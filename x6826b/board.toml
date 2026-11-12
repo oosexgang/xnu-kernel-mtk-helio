@@ -1,0 +1,79 @@
+# Infinix Hot 20 (X6826B): MediaTek Helio G85, Mali-G52 MC2, 6.6" 720 x 1640 panel, eMMC.
+# Where each value was read is said beside it; "the tree" is the phone's Android device tree
+# (/sys/firmware/fdt, read as root), "pstore" what Android's kernel log says of ramoops.
+name = "x6826b"
+description = "Infinix Hot 20 (X6826B)"
+soc = "mt6768"
+
+# The drivers this board may start: each was seen working on this phone (README.md has the runs).
+features = [
+    "emmc-msdc",            # the system image in the partition xnusys, read by the kernel
+    "keys-mt6358",          # power and volume keys; the cores' clocks
+    "gpu-mali-g52",
+    "scp-sensors",          # the accelerometer behind the sensor hub
+    "battery-mt6358",
+    "display-ovl-flip",
+    "touch-td4160",         # OmniVision TD4160 on SPI2 (pins 25 to 28, interrupt on pin 1)
+    "connsys-mt6631",       # Wi-Fi and Bluetooth
+    "camera-s5kjn1",        # the main camera: Samsung S5K JN1 on I2C4, CSI0
+]
+
+# What the loader is built with (loader/mtkloader.c). Every address is this phone's.
+[loader]
+kernel_load = 0x40080000            # where LK starts a kernel: /proc/iomem "Kernel code", the boot image header (base 0x40078000 + 0x8000)
+chain_stub = 0x4a000000             # free DRAM for the few instructions that move Android's kernel into place
+xnu_base = 0xc0000000               # one range of DRAM nothing else uses (the tree's reserved-memory and /proc/iomem:
+xnu_size = 0xfe000000               # clear of LK, Android's kernel and ramdisk, ATF, the TEE, the framebuffer, ramoops), up to dramc-rk1 at 0x1bffff000
+marker = 0x80000000                 # how the last run ended: DRAM that survives a warm reset (fbdiag's phase 2 said so)
+panic_log = 0x80100000              # the kernel's panic log region ("pram"), kept across a reset as well
+panic_log_size = 0x80000
+scratch = 0x50000000                # 2 MB to stage the touch firmware in, and the GPU probe's first job
+test_buffer = 0xa0000000            # 4 MB the eMMC read test (-DMSDC_TEST=1) reads into
+core_order = [0, 7, 6, 1, 2, 3, 4, 5]   # the boot core, the two Cortex-A75s, the other Cortex-A55s
+system_partition = "xnusys"         # the GPT partition with the system image (4 GiB, cut off the end of userdata)
+big_cores_clock = true              # LK leaves the big cluster at 800 mV and a slow PLL: raised to what that voltage allows
+
+# Android's ramoops (pstore): the only way a log leaves the phone. Region 0x4d010000 + 0xe0000, cut into
+# dump records, console, ftrace, pmsg in that order (the tree's reserved-memory mblock-13-pstore; read on
+# 2026-10-19 with kernel 4.19.191).
+[ramoops]
+console = 0x4d09f000
+console_size = 0x40000
+pmsg = 0x4d0e0000                   # Android's request for one XNU boot comes in here, the kernel's kept lines go out
+pmsg_size = 0x10000
+
+# The panel and the framebuffer LK leaves on OVL0's layer 0 (the tree's reserved-memory "framebuffer";
+# the address OVL0 scans was read by fbdiag).
+[display]
+fb_base = 0x787b0000
+fb_size = 0x1050000                 # three pictures and a half
+fb_pitch = 2944                     # bytes a line: 736 pixels, LK rounds 720 up to 32
+width = 720
+height = 1640
+
+# loader/fbdiag.c, the first thing a port runs: where it keeps its marker over the watchdog reset
+# and which words of DRAM it writes a pattern to and looks at afterwards.
+[fbdiag]
+marker = 0x4d0df000                 # the header word of ramoops' ftrace zone (Android's ramoops rewrites it)
+probes = [0x42000000, 0x47b1c9c0, 0x80000000, 0xc0000000, 0xc7b1c9c0, 0xd0000000, 0x140000000]
+dump = [0x78c5c000, 0x78e8e800]     # LK's second layer ("DAL"), its start and its row 800
+
+# The cell: the 25 degree table of the phone's battery profile (a 4.45 V cell).
+[battery]
+design_uah = 5132000
+
+# CONNSYS's memory, as Android's kernel placed it on this phone (its log: consys-reserve-memory and
+# wifi-reserve-memory, both allocated at boot inside 0x40000000..0xc0000000). Outside the kernel's own
+# range, which begins at xnu_base.
+[connsys]
+emi = 0x51000000
+emi_size = 0x400000
+wifi_dma = 0x51400000
+wifi_dma_size = 0x100000
+
+# A plain run (tools/xnu-cycle.sh without XNU_ARGS).
+[boot]
+android_device = "Infinix-X6826B"   # `adb shell getprop ro.product.device`: the tools refuse any other phone
+cpus = 4
+seconds = 120
+bootargs = ["touchscreen=2", "mali=1"]
