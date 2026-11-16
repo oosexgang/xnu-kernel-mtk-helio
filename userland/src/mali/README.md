@@ -72,6 +72,14 @@ Runs 500 to 502, the 27 release with `mali=1 metal=1`, `mali-probe` as launchd's
   winding is the one with row 0 at the top (here NDC y -1 is row 0, so the API's flag is turned over: draw.cpp), and
   `instanced` was right but judged with a threshold the four small triangles do not reach (160 pixels); both changed.
   48 of 50 stages; **capabilities 31 of 37 measured (83%)**.
+- Run 516: `cull` with the winding turned over (none: both, back+CCW: A, back+CW: B, front+CCW: B), `instanced`
+  (four instances of a triangle through the NPOT divisor, three of a line through the POT one), `vertex-descriptor`
+  (Float2 and UChar4Normalized out of one 12-byte interleaved buffer), `argument-buffer` (a kernel following the GPU
+  addresses held in a buffer, as Metal 3's argument buffers hold them: no function of the release's libraries has an
+  argument buffer the AIR frontend reports, `airrender --argbufs`), `msaa` (four samples resolved on writeback: 64
+  edge pixels in exact quarters, 16 + 32 + 16, none with one sample), and `apple-render` again. 53 of 53 stages;
+  **capabilities 35 of 37 measured (94%)**. Left: presenting to the panel through the window server, and the
+  `MTLDevice` plug-in of Metal.framework itself.
 
 ## Capabilities: how far along
 
@@ -109,12 +117,12 @@ One counts only when every `mali-probe` stage named for it said PASS on the phon
 | 25 | mipmaps | `mipmaps` |
 | 26 | more pixel formats: R8, RG8 | `formats` |
 | 27 | render to a texture, then sample it | `render-to-texture` |
-| 28 | multisampling | -- |
+| 28 | multisampling | `msaa` |
 | 29 | stencil | `stencil` |
 | 30 | scissor and viewport from the API | `viewport-scissor` |
 | 31 | culling and winding | `cull` |
 | 32 | instanced draws | `instanced` |
-| 33 | vertex descriptors and argument buffers | -- |
+| 33 | vertex descriptors and argument buffers | `vertex-descriptor` `argument-buffer` |
 | 34 | Apple vertex and fragment functions (AIR) | `apple-render` (ARKitCore's `resample_v` + `resample_f`) |
 | 35 | blit: textures, generateMipmaps | `blit-texture` `generate-mipmaps` |
 | 36 | presenting to the panel (CAMetalLayer) | -- |
