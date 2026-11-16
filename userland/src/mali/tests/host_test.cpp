@@ -18,6 +18,7 @@
 #include "fake_gpu.hpp"
 #include "mali.hpp"
 #include "pass.hpp"
+#include "shaders_v7.h"
 #include "v7.h"
 
 using namespace hakios::mali;
@@ -366,6 +367,89 @@ static void testBuffers() {
           std::string(exceptionName(0x3c3)) == "TRANSLATION_FAULT", "exception names");
 }
 
+// The depth and stencil state written over a compiled Renderer State: Less with writes over the depth state gives the
+// compiler's own fs_rsd_depth word for word; Always without writes gives fs_rsd's words 8 to 11; a stencil state
+// reads back as written
+static void testZs() {
+    for (const hm_program* p : {&hm_color, &hm_tri, &hm_tex}) {
+        uint32_t rsd[16];
+        memcpy(rsd, p->fs_rsd_depth, sizeof(rsd));
+        hm_v7_zs zs = {};
+        zs.depth_compare = HM_COMPARE_LESS;
+        zs.depth_write = true;
+        const char* why = nullptr;
+        CHECK(hm_v7_renderer_state_zs(rsd, &zs, &why) == 0, "%s: %s", p->name, why ? why : "");
+        CHECK(memcmp(rsd, p->fs_rsd_depth, sizeof(rsd)) == 0, "%s: Less, write is not fs_rsd_depth", p->name);
+        zs.depth_compare = HM_COMPARE_ALWAYS;
+        zs.depth_write = false;
+        hm_v7_renderer_state_zs(rsd, &zs, &why);
+        CHECK(memcmp(rsd + 8, p->fs_rsd + 8, 16) == 0, "%s: Always is not fs_rsd's words 8..11: %08x %08x %08x %08x",
+              p->name, rsd[8], rsd[9], rsd[10], rsd[11]);
+    }
+    uint32_t rsd[16];
+    memcpy(rsd, hm_color.fs_rsd_depth, sizeof(rsd));
+    hm_v7_zs zs = {};
+    zs.depth_compare = HM_COMPARE_ALWAYS;
+    zs.stencil_enable = true;
+    zs.reference = 0x5a;
+    zs.front = {HM_COMPARE_EQUAL, HM_STENCIL_KEEP, HM_STENCIL_ZERO, HM_STENCIL_REPLACE, 0xff, 0x0f};
+    zs.back = zs.front;
+    CHECK(hm_v7_renderer_state_zs(rsd, &zs, nullptr) == 0, "stencil state");
+    // STENCIL: reference 0:7, mask 8:15, compare 16:18, stencil fail 19:21, depth fail 22:24, depth pass 25:27 (v7.xml)
+    uint32_t want = 0x5au | 0xffu << 8 | 2u << 16 | 0u << 19 | 2u << 22 | 1u << 25;
+    CHECK(rsd[10] == want && rsd[11] == want, "stencil words %08x %08x, want %08x", rsd[10], rsd[11], want);
+    CHECK((rsd[9] & 0xffff) == 0x0f0f, "stencil write masks %04x", rsd[9] & 0xffff);
+    CHECK(memcmp(rsd, hm_color.fs_rsd_depth, 32) == 0 && memcmp(rsd + 12, hm_color.fs_rsd_depth + 12, 16) == 0,
+          "words other than 8..11 changed");
+}
+
+// The render target formats of v7.c against Panfrost's own (hm_formats: pan_format.c's blendable table and
+// pan_prepare_rt's inverted swizzle, computed by Mesa in bishaders), and a clear into R8 and RG8 carried out by the
+// fake GPU byte for byte, nothing past each row's pixels
+static void testFormats() {
+    const enum hm_rt_format rts[4] = {HM_RT_RGBA8_UNORM, HM_RT_BGRA8_UNORM, HM_RT_R8_UNORM, HM_RT_RG8_UNORM};
+    for (int i = 0; i < 4; i++) {
+        CHECK(hm_formats[i].rt_internal == 1, "%s: internal %u", hm_formats[i].name, hm_formats[i].rt_internal);
+        CHECK(hm_v7_rt_writeback(rts[i]) == hm_formats[i].rt_writeback, "%s: writeback %u, Mesa's %u",
+              hm_formats[i].name, hm_v7_rt_writeback(rts[i]), hm_formats[i].rt_writeback);
+        CHECK(hm_v7_rt_swizzle(rts[i]) == hm_formats[i].rt_swizzle, "%s: swizzle %#x, Mesa's %#x", hm_formats[i].name,
+              hm_v7_rt_swizzle(rts[i]), hm_formats[i].rt_swizzle);
+        CHECK(hm_formats[i].blend_memory_format == hm_formats[0].blend_memory_format,
+              "%s: a blend memory format of its own (%#x): the compiled blend descriptors would not do",
+              hm_formats[i].name, hm_formats[i].blend_memory_format);
+    }
+    for (Format f : {Format::R8Unorm, Format::RG8Unorm}) {
+        World w;
+        Gpu& gpu = w.gpu;
+        Device& device = w.device;
+        std::string why;
+        auto bo = gpu.newBo(128 * 64 + 4096, &why);
+        memset(bo->cpu(), 0xa5, bo->size());
+        Target t;
+        t.bo = bo.get();
+        t.width = t.height = 64;
+        t.rowBytes = 128;
+        t.format = f;
+        const float c[4] = {0.2f, 0.4f, 0.6f, 0.8f};
+        auto pass = ClearPass::make(device, t, c, ClearOptions(), &why);
+        CHECK(pass != nullptr, "%s", why.c_str());
+        if (!pass) continue;
+        Submission s;
+        CHECK(pass->submit(&s) == 0 && gpu.wait(s, 1000000) == 0 && (pass->status() & 0xff) == 1, "R8/RG8 clear not done");
+        const uint32_t bpp = bytesPerPixel(f);
+        unsigned right = 0, kept = 0;
+        for (uint32_t y = 0; y < 64; y++) {
+            for (uint32_t x = 0; x < 64; x++) {
+                const uint8_t* q = bo->cpu() + y * 128 + bpp * x;
+                right += q[0] == 0x33 && (bpp == 1 || q[1] == 0x66);
+            }
+            for (uint32_t x = bpp * 64; x < 128; x++) kept += bo->cpu()[y * 128 + x] == 0xa5;
+        }
+        CHECK(right == 4096, "%u bytes-per-pixel %u: %u of 4096 pixels right", bpp, bpp, right);
+        CHECK(kept == 64 * (128 - bpp * 64), "row padding written: %u of %u bytes kept", kept, 64 * (128 - bpp * 64));
+    }
+}
+
 // an assertion or a fault: the backtrace, and out at once (no crash report: this Mac's reporter has been seen to hold a
 // crashed process for minutes)
 static void fatal(int sig) {
@@ -383,6 +467,8 @@ int main() {
     testTwins();
     testBounds();
     testBuffers();
+    testZs();
+    testFormats();
     printf("host_test: %d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;
 }

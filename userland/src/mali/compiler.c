@@ -362,6 +362,37 @@ hm_compile_program(const char *name, unsigned gpu_id, struct hm_program *out, ch
 		return build(name, gpu_id, v.shader, f.shader, attrs, 2, true, out, why, why_size);
 	}
 	}
+	if (strcmp(name, "inst") == 0) {
+	/* instancing: a position per vertex, an offset and a colour per instance (attributes 1 and 2 stepped by instance:
+	 * the driver's attribute buffers, not the shader, make them so), the colour times the pushed tint */
+	{
+		nir_builder v = shader(MESA_SHADER_VERTEX, "inst_vs");
+		nir_variable *in = var(&v, nir_var_shader_in, glsl_vec4_type(), "a_position", VERT_ATTRIB_GENERIC0, 0);
+		nir_variable *in_o = var(&v, nir_var_shader_in, glsl_vec4_type(), "a_offset", VERT_ATTRIB_GENERIC1, 1);
+		nir_variable *in_c = var(&v, nir_var_shader_in, glsl_vec4_type(), "a_color", VERT_ATTRIB_GENERIC2, 2);
+		nir_variable *pos = var(&v, nir_var_shader_out, glsl_vec4_type(), "gl_Position", VARYING_SLOT_POS, 0);
+		nir_variable *col = var(&v, nir_var_shader_out, glsl_vec4_type(), "v_color", VARYING_SLOT_VAR0, 1);
+		v.shader->info.inputs_read = BITFIELD64_BIT(VERT_ATTRIB_GENERIC0) | BITFIELD64_BIT(VERT_ATTRIB_GENERIC1) |
+		    BITFIELD64_BIT(VERT_ATTRIB_GENERIC2);
+		v.shader->info.outputs_written = BITFIELD64_BIT(VARYING_SLOT_POS) | BITFIELD64_BIT(VARYING_SLOT_VAR0);
+		nir_def *o = nir_load_var(&v, in_o);
+		nir_def *shift = nir_vec4(&v, nir_channel(&v, o, 0), nir_channel(&v, o, 1), nir_imm_float(&v, 0.0f),
+		    nir_imm_float(&v, 0.0f));
+		nir_store_var(&v, pos, nir_fadd(&v, nir_load_var(&v, in), shift), 0xf);
+		nir_store_var(&v, col, nir_load_var(&v, in_c), 0xf);
+
+		nir_builder f = shader(MESA_SHADER_FRAGMENT, "inst_fs");
+		nir_variable *vc = var(&f, nir_var_shader_in, glsl_vec4_type(), "v_color", VARYING_SLOT_VAR0, 0);
+		nir_variable *color = var(&f, nir_var_shader_out, glsl_vec4_type(), "color", FRAG_RESULT_DATA0, 0);
+		vc->data.interpolation = INTERP_MODE_SMOOTH;
+		f.shader->info.inputs_read = BITFIELD64_BIT(VARYING_SLOT_VAR0);
+		f.shader->info.outputs_written = BITFIELD64_BIT(FRAG_RESULT_DATA0);
+		nir_store_var(&f, color, nir_load_var(&f, vc), 0xf);
+		enum pipe_format attrs[] = { PIPE_FORMAT_R32G32B32A32_FLOAT, PIPE_FORMAT_R32G32B32A32_FLOAT,
+		    PIPE_FORMAT_R32G32B32A32_FLOAT };
+		return build(name, gpu_id, v.shader, f.shader, attrs, 3, false, out, why, why_size);
+	}
+	}
 	if (strcmp(name, "tex") == 0) {
 	/* a texture sampled at a varying */
 	{
@@ -507,9 +538,66 @@ copy_kernel(unsigned gpu_id, struct hm_kernel *out)
 	return 0;
 }
 
+/* copy2d: a rectangle of 32-bit texels, dst[y * dst_stride + x] = src[y * src_stride + x] for x < width, y < height;
+ * uniform buffer 0: the source's address (words 0, 1), the destination's (2, 3), width, height, source and destination
+ * row strides in words (4..7); 64x1 threads a workgroup, the grid (width / 64 rounded up, height) -- a texture's region
+ * copied as MTLBlitCommandEncoder's copyFromTexture does it, with no render pass to load and store */
+static int
+copy2d_kernel(unsigned gpu_id, struct hm_kernel *out)
+{
+	nir_builder c = shader(MESA_SHADER_COMPUTE, "copy2d_cs");
+	c.shader->info.workgroup_size[0] = 64;
+	c.shader->info.workgroup_size[1] = 1;
+	c.shader->info.workgroup_size[2] = 1;
+	c.shader->info.num_ubos = 1;
+	c.shader->info.first_ubo_is_default_ubo = true;
+	nir_def *gid = nir_load_global_invocation_id(&c, 32);
+	nir_def *x = nir_channel(&c, gid, 0), *y = nir_channel(&c, gid, 1);
+	nir_def *a = nir_load_ubo(&c, 4, 32, nir_imm_int(&c, 0), nir_imm_int(&c, 0), .align_mul = 16, .align_offset = 0,
+	    .range_base = 0, .range = 32);
+	nir_def *g = nir_load_ubo(&c, 4, 32, nir_imm_int(&c, 0), nir_imm_int(&c, 16), .align_mul = 16, .align_offset = 0,
+	    .range_base = 0, .range = 32);
+	nir_push_if(&c, nir_iand(&c, nir_ult(&c, x, nir_channel(&c, g, 0)), nir_ult(&c, y, nir_channel(&c, g, 1))));
+	{
+		nir_def *so = nir_u2u64(&c, nir_imul_imm(&c, nir_iadd(&c, nir_imul(&c, y, nir_channel(&c, g, 2)), x), 4));
+		nir_def *dof = nir_u2u64(&c, nir_imul_imm(&c, nir_iadd(&c, nir_imul(&c, y, nir_channel(&c, g, 3)), x), 4));
+		nir_def *src = nir_iadd(&c, nir_pack_64_2x32_split(&c, nir_channel(&c, a, 0), nir_channel(&c, a, 1)), so);
+		nir_def *dst = nir_iadd(&c, nir_pack_64_2x32_split(&c, nir_channel(&c, a, 2), nir_channel(&c, a, 3)), dof);
+		nir_store_global(&c, dst, 4, nir_load_global(&c, src, 4, 1, 32), 0x1);
+	}
+	nir_pop_if(&c, NULL);
+	NIR_PASS(_, c.shader, nir_lower_compute_system_values, NULL);
+
+	struct util_dynarray bin;
+	struct pan_shader_info cs;
+	compile(c.shader, gpu_id, &bin, &cs);
+	struct mali_renderer_state_packed rsd;
+	pan_pack(&rsd, RENDERER_STATE, cfg) {
+		pan_shader_prepare_rsd(&cs, 0, &cfg);
+	}
+	memset(out, 0, sizeof(*out));
+	out->name = "copy2d";
+	out->code = copy(bin.data, bin.size);
+	out->size = bin.size;
+	out->rsd = copy(rsd.opaque, 64);
+	out->push = push_table(&cs);
+	out->push_count = cs.push.count;
+	out->local[0] = 64, out->local[1] = 1, out->local[2] = 1;
+	out->tls_size = cs.tls_size;
+	out->work_registers = cs.work_reg_count;
+	out->ubo_count = cs.ubo_count;
+	out->wls_size = cs.wls_size;
+	util_dynarray_fini(&bin);
+	ralloc_free(c.shader);
+	return 0;
+}
+
 int
 hm_compile_kernel(const char *name, unsigned gpu_id, struct hm_kernel *out, char *why, size_t why_size)
 {
+	if (strcmp(name, "copy2d") == 0) {
+		return copy2d_kernel(gpu_id, out);
+	}
 	if (strcmp(name, "share") == 0) {
 		return share_kernel(gpu_id, out);
 	}
@@ -574,6 +662,40 @@ uint32_t
 hm_compile_texture_format_rgba8(void)
 {
 	return GENX(panfrost_format_from_pipe_format)(PIPE_FORMAT_R8G8B8A8_UNORM)->hw;
+}
+
+int
+hm_compile_format(const char *name, struct hm_format *out)
+{
+	static const struct { const char *name; enum pipe_format f; } formats[] = {
+		{ "RGBA8Unorm", PIPE_FORMAT_R8G8B8A8_UNORM }, { "BGRA8Unorm", PIPE_FORMAT_B8G8R8A8_UNORM },
+		{ "R8Unorm", PIPE_FORMAT_R8_UNORM }, { "RG8Unorm", PIPE_FORMAT_R8G8_UNORM },
+	};
+	for (unsigned i = 0; i < sizeof(formats) / sizeof(formats[0]); i++) {
+		if (strcmp(name, formats[i].name) != 0) {
+			continue;
+		}
+		enum pipe_format f = formats[i].f;
+		const struct util_format_description *desc = util_format_description(f);
+		const struct pan_blendable_format *b = GENX(panfrost_blendable_format_from_pipe_format)(f);
+		unsigned char swizzle[4];
+
+		memset(out, 0, sizeof(*out));
+		out->name = formats[i].name;
+		/* pan_prepare_rt */
+		out->rt_internal = b->internal;
+		out->rt_writeback = b->writeback;
+		panfrost_invert_swizzle(desc->swizzle, swizzle);
+		out->rt_swizzle = panfrost_translate_swizzle_4(swizzle);
+		/* panfrost_emit_blend: dithered, and RGB1 made RGBA for the fixed function */
+		out->blend_memory_format = GENX(panfrost_dithered_format_from_pipe_format)(f, true);
+		if ((out->blend_memory_format & 0xff) == MALI_RGB_COMPONENT_ORDER_RGB1) {
+			out->blend_memory_format = (out->blend_memory_format & ~0xffu) | MALI_RGB_COMPONENT_ORDER_RGBA;
+		}
+		out->texture_format = GENX(panfrost_format_from_pipe_format)(f)->hw;
+		return 0;
+	}
+	return -1;
 }
 
 uint32_t
@@ -671,6 +793,157 @@ grid_sysvals(nir_builder *b, nir_intrinsic_instr *intr, void *data)
 	    .align_offset = 0, .range_base = offset, .range = 12);
 	nir_def_replace(&intr->def, nir_u2uN(b, v, intr->def.bit_size));
 	return true;
+}
+
+/* [[vertex_id]] of a draw without indices: the raw vertex ID, the draw's offset start being 0 (pan_lower_vertex_id.c:
+ * vertex_id = raw_vertex_id_pan + raw_vertex_offset_pan) */
+static bool
+raw_vertex_id(nir_builder *b, nir_intrinsic_instr *intr, void *data)
+{
+	if (intr->intrinsic != nir_intrinsic_load_vertex_id && intr->intrinsic != nir_intrinsic_load_vertex_id_zero_base) {
+		return false;
+	}
+	b->cursor = nir_before_instr(&intr->instr);
+	nir_def_replace(&intr->def, nir_load_raw_vertex_id_pan(b));
+	return true;
+}
+
+static nir_shader *
+air_function(void *mem, const struct air_metallib *ml, const char *entry, struct air_shader_info *info, char *why,
+    size_t why_size)
+{
+	const struct air_metallib_function *f = NULL;
+	const char *err = NULL;
+
+	for (unsigned i = 0; i < ml->num_functions; i++) {
+		if (strcmp(ml->functions[i].name, entry) == 0) f = &ml->functions[i];
+	}
+	if (f == NULL) {
+		snprintf(why, why_size, "no function %s in the .metallib", entry);
+		return NULL;
+	}
+	nir_shader *s = air_to_nir(mem, f->bitcode, f->bitcode_size, NULL, NULL, GENX(pan_shader_get_compiler_options)(),
+	    info, &err);
+	if (s == NULL) {
+		snprintf(why, why_size, "%s: AIR to NIR: %s", entry, err ? err : "refused");
+	}
+	return s;
+}
+
+int
+hm_compile_air_program(const void *lib, size_t size, const char *vs_entry, const char *fs_entry, unsigned gpu_id,
+    struct hm_program *out, uint32_t *vs_device_buffers, bool *fs_linear, char *why, size_t why_size)
+{
+	void *mem = ralloc_context(NULL);
+	struct air_metallib ml;
+	const char *err = NULL;
+	struct air_shader_info vi, fi;
+
+	if (!air_metallib_parse(mem, lib, size, &ml, &err)) {
+		snprintf(why, why_size, "the .metallib: %s", err ? err : "not one");
+		ralloc_free(mem);
+		return -1;
+	}
+	nir_shader *vs = air_function(mem, &ml, vs_entry, &vi, why, why_size);
+	nir_shader *fs = vs ? air_function(mem, &ml, fs_entry, &fi, why, why_size) : NULL;
+	if (fs == NULL) {
+		ralloc_free(mem);
+		return -1;
+	}
+	const char *no = NULL;
+	if (vs->info.stage != MESA_SHADER_VERTEX || fs->info.stage != MESA_SHADER_FRAGMENT) {
+		no = "not a vertex function and a fragment function";
+	} else if (vi.num_vertex_attributes != 0) {
+		no = "a vertex function with [[stage_in]] attributes (not served yet)";
+	} else if (fi.num_render_targets != 1) {
+		no = "a fragment function that does not write one colour target";
+	}
+	*fs_linear = false;
+	for (unsigned i = 0; no == NULL && i < vi.num_resources; i++) {
+		const struct air_resource *r = &vi.resources[i];
+		if (r->kind == AIR_RESOURCE_CONSTANT_BUFFER && !r->unused) {
+			no = "a vertex function with a constant buffer (not served yet)";
+		} else if (r->kind == AIR_RESOURCE_DEVICE_BUFFER && r->write) {
+			no = "a vertex function that writes a buffer";
+		} else if (r->kind != AIR_RESOURCE_CONSTANT_BUFFER && r->kind != AIR_RESOURCE_DEVICE_BUFFER) {
+			no = "a vertex function with a texture, image or sampler (not served yet)";
+		}
+	}
+	for (unsigned i = 0; no == NULL && i < fi.num_resources; i++) {
+		const struct air_resource *r = &fi.resources[i];
+		if ((r->kind == AIR_RESOURCE_TEXTURE || r->kind == AIR_RESOURCE_SAMPLER) && r->index != 0) {
+			no = "a fragment function with a texture or sampler other than 0 (not served yet)";
+		} else if (r->kind == AIR_RESOURCE_SAMPLER && r->inline_sampler) {
+			*fs_linear = r->sampler.min_filter != AIR_SAMPLER_NEAREST;
+		} else if (r->kind != AIR_RESOURCE_TEXTURE && r->kind != AIR_RESOURCE_SAMPLER && !r->unused) {
+			no = "a fragment function with a buffer (not served yet)";
+		}
+	}
+	if (no != NULL) {
+		snprintf(why, why_size, "%s, %s: %s", vs_entry, fs_entry, no);
+		ralloc_free(mem);
+		return -1;
+	}
+	*vs_device_buffers = 0;
+	NIR_PASS(_, vs, nir_shader_intrinsics_pass, ssbo_to_global, nir_metadata_control_flow, vs_device_buffers);
+	NIR_PASS(_, vs, nir_shader_intrinsics_pass, raw_vertex_id, nir_metadata_control_flow, NULL);
+	if (vs->info.num_ubos < HM_AIR_SYSVAL_UBO + 1) {
+		vs->info.num_ubos = HM_AIR_SYSVAL_UBO + 1;
+	}
+	char *name = malloc(strlen(vs_entry) + strlen(fs_entry) + 2);
+	sprintf(name, "%s+%s", vs_entry, fs_entry);
+	int e = build(name, gpu_id, vs, fs, NULL, 0, true, out, why, why_size);
+	ralloc_free(mem);
+	return e;
+}
+
+int
+hm_air_describe(const void *lib, size_t size, const char *entry, void *fp, char *why, size_t why_size)
+{
+	FILE *out = fp;
+	void *mem = ralloc_context(NULL);
+	struct air_metallib ml;
+	const char *err = NULL;
+	const struct air_metallib_function *f = NULL;
+
+	if (!air_metallib_parse(mem, lib, size, &ml, &err)) {
+		snprintf(why, why_size, "the .metallib: %s", err ? err : "not one");
+		ralloc_free(mem);
+		return -1;
+	}
+	for (unsigned i = 0; i < ml.num_functions; i++) {
+		if (strcmp(ml.functions[i].name, entry) == 0) f = &ml.functions[i];
+	}
+	if (f == NULL) {
+		snprintf(why, why_size, "no function %s", entry);
+		ralloc_free(mem);
+		return -1;
+	}
+	struct air_shader_info info;
+	nir_shader *s = air_to_nir(mem, f->bitcode, f->bitcode_size, NULL, NULL, GENX(pan_shader_get_compiler_options)(),
+	    &info, &err);
+	if (s == NULL) {
+		snprintf(why, why_size, "%s: AIR to NIR: %s", entry, err ? err : "refused");
+		ralloc_free(mem);
+		return -1;
+	}
+	fprintf(out, "%s: stage %s, %u resources, %u varyings, %u vertex attributes (read %#x), %u render targets\n", entry,
+	    gl_shader_stage_name(s->info.stage), info.num_resources, info.num_varyings, info.num_vertex_attributes,
+	    info.vertex_attributes_read, info.num_render_targets);
+	for (unsigned i = 0; i < info.num_resources; i++) {
+		const struct air_resource *r = &info.resources[i];
+		fprintf(out, "  resource kind %d index %u size %u%s%s%s %s %s\n", r->kind, r->index, r->size,
+		    r->unused ? " unused" : "", r->read ? " read" : "", r->write ? " write" : "", r->name ? r->name : "",
+		    r->type_name ? r->type_name : "");
+	}
+	for (unsigned i = 0; i < info.num_varyings; i++) {
+		const struct air_varying *v = &info.varyings[i];
+		fprintf(out, "  varying %s slot %u components %u%s%s\n", v->name, v->slot, v->components, v->flat ? " flat" : "",
+		    v->no_perspective ? " noperspective" : "");
+	}
+	nir_print_shader(s, out);
+	ralloc_free(mem);
+	return 0;
 }
 
 int

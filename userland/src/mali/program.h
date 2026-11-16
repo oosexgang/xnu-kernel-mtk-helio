@@ -51,6 +51,16 @@ struct hm_program {
 	const uint32_t *blend_over_bgra;
 };
 
+/* a colour format as Panfrost sets it up (pan_format.c, pan_desc.c pan_prepare_rt, panfrost_emit_blend,
+ * GENX(panfrost_new_texture)): the render target's internal and writeback formats and swizzle, the blend's memory format,
+ * the texture's format word (its swizzle the identity: the format word carries the component order) */
+struct hm_format {
+	const char *name;
+	uint32_t rt_internal, rt_writeback, rt_swizzle;
+	uint32_t blend_memory_format;
+	uint32_t texture_format;
+};
+
 /* a compute kernel: its code, its Renderer State (the address left 0), the words it pushes, its workgroup size */
 struct hm_kernel {
 	const char *name;

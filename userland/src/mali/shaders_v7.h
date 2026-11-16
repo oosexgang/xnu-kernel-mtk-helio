@@ -230,6 +230,83 @@ static const struct hm_program hm_tex = {
 	hm_tex_fs_rsd_depth, 32, 32, hm_tex_blend_off_bgra, hm_tex_blend_over_bgra,
 };
 
+/* --- inst: vertex shader 336 bytes, 32 work registers; fragment shader 144 bytes, 32 work registers --- */
+static const uint32_t hm_inst_vs_code[84] = {
+	0x2000004a, 0x80cb1c02, 0xc000e023, 0x10800008, 0x2000004a, 0x80cb1c02, 0xc000a123, 0x10800888,
+	0x00c3002b, 0x60004608, 0xc0018009, 0x30800888, 0x10004020, 0x6000408a, 0x180000bd, 0x58fc1102,
+	0x00000044, 0x70000000, 0xe030000c, 0xc0008008, 0x30004028, 0x80cb1840, 0xc00400a3, 0x11800018,
+	0x00c30021, 0x2007c028, 0x00076590, 0x32043080, 0x20410001, 0x20064086, 0x08076590, 0x2401d964,
+	0x00828061, 0x000b0008, 0x040f6590, 0x58004080, 0x204182c9, 0x000b0008, 0x00076590, 0x0001d964,
+	0x4182005e, 0x80cb198a, 0x00027a23, 0x47000000, 0x2000004a, 0x80cb1c02, 0xc000e223, 0x10800008,
+	0x2000004e, 0x80cb1c02, 0xc0020123, 0x30800888, 0x4186004e, 0x80cb1e0a, 0x00027a23, 0x01800000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000,
+};
+static const uint32_t hm_inst_fs_code[36] = {
+	0x3f3c054e, 0x80cb1ef8, 0xc0023d07, 0x4b460f8c, 0xcc30084e, 0x80cb186b, 0x0002a583, 0x02400004,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000,
+};
+static const uint32_t hm_inst_vs_rsd[16] = {
+	0x00000000, 0x00000000, 0x00000000, 0x00020003, 0x00002002, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x0001e000, 0x00000000, 0x00000000, 0x00000000,
+};
+static const uint32_t hm_inst_fs_rsd[16] = {
+	0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x41582200, 0x00000000, 0x00000000, 0x00000000,
+	0x37d8ffff, 0x40000000, 0x00000000, 0x00000000, 0x00000080, 0x00000000, 0x00000000, 0x00001801,
+};
+static const uint32_t hm_inst_fs_rsd_depth[16] = {
+	0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x40182200, 0x00000000, 0x00000000, 0x00000000,
+	0x39d8ffff, 0x40000000, 0x00000000, 0x00000000, 0x00000080, 0x00000000, 0x00000000, 0x00001801,
+};
+static const uint32_t hm_inst_fs_rsd_blended[16] = {
+	0x00000000, 0x00000000, 0x00000000, 0x00010000, 0x41502200, 0x00000000, 0x00000000, 0x00000000,
+	0x37d8ffff, 0x40000000, 0x00000000, 0x00000000, 0x00000080, 0x00000000, 0x00000000, 0x00001801,
+};
+static const uint32_t hm_inst_blend_off[4] = {
+	0x00000200, 0xf0122122, 0x00000019, 0x010ed000,
+};
+static const uint32_t hm_inst_blend_over[4] = {
+	0x00000201, 0xf0d32d32, 0x0000005a, 0x010ed000,
+};
+static const uint32_t hm_inst_blend_off_bgra[4] = {
+	0x00000200, 0xf0122122, 0x00000019, 0x010ed000,
+};
+static const uint32_t hm_inst_blend_over_bgra[4] = {
+	0x00000201, 0xf0d32d32, 0x0000005a, 0x010ed000,
+};
+static const struct hm_push_word hm_inst_vs_push[6] = {
+	{ 1, 0 }, { 1, 16 }, { 1, 4 }, { 1, 20 }, { 1, 8 }, { 1, 24 },
+};
+static const struct hm_push_word hm_inst_fs_push[1] = { { 0, 0 }
+};
+static const struct hm_varying hm_inst_vs_out[2] = {
+	{ 0, 0x00000000, 16 },
+	{ 32, 0x0009d000, 16 },
+};
+static const struct hm_varying hm_inst_fs_in[1] = {
+	{ 32, 0x000bf000, 16 },
+};
+static const uint32_t hm_inst_attribute_formats[3] = {
+	0x000bf000, 0x000bf000, 0x000bf000,
+};
+static const uint32_t hm_inst_attribute_sizes[3] = {
+	0x00000010, 0x00000010, 0x00000010,
+};
+static const struct hm_program hm_inst = {
+	"inst",
+	hm_inst_vs_code, 336, hm_inst_fs_code, 144,
+	hm_inst_vs_rsd, hm_inst_fs_rsd, hm_inst_fs_rsd_blended, hm_inst_blend_off, hm_inst_blend_over,
+	hm_inst_vs_push, 6, hm_inst_fs_push, 0,
+	hm_inst_vs_out, 2, hm_inst_fs_in, 1,
+	hm_inst_attribute_formats, hm_inst_attribute_sizes, 3, 0, 0, 0,
+	hm_inst_fs_rsd_depth, 32, 32, hm_inst_blend_off_bgra, hm_inst_blend_over_bgra,
+};
+
 /* --- fill: compute shader 128 bytes, 32 work registers, 0 bytes of threadgroup memory --- */
 static const uint32_t hm_fill_cs_code[32] = {
 	0xc0004229, 0x9e074043, 0x00076593, 0x01800000, 0xc0004221, 0x8b88c00b, 0x0c0f6591, 0x58c04002,
@@ -285,6 +362,34 @@ static const struct hm_push_word hm_copy_cs_push[5] = {
 	{ 0, 0 }, { 0, 4 }, { 0, 8 }, { 0, 12 }, { 0, 16 },
 };
 static const struct hm_kernel hm_copy = { "copy", hm_copy_cs_code, 224, hm_copy_cs_rsd, hm_copy_cs_push, 5, { 64, 1, 1 }, 0, 32, 1, 0 };
+
+/* --- copy2d: compute shader 256 bytes, 32 work registers, 0 bytes of threadgroup memory --- */
+static const uint32_t hm_copy2d_cs_code[64] = {
+	0xc000822b, 0x80cb1843, 0x8006da13, 0x00000800, 0xd0008223, 0x80cb182b, 0x0006da17, 0xb602c000,
+	0x00000044, 0x00000000, 0x5c780000, 0x6000f92b, 0x3000832d, 0x9e070c04, 0xc007180f, 0x31400808,
+	0x00004021, 0x8b8af85c, 0x04076591, 0x58c2e000, 0x00008001, 0x80cb182c, 0xe036caf3, 0xac01c634,
+	0x00008065, 0x80cb185c, 0x000718bf, 0x58c2c000, 0x00000046, 0x00000020, 0xe0300000, 0x60000c78,
+	0x3000832d, 0x9e074c04, 0x0007180f, 0x01800000, 0x00004021, 0x8b8af85c, 0x040f6591, 0x58c2e000,
+	0x00418101, 0x80cb182c, 0xe036caf3, 0xac01c634, 0x00008165, 0x80cb185c, 0x000718bf, 0x58c2c080,
+	0x00000007, 0x80cb185c, 0xe033fcd3, 0x6c002c78, 0x00000076, 0x00000020, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+};
+static const uint32_t hm_copy2d_cs_rsd[16] = {
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00002001, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00023000, 0x00000000, 0x00000000, 0x00000000,
+};
+static const struct hm_push_word hm_copy2d_cs_push[8] = {
+	{ 0, 0 }, { 0, 4 }, { 0, 8 }, { 0, 12 }, { 0, 16 }, { 0, 20 }, { 0, 24 }, { 0, 28 },
+};
+static const struct hm_kernel hm_copy2d = { "copy2d", hm_copy2d_cs_code, 256, hm_copy2d_cs_rsd, hm_copy2d_cs_push, 8, { 64, 1, 1 }, 0, 32, 1, 0 };
+
+/* colour formats (pan_format.c, pan_prepare_rt, panfrost_emit_blend, panfrost_new_texture) */
+static const struct hm_format hm_formats[4] = {
+	{ "RGBA8Unorm", 1, 19, 0x688, 0x000ed000, 0x000bb000 },
+	{ "BGRA8Unorm", 1, 19, 0x60a, 0x000ed000, 0x000bb004 },
+	{ "R8Unorm", 1, 16, 0x920, 0x000ed000, 0x000a3010 },
+	{ "RG8Unorm", 1, 17, 0x908, 0x000ed000, 0x000ab010 },
+};
 
 /* textures: RGBA8Unorm's format word and the identity swizzle */
 static const uint32_t hm_texture_format_rgba8 = 0x000bb000;

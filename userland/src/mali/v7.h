@@ -41,7 +41,7 @@ struct hm_v7_sizes {
 	unsigned job_header, fragment_job, write_value_job, framebuffer, render_target, zs_crc_extension,
 	    tiler_context, tiler_heap, sample_positions, job_align, framebuffer_align, tiler_align;
 	unsigned vertex_job, tiler_job, renderer_state, blend, attribute, attribute_buffer, viewport, local_storage,
-	    uniform_buffer;
+	    uniform_buffer, surface_with_stride, texture, sampler;
 };
 const struct hm_v7_sizes *hm_v7_sizes(void);
 
@@ -51,7 +51,12 @@ const struct hm_v7_sizes *hm_v7_sizes(void);
 enum hm_rt_format {
 	HM_RT_RGBA8_UNORM = 1,
 	HM_RT_BGRA8_UNORM = 2,
+	HM_RT_R8_UNORM = 3,
+	HM_RT_RG8_UNORM = 4,
 };
+/* its writeback format (MALI_COLOR_FORMAT_*: pan_format.c's blendable table, internal R8G8B8A8 for all four) */
+unsigned hm_v7_rt_writeback(enum hm_rt_format format);
+
 
 /* --- writing ---------------------------------------------------------------------------------------------- */
 
@@ -64,6 +69,29 @@ void hm_v7_write_value_job(void *job, unsigned index, uint64_t next, uint64_t ta
 
 /* A Framebuffer Descriptor ("Framebuffer": Parameters and Padding) and its render targets right after it, as
  * GENX(pan_emit_fbd) lays them out (no ZS CRC extension). */
+/*
+ * Depth and stencil state (panfrost_create_depth_stencil_state, and the reference panfrost_emit_frag_shader merges):
+ * Metal's MTLCompareFunction, whose numbers are Mali's (MALI_FUNC_*), and MTLStencilOperation, whose are not
+ */
+enum hm_compare { HM_COMPARE_NEVER, HM_COMPARE_LESS, HM_COMPARE_EQUAL, HM_COMPARE_LEQUAL, HM_COMPARE_GREATER,
+	HM_COMPARE_NOT_EQUAL, HM_COMPARE_GEQUAL, HM_COMPARE_ALWAYS };
+enum hm_stencil_op { HM_STENCIL_KEEP, HM_STENCIL_ZERO, HM_STENCIL_REPLACE, HM_STENCIL_INCR_CLAMP, HM_STENCIL_DECR_CLAMP,
+	HM_STENCIL_INVERT, HM_STENCIL_INCR_WRAP, HM_STENCIL_DECR_WRAP };
+struct hm_v7_stencil {
+	enum hm_compare compare;
+	enum hm_stencil_op fail, depth_fail, pass;
+	uint8_t read_mask, write_mask;
+};
+struct hm_v7_zs {
+	enum hm_compare depth_compare;
+	bool depth_write;
+	bool stencil_enable;
+	struct hm_v7_stencil front, back;
+	uint8_t reference;
+};
+/* ZS into the Renderer State RSD (words 8 to 11, the rest kept): 0, or -1 with the unpacker's sentence in *WHY */
+int hm_v7_renderer_state_zs(void *rsd, const struct hm_v7_zs *zs, const char **why);
+
 struct hm_v7_fb {
 	uint32_t width, height;           /* pixels */
 	uint32_t bound_min_x, bound_min_y, bound_max_x, bound_max_y;   /* pixels, inclusive (pan_emit_fbd: 0..w-1) */
@@ -73,6 +101,7 @@ struct hm_v7_fb {
 	uint32_t cbuf_allocation;         /* bytes of tile buffer for the colour (pan_select_tile_size), 1 KB units */
 	uint32_t rt_count;                /* render targets that follow, 1 to 8 */
 	float z_clear;                    /* the tile buffer's depth at the frame's start (pan_emit_fbd: zs.clear_value) */
+	uint8_t s_clear;                  /* and its stencil */
 };
 struct hm_v7_rt {
 	enum hm_rt_format format;
@@ -135,11 +164,19 @@ void hm_v7_uniform_buffer(void *out, uint64_t pointer, uint32_t size);
 /* A 2D texture of one level, one layer, one sample, linear (GENX(panfrost_new_texture) on v7): FORMAT the Mali format
  * word (Mesa's table), SWIZZLE (panfrost_translate_swizzle_4), the surfaces at SURFACES (hm_v7_surface_with_stride) */
 void hm_v7_texture_2d(void *out, uint32_t format, uint32_t swizzle, uint32_t width, uint32_t height, uint64_t surfaces);
+/* the same with LEVELS mip levels, a Surface With Stride each at SURFACES in order (panfrost_emit_texture_payload); the
+ * texture's own LOD range 0..levels-1, for bounds checking only (the API's clamps are the sampler's) */
+void hm_v7_texture_2d_levels(void *out, uint32_t format, uint32_t swizzle, uint32_t width, uint32_t height,
+    unsigned levels, uint64_t surfaces);
 /* The surface a texture names (panfrost_emit_surface_with_stride): the first texel, row and surface strides */
 void hm_v7_surface_with_stride(void *out, uint64_t pointer, int32_t row_stride, int32_t surface_stride);
 /* A Sampler (panfrost_create_sampler_state on v7): NEAREST or linear filtering both ways, no mipmapping (levels 0..0),
  * every wrap mode Clamp to Edge, normalized coordinates */
 void hm_v7_sampler(void *out, bool nearest);
+/* panfrost_create_sampler_state in full: MIN_NEAREST / MAG_NEAREST, MIPMAP (pan_pipe_to_mipmode: 0 none, 1 nearest,
+ * 2 trilinear -- Metal's NotMipmapped, Nearest, Linear), the LOD clamps MIN_LOD..MAX_LOD */
+enum hm_mip { HM_MIP_NONE, HM_MIP_NEAREST, HM_MIP_LINEAR };
+void hm_v7_sampler_full(void *out, bool min_nearest, bool mag_nearest, enum hm_mip mip, float min_lod, float max_lod);
 /* Local Storage with no thread or workgroup storage (GENX(pan_emit_tls) with both sizes 0) */
 void hm_v7_local_storage(void *out);
 /* ... with workgroup storage (threadgroup memory): WLS_SIZE bytes a workgroup (pan_wls_adjust_size: a power of two of
@@ -155,7 +192,19 @@ struct hm_v7_draw {
 	uint64_t viewport;                /* the tiler's */
 	uint64_t thread_storage;
 	uint64_t push_uniforms, uniform_buffers, textures, samplers;
+	/* the tiler's (jm_emit_tiler_draw: rast->cull_face, rast->front_ccw); zero: nothing culled, clockwise front */
+	bool cull_front, cull_back, front_ccw;
+	/* instancing (GENX(jm_launch_draw), jm_emit_draw_descs): INSTANCE_COUNT instances (0 or 1: none), each PADDED_COUNT
+	 * vertices apart in the varyings (hm_v7_padded_vertex_count of the draw's vertex count) */
+	unsigned instance_count, padded_count;
 };
+/* panfrost_padded_vertex_count (pan_attributes.c): the vertices an instance takes, as the hardware computes it */
+unsigned hm_v7_padded_vertex_count(unsigned vertex_count);
+/* An attribute buffer of an instanced draw (panfrost_emit_vertex_data): per vertex, 1D_MODULUS by PADDED; per instance,
+ * the hardware divisor PADDED (a divisor of 1), 1D_POT_DIVISOR or 1D_NPOT_DIVISOR with its continuation record
+ * (panfrost_compute_magic_divisor). Writes 1 or 2 records at OUT: how many */
+unsigned hm_v7_attribute_buffer_instanced(void *out, uint64_t pointer, uint32_t stride, uint32_t size, unsigned padded,
+    bool per_instance);
 /* A vertex job: Compute Job's layout with type Vertex (jm_emit_vertex_job), VERTEX_COUNT vertices of one instance
  * (jm_launch_draw's Invocation for instance_count 1), Job Task Split 5 */
 void hm_v7_vertex_job(void *job, unsigned index, uint64_t next, unsigned vertex_count, const struct hm_v7_draw *draw);

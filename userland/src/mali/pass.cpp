@@ -66,14 +66,15 @@ std::unique_ptr<ClearPass> ClearPass::make(Device& device, const Target& t, cons
     if (t.bo == nullptr) return no("the target has no buffer");
     if (t.width == 0 || t.height == 0 || t.width > 4096 || t.height > 4096)
         return no("a target of " + std::to_string(t.width) + "x" + std::to_string(t.height) + " (1 to 4096 a side)");
-    if (t.rowBytes < 4 * t.width) return no("a row of " + std::to_string(t.rowBytes) + " bytes for " +
-                                            std::to_string(t.width) + " pixels of 4 bytes");
+    const uint32_t bpp = bytesPerPixel(t.format);
+    if (t.rowBytes < bpp * t.width) return no("a row of " + std::to_string(t.rowBytes) + " bytes for " +
+                                              std::to_string(t.width) + " pixels of " + std::to_string(bpp) + " bytes");
     uint64_t base = t.bo->gpu() + t.offset;
     // pan_layout.c: on v7 a linear RGBA8 image's offset and row stride are both 64-byte aligned (format_minimum_alignment)
     if ((base & 63) != 0) return no("the target's first pixel is not 64-byte aligned (pan_layout.c, v7)");
     if ((t.rowBytes & 63) != 0) return no("the target's row of " + std::to_string(t.rowBytes) +
                                           " bytes is not a multiple of 64 (pan_layout.c, v7)");
-    uint64_t span = static_cast<uint64_t>(t.rowBytes) * (t.height - 1) + 4ull * t.width;
+    uint64_t span = static_cast<uint64_t>(t.rowBytes) * (t.height - 1) + static_cast<uint64_t>(bpp) * t.width;
     if (t.offset > t.bo->size() || span > t.bo->size() - t.offset)
         return no("the target's " + std::to_string(t.height) + " rows do not fit in its buffer");
     for (int i = 0; i < 4; i++) {
@@ -116,7 +117,7 @@ std::unique_ptr<ClearPass> ClearPass::make(Device& device, const Target& t, cons
     hm_v7_tile_size(4, device.tileBufferBudget(), &fb.tile_size, &fb.cbuf_allocation);
     fb.rt_count = 1;
     struct hm_v7_rt rt = {};
-    rt.format = t.format == Format::BGRA8Unorm ? HM_RT_BGRA8_UNORM : HM_RT_RGBA8_UNORM;
+    rt.format = rtFormat(t.format);
     rt.base = base;
     rt.row_stride = t.rowBytes;
     rt.internal_buffer_offset = 0;

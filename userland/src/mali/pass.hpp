@@ -11,10 +11,18 @@
 #include <string>
 
 #include "mali.hpp"
+#include "v7.h"
 
 namespace hakios::mali {
 
-enum class Format { RGBA8Unorm, BGRA8Unorm };
+enum class Format { RGBA8Unorm, BGRA8Unorm, R8Unorm, RG8Unorm };
+// bytes a pixel in memory; the render target format of v7.h (all four kept as R8G8B8A8 in the tile buffer:
+// pan_format.c's blendable table)
+inline uint32_t bytesPerPixel(Format f) { return f == Format::R8Unorm ? 1 : f == Format::RG8Unorm ? 2 : 4; }
+inline enum hm_rt_format rtFormat(Format f) {
+    return f == Format::BGRA8Unorm ? HM_RT_BGRA8_UNORM : f == Format::R8Unorm ? HM_RT_R8_UNORM
+         : f == Format::RG8Unorm ? HM_RT_RG8_UNORM : HM_RT_RGBA8_UNORM;
+}
 
 // the device: the GPU and what every frame on it shares
 class Device {

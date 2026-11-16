@@ -58,6 +58,10 @@ if [ -n "${MALI27:-}" ]; then
 		mkdir -p $T/share
 		cp $MALI27/PortraitFilters.metallib $T/share/
 	fi
+	if [ -f $MALI27/ARKitCore.metallib ]; then
+		mkdir -p $T/share
+		cp $MALI27/ARKitCore.metallib $T/share/
+	fi
 fi
 # the audio server's output device (inj26.sh): arm64e, in place of 16.5's arm64 one, which the audio server cannot load;
 # the system image links /System/Library/Audio/Plug-Ins/HAL/HakiosAudio.driver to it (mkimage26.py)

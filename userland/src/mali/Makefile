@@ -18,7 +18,7 @@ GEN      = $(OUT)/gen/genxml/v7_pack.h
 V7FLAGS  = -std=c11 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-shift-count-overflow -Werror \
            -I$(OUT)/gen -I$(MESA)/src -I$(MESA)/include -I$(MESA)/src/panfrost/lib
 CXXFLAGS_MALI = -std=c++17 -O1 -g -Wall -Wextra -Werror -I.
-LIBSRC   = gpu.cpp pass.cpp draw.cpp metal.cpp fake_gpu.cpp iokit_transport.cpp
+LIBSRC   = gpu.cpp pass.cpp draw.cpp blit.cpp metal.cpp fake_gpu.cpp iokit_transport.cpp
 LIBOBJ   = $(LIBSRC:%.cpp=$(OUT)/%.o) $(OUT)/v7.o
 ifeq ($(shell uname),Darwin)
 LDLIBS   = -framework IOKit -framework CoreFoundation -framework IOSurface

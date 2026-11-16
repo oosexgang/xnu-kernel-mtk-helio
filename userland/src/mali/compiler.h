@@ -6,6 +6,7 @@
  * against what was compiled here.
  */
 #pragma once
+#include <stdbool.h>
 #include <stddef.h>
 #include "program.h"
 
@@ -35,8 +36,24 @@ void hm_kernel_free(struct hm_kernel *k);
 #define HM_AIR_SYSVAL_SIZE 288
 int hm_compile_air_kernel(const void *lib, size_t size, const char *entry, unsigned gpu_id, struct hm_kernel *out,
     uint32_t *device_buffers, uint32_t *constant_buffers, char *why, size_t why_size);
+/*
+ * A render pipeline of Apple's: vertex function VS and fragment function FS of the .metallib LIB through the AIR
+ * frontend and Mesa's Bifrost compiler into *OUT as hm_compile_program's (no vertex attributes: Apple's vertex
+ * functions that read their vertices out of buffers by [[vertex_id]]). The vertex function's device buffers are global
+ * memory at addresses pushed from uniform buffer HM_AIR_SYSVAL_UBO (8 bytes a Metal index; *VS_DEVICE_BUFFERS, bit n:
+ * buffer n); the fragment function's texture 0 and sampler 0, an inline (constexpr) sampler's filter in *FS_LINEAR.
+ * 0, or -1 with WHY.
+ */
+int hm_compile_air_program(const void *lib, size_t size, const char *vs, const char *fs, unsigned gpu_id,
+    struct hm_program *out, uint32_t *vs_device_buffers, bool *fs_linear, char *why, size_t why_size);
+/* function ENTRY of LIB translated to NIR and described on FP: its stage, resources, varyings, vertex attributes,
+ * render targets, and the NIR itself. 0, or -1 with WHY */
+int hm_air_describe(const void *lib, size_t size, const char *entry, void *fp, char *why, size_t why_size);
 /* the names of the compute functions of the .metallib LIB, NUL-separated into NAMES (at most SIZE bytes): how many */
 int hm_air_kernels(const void *lib, size_t size, char *names, size_t names_size);
+
+/* the colour format NAME (RGBA8Unorm, BGRA8Unorm, R8Unorm, RG8Unorm) into *OUT: 0, or -1 for another */
+int hm_compile_format(const char *name, struct hm_format *out);
 
 /* RGBA8Unorm's texture format word and the identity swizzle (GENX(panfrost_new_texture)) */
 uint32_t hm_compile_texture_format_rgba8(void);

@@ -27,6 +27,7 @@ clang -std=c11 -O1 -g -w -DPAN_ARCH=7 $DEFS "${INC[@]}" -I"$S/src/compiler/air" 
 	-c "$HERE/../compiler.c" -o "$OUT/compiler.o"
 clang -std=c11 -O1 -g -w -c "$HERE/bishaders.c" -o "$OUT/bishaders.o"
 clang -std=c11 -O1 -g -w -c "$HERE/airkernels.c" -o "$OUT/airkernels.o"
+clang -std=c11 -O1 -g -w -c "$HERE/airrender.c" -o "$OUT/airrender.o"
 L=$B/src
 LIBS=(
 	$L/panfrost/lib/libpan-arch-v7.a $L/panfrost/lib/libpan-format-v7.a $L/panfrost/lib/libpan-format-v6.a $L/panfrost/lib/libpanfrost_lib.a \
@@ -37,4 +38,5 @@ LIBS=(
 	$L/compiler/air/libair.a -lz)
 clang++ -o "$OUT/bishaders" "$OUT/bishaders.o" "$OUT/compiler.o" "${LIBS[@]}"
 clang++ -o "$OUT/airkernels" "$OUT/airkernels.o" "$OUT/compiler.o" "${LIBS[@]}"
+clang++ -o "$OUT/airrender" "$OUT/airrender.o" "$OUT/compiler.o" "${LIBS[@]}"
 "$OUT/bishaders" "$HERE/../shaders_v7.h"

@@ -1,4 +1,5 @@
 // DrawPass (draw.hpp).
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -34,36 +35,63 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
         return no("a vertex count that is not a whole number of primitives, up to 48");
     if (in.indices != nullptr) {
         if (in.vertexCount < 1 || in.vertexCount > 48 || in.indexCount < 3 || in.indexCount % 3 != 0 ||
-            in.indexCount * 2 > kSize - kIndices)
+            in.indexCount * 2 > D::kAirSysvals - kIndices)
             return no("an indexed draw of 1 to 48 vertices and a whole number of triangles of indices");
         for (uint32_t i = 0; i < in.indexCount; i++) {
             if (in.indices[i] >= in.vertexCount) return no("an index past the vertices");
         }
     }
     if (p.attribute_count > 4) return no("more than four vertex attributes");
+    const bool instanced = in.instanceCount > 1;
+    if (in.instanceCount < 1 || in.instanceCount > 16) return no("an instance count of 1 to 16");
+    if (instanced && in.indices != nullptr) return no("indices with instances (not served yet)");
+    if ((in.perInstance >> p.attribute_count) != 0) return no("a per-instance attribute the program does not have");
+    // the vertices an instance takes in the varyings (panfrost_padded_vertex_count, for instance_count > 1)
+    const uint32_t padded = instanced ? hm_v7_padded_vertex_count(in.vertexCount) : in.vertexCount;
+    const uint32_t shaded = padded * in.instanceCount;
+    auto elements = [&](uint32_t a) { return (in.perInstance >> a & 1) ? in.instanceCount : in.vertexCount; };
     uint32_t vertexBytes = 0;
     for (uint32_t a = 0; a < p.attribute_count; a++) {
         if (in.attributes[a] == nullptr) return no("attribute " + std::to_string(a) + " has no data");
-        vertexBytes += p.attribute_sizes[a] * in.vertexCount;
-        for (uint32_t i = 0; i < p.attribute_sizes[a] / 4 * in.vertexCount; i++) {
+        vertexBytes += (p.attribute_sizes[a] * elements(a) + 63) & ~63u;
+        for (uint32_t i = 0; i < p.attribute_sizes[a] / 4 * elements(a); i++) {
             if (!std::isfinite(in.attributes[a][i])) return no("an attribute value that is not a finite number");
         }
     }
     if (vertexBytes > kGeneral - kVertices) return no("the vertices do not fit");
     if (p.texture_count > 1 || p.sampler_count > 1) return no("more than one texture or sampler");
+    static_assert(D::kSurface + DrawInput::kMaxLevels * 16 <= D::kSampler && D::kSampler + 32 <= D::kSysvals &&
+                  D::kSysvals + 32 <= D::kUbos && D::kUbos + 16 * 8 <= D::kIndices && D::kAirSysvals + 288 <= D::kSize, "layout");
     if (p.texture_count != 0) {
         const Bo* tb = in.texture;
         if (tb == nullptr) return no("the program samples a texture and none is given");
         uint64_t tbase = tb->gpu() + in.textureOffset;
+        const uint32_t tbpp = bytesPerPixel(in.textureFormat);
+        if (in.textureFormat == Format::BGRA8Unorm) return no("a BGRA8 texture (not served yet)");
         if (in.textureWidth == 0 || in.textureHeight == 0 || in.textureWidth > 4096 || in.textureHeight > 4096 ||
-            in.textureRowBytes < 4 * in.textureWidth || (tbase & 63) != 0 || (in.textureRowBytes & 63) != 0 ||
-            in.textureOffset + static_cast<uint64_t>(in.textureRowBytes) * (in.textureHeight - 1) + 4ull * in.textureWidth > tb->size())
-            return no("the texture is not 64-byte aligned rows of RGBA8 inside its buffer (pan_layout.c, v7)");
+            in.textureRowBytes < tbpp * in.textureWidth || (tbase & 63) != 0 || (in.textureRowBytes & 63) != 0 ||
+            in.textureOffset + static_cast<uint64_t>(in.textureRowBytes) * (in.textureHeight - 1) +
+                    static_cast<uint64_t>(tbpp) * in.textureWidth > tb->size())
+            return no("the texture is not 64-byte aligned rows of its format inside its buffer (pan_layout.c, v7)");
+        if (in.textureLevels < 1 || in.textureLevels > DrawInput::kMaxLevels ||
+            (in.textureLevels > 1 && ((in.textureWidth >> (in.textureLevels - 1)) == 0 && (in.textureHeight >> (in.textureLevels - 1)) == 0)))
+            return no("mip levels past 1x1, or more than eight");
+        for (uint32_t l = 1; l < in.textureLevels; l++) {
+            uint32_t lw = std::max(1u, in.textureWidth >> l), lh = std::max(1u, in.textureHeight >> l);
+            uint64_t lb = tb->gpu() + in.textureLevelOffset[l];
+            uint32_t rb = in.textureLevelRowBytes[l];
+            if ((lb & 63) != 0 || (rb & 63) != 0 || rb < tbpp * lw ||
+                in.textureLevelOffset[l] + static_cast<uint64_t>(rb) * (lh - 1) + static_cast<uint64_t>(tbpp) * lw > tb->size())
+                return no("mip level " + std::to_string(l) + " is not 64-byte aligned rows inside the texture's buffer");
+        }
+        if (!(in.minLod >= 0) || !(in.maxLod >= in.minLod)) return no("LOD clamps that are not 0 <= min <= max");
     }
     if (in.blendOver && !p.can_blend) return no("the program has no blended state");
     // uniform buffer 0 is the caller's, 1 the system values (compiler.c: the viewport's scale and offset)
+    // and 15 the device buffers' addresses (an Apple vertex function's: compiler.h HM_AIR_SYSVAL_UBO)
     auto pushable = [&](const hm_push_word& w) {
-        return (w.ubo == 0 && w.offset + 4u <= in.uniformSize) || (w.ubo == 1 && w.offset + 4u <= kSysvalSize);
+        return (w.ubo == 0 && w.offset + 4u <= in.uniformSize) || (w.ubo == 1 && w.offset + 4u <= kSysvalSize) ||
+               (w.ubo == 15 && w.offset + 4u <= 8 * DrawInput::kMaxDeviceBuffers);
     };
     for (uint32_t i = 0; i < p.vs_push_count; i++) {
         if (!pushable(p.vs_push[i])) return no("the vertex shader pushes a word the uniform data does not hold");
@@ -93,7 +121,7 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
         for (uint32_t i = 0; i < p.vs_out_count; i++) found |= p.vs_out[i].location == p.fs_in[j].location;
         if (!found) return no("the fragment shader reads a varying the vertex shader does not write");
     }
-    if (stride * in.vertexCount > kPositions - kGeneral) return no("the varyings do not fit");
+    if (stride * shaded > kPositions - kGeneral || 16 * shaded > kVsCode - kPositions) return no("the varyings do not fit");
     if (p.vs_out_count + p.fs_in_count > 16) return no("more than sixteen varying records");
 
     memset(cpu, 0, kSize);
@@ -105,8 +133,15 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
     rsd[0] |= static_cast<uint32_t>(gpu + kVsCode);
     rsd[1] |= static_cast<uint32_t>((gpu + kVsCode) >> 32);
     memcpy(cpu + kVsRsd, rsd, sizeof(rsd));
-    if (in.depthTest && in.blendOver) return no("a depth test with blending (not served yet)");
-    memcpy(rsd, in.depthTest ? p.fs_rsd_depth : in.blendOver ? p.fs_rsd_blended : p.fs_rsd, sizeof(rsd));
+    const bool zs = in.depthTest || in.zs != nullptr;
+    if (zs && in.blendOver) return no("a depth or stencil test with blending (not served yet)");
+    // a depth or stencil state: the Renderer State compiled for a test that writes (pan_earlyzs_get with writes_zs),
+    // its words 8 to 11 the state's
+    memcpy(rsd, zs ? p.fs_rsd_depth : in.blendOver ? p.fs_rsd_blended : p.fs_rsd, sizeof(rsd));
+    if (in.zs != nullptr) {
+        const char* bad = nullptr;
+        if (hm_v7_renderer_state_zs(rsd, in.zs, &bad) != 0) return no(std::string("the depth and stencil state: ") + bad);
+    }
     rsd[0] |= static_cast<uint32_t>(gpu + kFsCode);
     rsd[1] |= static_cast<uint32_t>((gpu + kFsCode) >> 32);
     memcpy(cpu + kFsRsd, rsd, sizeof(rsd));
@@ -114,15 +149,30 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
            in.blendOver ? (bgra ? p.blend_over_bgra : p.blend_over) : (bgra ? p.blend_off_bgra : p.blend_off), sz->blend);
 
     // the vertex attributes, one buffer each, and the tables' ends
+    // (instanced: per vertex 1D_MODULUS by the padded count, per instance a divisor of it; an NPOT divisor takes a
+    // continuation record, and such a pair starts at an even record -- panfrost_emit_vertex_data)
     uint64_t at = kVertices;
+    unsigned k = 0;
     for (uint32_t a = 0; a < p.attribute_count; a++) {
-        uint32_t bytes = p.attribute_sizes[a] * in.vertexCount;
+        uint32_t bytes = p.attribute_sizes[a] * elements(a);
         memcpy(cpu + at, in.attributes[a], bytes);
-        hm_v7_attribute(cpu + kAttributes + a * sz->attribute, a, p.attribute_formats[a], 0, true);
-        hm_v7_attribute_buffer(cpu + kAttributeBuffers + a * sz->attribute_buffer, gpu + at, p.attribute_sizes[a], bytes);
+        uint8_t* rec;
+        if (!instanced) {
+            rec = cpu + kAttributeBuffers + k * sz->attribute_buffer;
+            hm_v7_attribute_buffer(rec, gpu + at, p.attribute_sizes[a], bytes);
+            hm_v7_attribute(cpu + kAttributes + a * sz->attribute, k, p.attribute_formats[a], 0, true);
+            k++;
+        } else {
+            bool step = in.perInstance >> a & 1;
+            if (step && (padded & (padded - 1)) != 0) k = (k + 1) & ~1u;
+            rec = cpu + kAttributeBuffers + k * sz->attribute_buffer;
+            hm_v7_attribute(cpu + kAttributes + a * sz->attribute, k, p.attribute_formats[a], 0, true);
+            k += hm_v7_attribute_buffer_instanced(rec, gpu + at, p.attribute_sizes[a], bytes, padded, step);
+        }
         at = (at + bytes + 63) & ~63ull;
     }
-    hm_v7_attribute_buffer(cpu + kAttributeBuffers + p.attribute_count * sz->attribute_buffer, 0, 0, 0);
+    if (kAttributeBuffers + (k + 1) * sz->attribute_buffer > kVaryings) return no("too many attribute buffer records");
+    hm_v7_attribute_buffer(cpu + kAttributeBuffers + k * sz->attribute_buffer, 0, 0, 0);
 
     // the varying records: the vertex shader's (producer), then the fragment shader's (consumer); buffers GENERAL 0,
     // POSITION 1, then the table's end
@@ -144,9 +194,9 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
         hm_v7_attribute(cpu + kVaryings + (p.vs_out_count + j) * sz->attribute, 0, p.fs_in[j].format, off, false);
     }
     if (stride != 0) {
-        hm_v7_attribute_buffer(cpu + kVaryingBuffers, gpu + kGeneral, stride, stride * in.vertexCount);
+        hm_v7_attribute_buffer(cpu + kVaryingBuffers, gpu + kGeneral, stride, stride * shaded);
     }
-    hm_v7_attribute_buffer(cpu + kVaryingBuffers + sz->attribute_buffer, gpu + kPositions, 16, 16 * in.vertexCount);
+    hm_v7_attribute_buffer(cpu + kVaryingBuffers + sz->attribute_buffer, gpu + kPositions, 16, 16 * shaded);
     hm_v7_attribute_buffer(cpu + kVaryingBuffers + 2 * sz->attribute_buffer, 0, 0, 0);
 
     // the uniforms: buffer 0 the caller's, buffer 1 the system values -- the viewport transform's scale and offset
@@ -156,11 +206,38 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
         memcpy(cpu + kUniforms, in.uniforms, in.uniformSize);
         hm_v7_uniform_buffer(cpu + kUbos, gpu + kUniforms, in.uniformSize);
     }
-    float sysvals[8] = {t.width / 2.0f, t.height / 2.0f, 0.5f, 0.0f, t.width / 2.0f, t.height / 2.0f, 0.5f, 0.0f};
+    float vpX = 0, vpY = 0, vpW = static_cast<float>(t.width), vpH = static_cast<float>(t.height);
+    if (in.viewport.set) {
+        vpX = in.viewport.x, vpY = in.viewport.y, vpW = in.viewport.width, vpH = in.viewport.height;
+        if (!std::isfinite(vpX) || !std::isfinite(vpY) || !(vpW > 0) || !(vpH > 0) || vpW > 8192 || vpH > 8192)
+            return no("a viewport that is not a finite rectangle of positive size");
+    }
+    float sysvals[8] = {vpW / 2.0f, vpH / 2.0f, 0.5f, 0.0f, vpX + vpW / 2.0f, vpY + vpH / 2.0f, 0.5f, 0.0f};
+    // the Viewport descriptor's scissor, inclusive: the viewport's pixels, within the scissor rectangle and the target
+    int64_t sMinX = static_cast<int64_t>(std::floor(vpX)), sMinY = static_cast<int64_t>(std::floor(vpY));
+    int64_t sMaxX = static_cast<int64_t>(std::ceil(vpX + vpW)) - 1, sMaxY = static_cast<int64_t>(std::ceil(vpY + vpH)) - 1;
+    if (in.scissor.set) {
+        sMinX = std::max<int64_t>(sMinX, in.scissor.x), sMinY = std::max<int64_t>(sMinY, in.scissor.y);
+        sMaxX = std::min<int64_t>(sMaxX, static_cast<int64_t>(in.scissor.x) + in.scissor.width - 1);
+        sMaxY = std::min<int64_t>(sMaxY, static_cast<int64_t>(in.scissor.y) + in.scissor.height - 1);
+    }
+    sMinX = std::max<int64_t>(sMinX, 0), sMinY = std::max<int64_t>(sMinY, 0);
+    sMaxX = std::min<int64_t>(sMaxX, t.width - 1), sMaxY = std::min<int64_t>(sMaxY, t.height - 1);
+    if (sMinX > sMaxX || sMinY > sMaxY) return no("a scissor that leaves no pixel (not served: skip the draw)");
     memcpy(cpu + kSysvals, sysvals, sizeof(sysvals));
     hm_v7_uniform_buffer(cpu + kUbos + sz->uniform_buffer, gpu + kSysvals, sizeof(sysvals));
+    bool anyDevice = false;
+    for (uint32_t i = 0; i < DrawInput::kMaxDeviceBuffers; i++) {
+        if (in.deviceBuffers[i] == nullptr) continue;
+        if (in.deviceOffsets[i] > in.deviceBuffers[i]->size()) return no("a device buffer's offset past its end");
+        uint64_t a = in.deviceBuffers[i]->gpu() + in.deviceOffsets[i];
+        memcpy(cpu + D::kAirSysvals + 8 * i, &a, 8);
+        anyDevice = true;
+    }
+    if (anyDevice) hm_v7_uniform_buffer(cpu + kUbos + 15 * sz->uniform_buffer, gpu + D::kAirSysvals, 288);
     auto word = [&](const hm_push_word& w) {
-        return w.ubo == 0 ? static_cast<const uint8_t*>(in.uniforms) + w.offset : cpu + kSysvals + w.offset;
+        return w.ubo == 0 ? static_cast<const uint8_t*>(in.uniforms) + w.offset
+             : w.ubo == 15 ? cpu + D::kAirSysvals + w.offset : cpu + kSysvals + w.offset;
     };
     for (uint32_t i = 0; i < p.vs_push_count; i++) memcpy(cpu + kVsPush + 4 * i, word(p.vs_push[i]), 4);
     for (uint32_t i = 0; i < p.fs_push_count; i++) memcpy(cpu + kFsPush + 4 * i, word(p.fs_push[i]), 4);
@@ -168,11 +245,26 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
     // texture 0 and sampler 0 (GENX(panfrost_new_texture), panfrost_create_sampler_state)
     if (p.texture_count != 0) {
         hm_v7_surface_with_stride(cpu + kSurface, in.texture->gpu() + in.textureOffset, static_cast<int32_t>(in.textureRowBytes), 0);
-        hm_v7_texture_2d(cpu + kTexture, hm_texture_format_rgba8, hm_texture_swizzle_identity, in.textureWidth,
-                         in.textureHeight, gpu + kSurface);
-        hm_v7_sampler(cpu + kSampler, in.nearest);
+        for (uint32_t l = 1; l < in.textureLevels; l++) {
+            hm_v7_surface_with_stride(cpu + kSurface + l * sz->surface_with_stride, in.texture->gpu() + in.textureLevelOffset[l],
+                                      static_cast<int32_t>(in.textureLevelRowBytes[l]), 0);
+        }
+        const uint32_t texFormat = in.textureFormat == Format::R8Unorm ? hm_formats[2].texture_format
+                                 : in.textureFormat == Format::RG8Unorm ? hm_formats[3].texture_format
+                                 : hm_texture_format_rgba8;
+        if (in.textureLevels == 1 && in.mip == HM_MIP_NONE) {
+            hm_v7_texture_2d(cpu + kTexture, texFormat, hm_texture_swizzle_identity, in.textureWidth,
+                             in.textureHeight, gpu + kSurface);
+            hm_v7_sampler(cpu + kSampler, in.nearest);
+        } else {
+            hm_v7_texture_2d_levels(cpu + kTexture, texFormat, hm_texture_swizzle_identity, in.textureWidth,
+                                    in.textureHeight, in.textureLevels, gpu + kSurface);
+            hm_v7_sampler_full(cpu + kSampler, in.nearest, in.nearest, in.mip, in.minLod,
+                               std::min(in.maxLod, static_cast<float>(in.textureLevels - 1)));
+        }
     }
-    hm_v7_viewport(cpu + kViewport, 0, 0, t.width - 1, t.height - 1, 0.0f, 1.0f);
+    hm_v7_viewport(cpu + kViewport, static_cast<unsigned>(sMinX), static_cast<unsigned>(sMinY),
+                   static_cast<unsigned>(sMaxX), static_cast<unsigned>(sMaxY), 0.0f, 1.0f);
     hm_v7_local_storage(cpu + kLocalStorage);
     struct hm_v7_draw vertex = {};
     vertex.state = gpu + kVsRsd;
@@ -183,6 +275,8 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
     vertex.thread_storage = gpu + kLocalStorage;
     vertex.push_uniforms = p.vs_push_count ? gpu + kVsPush : 0;
     vertex.uniform_buffers = gpu + kUbos;
+    vertex.instance_count = in.instanceCount;
+    vertex.padded_count = padded;
     hm_v7_vertex_job(cpu + kVertexJob, vIndex, gpu + kTilerJob, in.vertexCount, &vertex);
     struct hm_v7_draw fragment = {};
     fragment.state = gpu + kFsRsd;
@@ -195,6 +289,11 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
     fragment.uniform_buffers = gpu + kUbos;
     fragment.textures = p.texture_count ? gpu + kTexture : 0;
     fragment.samplers = p.sampler_count ? gpu + kSampler : 0;
+    fragment.cull_front = in.cull == DrawInput::Cull::Front;
+    fragment.cull_back = in.cull == DrawInput::Cull::Back;
+    fragment.front_ccw = in.frontCCW;
+    fragment.instance_count = in.instanceCount;
+    fragment.padded_count = padded;
     if (in.indices != nullptr) {
         memcpy(cpu + kIndices, in.indices, 2 * in.indexCount);
         hm_v7_tiler_job_indexed(cpu + kTilerJob, vIndex + 1, vIndex, next, in.vertexCount, tilerCtx, &fragment, in.indexCount,
@@ -229,16 +328,19 @@ std::unique_ptr<DrawPass> DrawPass::makeMany(Device& device, const Target& t,
     if (draws.empty() || draws.size() > kMaxDraws) return no("a pass of 1 to " + std::to_string(kMaxDraws) + " draws");
     if (t.bo == nullptr || t.width == 0 || t.height == 0 || t.width > 4096 || t.height > 4096)
         return no("a draw goes into a target of 1 to 4096 pixels a side");
-    const bool bgra = t.format == Format::BGRA8Unorm;
     uint64_t base = t.bo->gpu() + t.offset;
-    if ((base & 63) != 0 || (t.rowBytes & 63) != 0 || t.rowBytes < 4 * t.width ||
-        t.offset + static_cast<uint64_t>(t.rowBytes) * (t.height - 1) + 4ull * t.width > t.bo->size())
+    const uint32_t bpp = bytesPerPixel(t.format);
+    if ((base & 63) != 0 || (t.rowBytes & 63) != 0 || t.rowBytes < bpp * t.width ||
+        t.offset + static_cast<uint64_t>(t.rowBytes) * (t.height - 1) + static_cast<uint64_t>(bpp) * t.width > t.bo->size())
         return no("the target is not 64-byte aligned rows inside its buffer (pan_layout.c, v7)");
     std::unique_ptr<DrawPass> pass(new DrawPass(device));
     pass->target_ = t;
     pass->draws_ = static_cast<uint32_t>(draws.size());
     for (const auto& d : draws) {
         if (d.first->texture_count && d.second.texture) pass->textures_.push_back(d.second.texture);
+        for (const Bo* b : d.second.deviceBuffers) {
+            if (b) pass->textures_.push_back(b);
+        }
     }
     pass->cmd_ = device.gpu().newBo(kSize * draws.size(), why);
     if (!pass->cmd_) return nullptr;
@@ -270,8 +372,9 @@ std::unique_ptr<DrawPass> DrawPass::makeMany(Device& device, const Target& t,
     hm_v7_tile_size(4, device.tileBufferBudget(), &fb.tile_size, &fb.cbuf_allocation);
     fb.rt_count = 1;
     fb.z_clear = 1.0f;
+    fb.s_clear = in.stencilClear;
     struct hm_v7_rt rt = {};
-    rt.format = bgra ? HM_RT_BGRA8_UNORM : HM_RT_RGBA8_UNORM;
+    rt.format = rtFormat(t.format);
     rt.base = base;
     rt.row_stride = t.rowBytes;
     rt.write_enable = true;

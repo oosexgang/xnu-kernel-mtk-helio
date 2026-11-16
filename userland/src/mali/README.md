@@ -96,18 +96,18 @@ One counts only when every `mali-probe` stage named for it said PASS on the phon
 | 21 | blit: buffer to buffer copy | `blit` (the `copy` kernel) |
 | 22 | primitive: lines | `lines` |
 | 23 | primitive: points | `points` |
-| 24 | textures sampled, linear | -- |
-| 25 | mipmaps | -- |
-| 26 | more pixel formats (R8, RG8, RGBA16F...) | -- |
-| 27 | render to a texture, then sample it | -- |
+| 24 | textures sampled, linear | `texture-linear` |
+| 25 | mipmaps | `mipmaps` |
+| 26 | more pixel formats: R8, RG8 | `formats` |
+| 27 | render to a texture, then sample it | `render-to-texture` |
 | 28 | multisampling | -- |
-| 29 | stencil | -- |
-| 30 | scissor and viewport from the API | -- |
-| 31 | culling and winding | -- |
-| 32 | instanced draws | -- |
+| 29 | stencil | `stencil` |
+| 30 | scissor and viewport from the API | `viewport-scissor` |
+| 31 | culling and winding | `cull` |
+| 32 | instanced draws | `instanced` |
 | 33 | vertex descriptors and argument buffers | -- |
-| 34 | Apple vertex and fragment functions (AIR) | -- |
-| 35 | blit: textures, generateMipmaps | -- |
+| 34 | Apple vertex and fragment functions (AIR) | `apple-render` (ARKitCore's `resample_v` + `resample_f`) |
+| 35 | blit: textures, generateMipmaps | `blit-texture` `generate-mipmaps` |
 | 36 | presenting to the panel (CAMetalLayer) | -- |
 | 37 | Metal.framework's MTLDevice on this backend | -- |
 

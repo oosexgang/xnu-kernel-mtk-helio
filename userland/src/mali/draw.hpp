@@ -21,6 +21,7 @@
 #include "mali.hpp"
 #include "pass.hpp"
 #include "program.h"
+#include "v7.h"
 
 namespace hakios::mali {
 
@@ -35,9 +36,18 @@ struct DrawInput {
     bool blendOver = false;     // Metal's source-over, premultiplied: One, OneMinusSourceAlpha
     // texture 0 and sampler 0 of a program that samples (RGBA8Unorm, linear rows, one level), and its filtering
     const Bo* texture = nullptr;
+    Format textureFormat = Format::RGBA8Unorm;      // RGBA8Unorm, R8Unorm or RG8Unorm (hm_formats)
     uint64_t textureOffset = 0;
     uint32_t textureWidth = 0, textureHeight = 0, textureRowBytes = 0;
     bool nearest = true;
+    // mip levels of the texture: level 0 at textureOffset, level l at textureLevelOffset[l] with textureLevelRowBytes[l]
+    // (each (w >> l) x (h >> l), at least 1); the sampler's MTLSamplerMipFilter and lodMinClamp..lodMaxClamp
+    static constexpr uint32_t kMaxLevels = 8;
+    uint32_t textureLevels = 1;
+    uint64_t textureLevelOffset[kMaxLevels] = {};
+    uint32_t textureLevelRowBytes[kMaxLevels] = {};
+    hm_mip mip = HM_MIP_NONE;
+    float minLod = 0.0f, maxLod = 1000.0f;
     // Metal's depth test Less with writes, in the tile buffer alone (cleared to 1.0, not written back): what a draw of
     // several triangles needs to keep the nearest
     bool depthTest = false;
@@ -46,6 +56,27 @@ struct DrawInput {
     uint32_t indexCount = 0;
     // MTLPrimitiveType: triangles, lines (pairs of vertices) or points
     enum class Primitive { Triangles, Lines, Points } primitive = Primitive::Triangles;
+    // MTLViewport: the pixels NDC -1..1 lands on (x, y the corner nearest NDC (-1, -1)), the whole target when unset;
+    // MTLScissorRect: the pixels that may be written. The Viewport descriptor's scissor is their intersection with the
+    // target (panfrost_emit_viewport)
+    struct { bool set = false; float x = 0, y = 0, width = 0, height = 0; } viewport;
+    struct { bool set = false; uint32_t x = 0, y = 0, width = 0, height = 0; } scissor;
+    // MTLCullMode and MTLWinding (rast->cull_face, rast->front_ccw)
+    enum class Cull { None, Front, Back } cull = Cull::None;
+    bool frontCCW = false;
+    // MTLDepthStencilState in full, with the reference (overrides depthTest); the stencil's clear value is the first
+    // draw's
+    const hm_v7_zs* zs = nullptr;
+    uint8_t stencilClear = 0;
+    // -drawPrimitives:...instanceCount: INSTANCE_COUNT instances of the VERTEX_COUNT vertices; bit a of PER_INSTANCE: attribute
+    // a steps once an instance (MTLVertexStepFunctionPerInstance, step rate 1), its data INSTANCE_COUNT elements
+    uint32_t instanceCount = 1;
+    uint32_t perInstance = 0;
+    // an Apple vertex function's device buffers (hm_compile_air_program): buffer n at deviceBuffers[n] +
+    // deviceOffsets[n], its address in uniform buffer 15 (HM_AIR_SYSVAL_UBO, 8 bytes an index)
+    static constexpr uint32_t kMaxDeviceBuffers = 8;
+    const Bo* deviceBuffers[kMaxDeviceBuffers] = {};
+    uint64_t deviceOffsets[kMaxDeviceBuffers] = {};
 };
 
 class DrawPass {
@@ -70,9 +101,9 @@ public:
     static constexpr uint32_t kVertexJob = 0x000, kTilerJob = 0x100, kFragmentJob = 0x200, kFbd = 0x240,
         kHeapDesc = 0x300, kTilerCtx = 0x340, kVsRsd = 0x400, kFsRsd = 0x440, kAttributes = 0x4c0,
         kAttributeBuffers = 0x500, kVaryings = 0x5c0, kVaryingBuffers = 0x640, kViewport = 0x680,
-        kLocalStorage = 0x6c0, kUbos = 0x700, kVsPush = 0x740, kFsPush = 0x7c0, kVertices = 0x800,
+        kLocalStorage = 0x6c0, kUbos = 0x3180, kVsPush = 0x740, kFsPush = 0x7c0, kVertices = 0x800,
         kGeneral = 0xc00, kPositions = 0xe00, kVsCode = 0x1000, kFsCode = 0x1800, kUniforms = 0x2000, kTexture = 0x3000,
-        kSurface = 0x3040, kSampler = 0x3080, kSysvals = 0x3100, kSysvalSize = 32, kIndices = 0x3200, kSize = 0x4000;
+        kSurface = 0x3040, kSampler = 0x30c0, kSysvals = 0x3100, kSysvalSize = 32, kIndices = 0x3200, kAirSysvals = 0x3d00, kSize = 0x4000;
 
 private:
     DrawPass(Device& device) : device_(device) {}
@@ -80,7 +111,7 @@ private:
     Target target_;
     std::unique_ptr<Bo> cmd_;
     const Bo* heap_ = nullptr;
-    std::vector<const Bo*> textures_;
+    std::vector<const Bo*> textures_;     // and the device buffers of Apple vertex functions
     uint32_t draws_ = 0;
 };
 

@@ -30,7 +30,7 @@ python3 "$MESA_SRC/src/panfrost/lib/genxml/gen_pack.py" "$MESA_SRC/src/panfrost/
 CC="xnu-clang -arch arm64e -isysroot $SDK -mios-version-min=16.0"
 CXX="xnu-clang++ -arch arm64e -isysroot $SDK -mios-version-min=16.0"
 $CC -std=c11 -O2 -I$O/gen -I"$MESA_SRC/src" -I"$MESA_SRC/include" -I"$MESA_SRC/src/panfrost/lib" -c $S/v7.c -o $O/v7.o
-for f in gpu pass draw metal fake_gpu iokit_transport probe; do
+for f in gpu pass draw blit metal fake_gpu iokit_transport probe; do
 	$CXX -std=c++17 -O2 -fno-exceptions -fno-rtti -I$S -c $S/$f.cpp -o $O/$f.o
 done
 # the compiler inside the driver (compiler.c): Mesa's Bifrost compiler from the arm64e Mesa build beside MESA_SRC
@@ -67,10 +67,13 @@ PY
 	REL=${REL:-$ROOT/build/ios27/ios27}
 	PF=$REL/rootfs/System/Library/CoreImage/PortraitFilters.cifilter/default.metallib
 	[ -f "$PF" ] && cp "$PF" $O/PortraitFilters.metallib
+	# and ARKitCore's, whose resample_v and resample_f are the apple-render stage's render pipeline
+	AK=$REL/rootfs/System/Library/SubFrameworks/ARKitCore.framework/default.metallib
+	[ -f "$AK" ] && cp "$AK" $O/ARKitCore.metallib
 	$CXX -std=c++17 -O2 -fno-exceptions -fno-rtti $PROBE_DEFS -I$S -c $S/probe.cpp -o $O/probe.o
 fi
 rm -f $O/libhakios-mali.a
-ar rcs $O/libhakios-mali.a $O/v7.o $O/gpu.o $O/pass.o $O/draw.o $O/metal.o $O/fake_gpu.o $O/iokit_transport.o
+ar rcs $O/libhakios-mali.a $O/v7.o $O/gpu.o $O/pass.o $O/draw.o $O/blit.o $O/metal.o $O/fake_gpu.o $O/iokit_transport.o
 $CXX -o $O/mali-probe $O/probe.o $O/libhakios-mali.a $COMPILER_OBJ "${COMPILER_LIBS[@]}" -framework IOKit \
 	-framework CoreFoundation -framework IOSurface -lc++
 # arm64e code made runnable on a processor without pointer authentication, then signed (root26-sys.sh signs it

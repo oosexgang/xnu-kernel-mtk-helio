@@ -475,15 +475,17 @@ uint32_t FakeGpu::runFragment(uint8_t* job, std::string* why) {
             *why = which + "YUV, sRGB, a dithered clear or MSAA (the fake does not model them)";
             return kJobConfigFault;
         }
-        if (r.internal_format != 1 || r.writeback_format != 19) {
+        if (r.internal_format != 1 || (r.writeback_format != 19 && r.writeback_format != 16 && r.writeback_format != 17)) {
             *why = which + "internal format " + std::to_string(r.internal_format) + ", writeback format " +
-                   std::to_string(r.writeback_format) + " (the fake models R8G8B8A8 into R8G8B8A8: 1 and 19)";
+                   std::to_string(r.writeback_format) + " (the fake models R8G8B8A8 into R8G8B8A8, R8, R8G8: 1 and 19, 16, 17)";
             return kJobConfigFault;
         }
         if (r.rt.format == 0) {
-            *why = which + "a swizzle of " + hex(r.swizzle) + " (the fake models RGBA and BGRA)";
+            *why = which + "a swizzle of " + hex(r.swizzle) + " with writeback format " + std::to_string(r.writeback_format) +
+                   " (the fake models RGBA, BGRA, R and RG)";
             return kJobConfigFault;
         }
+        const uint32_t bpp = r.writeback_format == 16 ? 1 : r.writeback_format == 17 ? 2 : 4;
         if (r.rt.internal_buffer_offset + 4 * tile > fb.fb.cbuf_allocation) {
             *why = which + "its tile (" + std::to_string(4 * tile) + " bytes at " +
                    std::to_string(r.rt.internal_buffer_offset) + ") is past the colour buffer allocation of " +
@@ -503,12 +505,12 @@ uint32_t FakeGpu::runFragment(uint8_t* job, std::string* why) {
                    " not 64-byte aligned (pan_layout.c, format_minimum_alignment on v7)";
             return kDataInvalidFault;
         }
-        if (r.rt.row_stride < 4 * fb.fb.width) {
+        if (r.rt.row_stride < bpp * fb.fb.width) {
             *why = which + "a row stride of " + std::to_string(r.rt.row_stride) + " for rows of " +
-                   std::to_string(4 * fb.fb.width) + " bytes";
+                   std::to_string(bpp * fb.fb.width) + " bytes";
             return kDataInvalidFault;
         }
-        uint64_t span = static_cast<uint64_t>(r.rt.row_stride) * (fb.fb.height - 1) + 4ull * fb.fb.width;
+        uint64_t span = static_cast<uint64_t>(r.rt.row_stride) * (fb.fb.height - 1) + static_cast<uint64_t>(bpp) * fb.fb.width;
         if (at(r.rt.base, span) == nullptr) {
             *why = which + "its " + std::to_string(fb.fb.height) + " rows at " + hex(r.rt.base) + " (" +
                    std::to_string(span) + " bytes) are not inside one buffer";
@@ -546,10 +548,11 @@ uint32_t FakeGpu::runFragment(uint8_t* job, std::string* why) {
             unsigned ch = (r.swizzle >> (3 * c)) & 7;
             pixel[c] = ch < 6 ? channel[ch] : 0;
         }
+        const uint32_t bpp = r.writeback_format == 16 ? 1 : r.writeback_format == 17 ? 2 : 4;
         uint8_t* base = at(r.rt.base, 1);
         for (uint32_t y = y0; y <= y1; y++) {
             for (uint32_t x = x0; x <= x1; x++) {
-                memcpy(base + static_cast<uint64_t>(y) * r.rt.row_stride + 4ull * x, pixel, 4);
+                memcpy(base + static_cast<uint64_t>(y) * r.rt.row_stride + static_cast<uint64_t>(bpp) * x, pixel, bpp);
             }
         }
         pixelsWritten_ += static_cast<uint64_t>(x1 - x0 + 1) * (y1 - y0 + 1);

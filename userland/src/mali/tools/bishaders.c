@@ -119,7 +119,8 @@ main(int argc, char **argv)
 	program("tri");
 	program("color");
 	program("tex");
-	for (const char **name = (const char *[]){ "fill", "share", "copy", NULL }; *name; name++) {
+	program("inst");
+	for (const char **name = (const char *[]){ "fill", "share", "copy", "copy2d", NULL }; *name; name++) {
 		if (hm_compile_kernel(*name, GPU_ID, &k, why, sizeof(why)) != 0) {
 			fprintf(stderr, "bishaders: %s\n", why);
 			return 1;
@@ -134,6 +135,18 @@ main(int argc, char **argv)
 		    k.local[1], k.local[2], k.tls_size, k.work_registers, k.ubo_count, k.wls_size);
 		hm_kernel_free(&k);
 	}
+	fprintf(out, "\n/* colour formats (pan_format.c, pan_prepare_rt, panfrost_emit_blend, panfrost_new_texture) */\n"
+	    "static const struct hm_format hm_formats[4] = {\n");
+	for (const char **name = (const char *[]){ "RGBA8Unorm", "BGRA8Unorm", "R8Unorm", "RG8Unorm", NULL }; *name; name++) {
+		struct hm_format f;
+		if (hm_compile_format(*name, &f) != 0) {
+			fprintf(stderr, "bishaders: no format %s\n", *name);
+			return 1;
+		}
+		fprintf(out, "\t{ \"%s\", %u, %u, 0x%03x, 0x%08x, 0x%08x },\n", f.name, f.rt_internal, f.rt_writeback,
+		    f.rt_swizzle, f.blend_memory_format, f.texture_format);
+	}
+	fprintf(out, "};\n");
 	fprintf(out, "\n/* textures: RGBA8Unorm's format word and the identity swizzle */\n"
 	    "static const uint32_t hm_texture_format_rgba8 = 0x%08x;\nstatic const uint32_t hm_texture_swizzle_identity = 0x%03x;\n",
 	    hm_compile_texture_format_rgba8(), hm_compile_swizzle_identity());

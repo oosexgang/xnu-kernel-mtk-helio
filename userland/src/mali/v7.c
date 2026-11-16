@@ -3,6 +3,7 @@
  * Mesa 25.0.7). This is the only file that includes it.
  */
 #include <assert.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -75,6 +76,9 @@ hm_v7_sizes(void)
 		.blend = pan_size(BLEND),
 		.attribute = pan_size(ATTRIBUTE),
 		.attribute_buffer = pan_size(ATTRIBUTE_BUFFER),
+		.surface_with_stride = pan_size(SURFACE_WITH_STRIDE),
+		.texture = pan_size(TEXTURE),
+		.sampler = pan_size(SAMPLER),
 		.viewport = pan_size(VIEWPORT),
 		.local_storage = pan_size(LOCAL_STORAGE),
 		.uniform_buffer = pan_size(UNIFORM_BUFFER),
@@ -122,8 +126,23 @@ hm_v7_rt_swizzle(enum hm_rt_format format)
 		return MALI_CHANNEL_R | (MALI_CHANNEL_G << 3) | (MALI_CHANNEL_B << 6) | (MALI_CHANNEL_A << 9);
 	case HM_RT_BGRA8_UNORM:
 		return MALI_CHANNEL_B | (MALI_CHANNEL_G << 3) | (MALI_CHANNEL_R << 6) | (MALI_CHANNEL_A << 9);
+	/* R8 is X001 and RG8 XY01: the inverse keeps X (and Y), the rest 0 (panfrost_invert_swizzle) */
+	case HM_RT_R8_UNORM:
+		return MALI_CHANNEL_R | (MALI_CHANNEL_0 << 3) | (MALI_CHANNEL_0 << 6) | (MALI_CHANNEL_0 << 9);
+	case HM_RT_RG8_UNORM:
+		return MALI_CHANNEL_R | (MALI_CHANNEL_G << 3) | (MALI_CHANNEL_0 << 6) | (MALI_CHANNEL_0 << 9);
 	}
 	return 0;
+}
+
+unsigned
+hm_v7_rt_writeback(enum hm_rt_format format)
+{
+	switch (format) {
+	case HM_RT_R8_UNORM: return MALI_COLOR_FORMAT_R8;
+	case HM_RT_RG8_UNORM: return MALI_COLOR_FORMAT_R8G8;
+	default: return MALI_COLOR_FORMAT_R8G8B8A8;
+	}
 }
 
 static bool
@@ -154,7 +173,7 @@ hm_v7_framebuffer(void *out, uint64_t gpu, const struct hm_v7_fb *fb, const stru
 		no = "no sample locations (Bifrost always reads them: pan_jm.c)";
 	}
 	for (unsigned i = 0; no == NULL && i < fb->rt_count; i++) {
-		if (rts[i].format != HM_RT_RGBA8_UNORM && rts[i].format != HM_RT_BGRA8_UNORM) {
+		if (rts[i].format < HM_RT_RGBA8_UNORM || rts[i].format > HM_RT_RG8_UNORM) {
 			no = "a render target's format is not one this library knows";
 		} else if ((rts[i].internal_buffer_offset & 15) != 0) {
 			no = "a render target's tile buffer offset is not a multiple of 16";
@@ -188,7 +207,7 @@ hm_v7_framebuffer(void *out, uint64_t gpu, const struct hm_v7_fb *fb, const stru
 		cfg.render_target_count = fb->rt_count;
 		cfg.z_internal_format = MALI_Z_INTERNAL_FORMAT_D24;    /* "Default to 24 bit depth if there's no surface" */
 		cfg.z_clear = fb->z_clear;
-		cfg.s_clear = 0;
+		cfg.s_clear = fb->s_clear;
 		cfg.color_buffer_allocation = fb->cbuf_allocation;
 		cfg.sample_count = 1;
 		cfg.sample_pattern = MALI_SAMPLE_PATTERN_SINGLE_SAMPLED;
@@ -220,7 +239,7 @@ hm_v7_framebuffer(void *out, uint64_t gpu, const struct hm_v7_fb *fb, const stru
 			cfg.writeback_msaa = MALI_MSAA_SINGLE;
 			cfg.srgb = false;
 			cfg.internal_format = MALI_COLOR_BUFFER_INTERNAL_FORMAT_R8G8B8A8;
-			cfg.writeback_format = MALI_COLOR_FORMAT_R8G8B8A8;
+			cfg.writeback_format = hm_v7_rt_writeback(rt->format);
 			cfg.swizzle = hm_v7_rt_swizzle(rt->format);
 			cfg.writeback_block_format = MALI_BLOCK_FORMAT_LINEAR;
 			cfg.rgb.base = rt->base;
@@ -406,12 +425,50 @@ hm_v7_texture_2d(void *out, uint32_t format, uint32_t swizzle, uint32_t width, u
 }
 
 void
+hm_v7_texture_2d_levels(void *out, uint32_t format, uint32_t swizzle, uint32_t width, uint32_t height,
+    unsigned levels, uint64_t surfaces)
+{
+	pan_cast_and_pack(out, TEXTURE, cfg) {
+		cfg.dimension = MALI_TEXTURE_DIMENSION_2D;
+		cfg.format = format;
+		cfg.width = width;
+		cfg.height = height;
+		cfg.sample_count = 1;
+		cfg.swizzle = swizzle;
+		cfg.texel_ordering = MALI_TEXTURE_LAYOUT_LINEAR;
+		cfg.levels = levels;
+		cfg.array_size = 1;
+		cfg.surfaces = surfaces;
+		cfg.minimum_lod = 0;
+		cfg.maximum_lod = cfg.levels - 1;
+	}
+}
+
+void
 hm_v7_surface_with_stride(void *out, uint64_t pointer, int32_t row_stride, int32_t surface_stride)
 {
 	pan_cast_and_pack(out, SURFACE_WITH_STRIDE, cfg) {
 		cfg.pointer = pointer;
 		cfg.row_stride = row_stride;
 		cfg.surface_stride = surface_stride;
+	}
+}
+
+void
+hm_v7_sampler_full(void *out, bool min_nearest, bool mag_nearest, enum hm_mip mip, float min_lod, float max_lod)
+{
+	pan_cast_and_pack(out, SAMPLER, cfg) {
+		cfg.magnify_nearest = mag_nearest;
+		cfg.minify_nearest = min_nearest;
+		cfg.mipmap_mode = mip == HM_MIP_NEAREST ? MALI_MIPMAP_MODE_NEAREST
+		    : mip == HM_MIP_LINEAR ? MALI_MIPMAP_MODE_TRILINEAR : MALI_MIPMAP_MODE_NONE;
+		cfg.normalized_coordinates = true;
+		cfg.minimum_lod = min_lod;
+		cfg.maximum_lod = max_lod;
+		cfg.wrap_mode_s = MALI_WRAP_MODE_CLAMP_TO_EDGE;
+		cfg.wrap_mode_t = MALI_WRAP_MODE_CLAMP_TO_EDGE;
+		cfg.wrap_mode_r = MALI_WRAP_MODE_CLAMP_TO_EDGE;
+		cfg.seamless_cube_map = false;
 	}
 }
 
@@ -467,9 +524,97 @@ hm_v7_local_storage(void *out)
 	}
 }
 
-static void
-pack_invocation(struct mali_invocation_packed *out, unsigned vertex_count)
+unsigned
+hm_v7_padded_vertex_count(unsigned vertex_count)
 {
+	if (vertex_count < 20) {
+		return vertex_count < 10 ? vertex_count : (vertex_count + 1) & ~1u;
+	}
+	unsigned highest = 32 - __builtin_clz(vertex_count);
+	unsigned n = highest - 4;
+	unsigned nibble = (vertex_count >> n) & 0xF;
+	switch ((nibble >> 1) & 0x3) {
+	case 0: return (nibble & 1) ? (1u << (n + 1)) * 5 : (1u << n) * 9;
+	case 1: return (1u << (n + 2)) * 3;
+	case 2: return (1u << (n + 1)) * 7;
+	default: return 1u << (n + 4);
+	}
+}
+
+unsigned
+hm_v7_attribute_buffer_instanced(void *out, uint64_t pointer, uint32_t stride, uint32_t size, unsigned padded,
+    bool per_instance)
+{
+	struct mali_attribute_buffer_packed *bufs = out;
+
+	if (!per_instance) {
+		pan_pack(bufs, ATTRIBUTE_BUFFER, cfg) {
+			cfg.type = MALI_ATTRIBUTE_TYPE_1D_MODULUS;
+			cfg.pointer = pointer;
+			cfg.stride = stride;
+			cfg.size = size;
+			cfg.divisor = padded;
+		}
+		return 1;
+	}
+	if (util_is_power_of_two_or_zero(padded)) {
+		pan_pack(bufs, ATTRIBUTE_BUFFER, cfg) {
+			cfg.type = MALI_ATTRIBUTE_TYPE_1D_POT_DIVISOR;
+			cfg.pointer = pointer;
+			cfg.stride = stride;
+			cfg.size = size;
+			cfg.divisor_r = __builtin_ctz(padded);
+		}
+		return 1;
+	}
+	/* panfrost_compute_magic_divisor */
+	unsigned shift = util_logbase2(padded), extra = 0;
+	uint64_t t = 1ull << (32 + shift);
+	uint32_t magic = (uint32_t)ceil((double)t / (double)padded);
+	if (t % padded <= (1ull << shift)) {
+		magic -= 1;
+		extra = 1;
+	}
+	assert(magic & (1u << 31));
+	magic &= ~(1u << 31);
+	pan_pack(bufs, ATTRIBUTE_BUFFER, cfg) {
+		cfg.type = MALI_ATTRIBUTE_TYPE_1D_NPOT_DIVISOR;
+		cfg.pointer = pointer;
+		cfg.stride = stride;
+		cfg.size = size;
+		cfg.divisor_r = shift;
+		cfg.divisor_e = extra;
+	}
+	pan_cast_and_pack(&bufs[1], ATTRIBUTE_BUFFER_CONTINUATION_NPOT, cfg) {
+		cfg.divisor_numerator = magic;
+		cfg.divisor = 1;
+	}
+	return 2;
+}
+
+static void
+pack_invocation(struct mali_invocation_packed *out, unsigned vertex_count, unsigned instance_count)
+{
+	if (instance_count > 1) {
+		/* panfrost_pack_work_groups_compute(1, vertex_count, instance_count, 1, 1, 1, graphics quirk, direct) */
+		unsigned values[6] = { 1, 1, 1, 1, vertex_count, instance_count };
+		unsigned shifts[7] = { 0 };
+		uint32_t packed = 0;
+		for (unsigned i = 0; i < 6; i++) {
+			packed |= (values[i] - 1) << shifts[i];
+			shifts[i + 1] = shifts[i] + util_logbase2_ceil(values[i]);
+		}
+		pan_pack(out, INVOCATION, cfg) {
+			cfg.invocations = packed;
+			cfg.size_y_shift = shifts[1];
+			cfg.size_z_shift = shifts[2];
+			cfg.workgroups_x_shift = shifts[3];
+			cfg.workgroups_y_shift = shifts[4];
+			cfg.workgroups_z_shift = shifts[5];
+			cfg.thread_group_split = MALI_SPLIT_MIN_EFFICIENT;
+		}
+		return;
+	}
 	/* GENX(jm_launch_draw), instance_count 1 */
 	pan_pack(out, INVOCATION, cfg) {
 		cfg.invocations = vertex_count - 1;
@@ -485,7 +630,7 @@ pack_invocation(struct mali_invocation_packed *out, unsigned vertex_count)
 void
 hm_v7_vertex_job(void *job, unsigned index, uint64_t next, unsigned vertex_count, const struct hm_v7_draw *draw)
 {
-	pack_invocation(pan_section_ptr(job, COMPUTE_JOB, INVOCATION), vertex_count);
+	pack_invocation(pan_section_ptr(job, COMPUTE_JOB, INVOCATION), vertex_count, draw->instance_count);
 	pan_section_pack(job, COMPUTE_JOB, PARAMETERS, cfg) {
 		cfg.job_task_split = 5;
 	}
@@ -498,7 +643,7 @@ hm_v7_vertex_job(void *job, unsigned index, uint64_t next, unsigned vertex_count
 		cfg.varying_buffers = draw->varyings ? draw->varying_buffers : 0;
 		cfg.thread_storage = draw->thread_storage;
 		cfg.offset_start = 0;
-		cfg.instance_size = 1;
+		cfg.instance_size = draw->instance_count > 1 ? draw->padded_count : 1;    /* jm_emit_draw_descs */
 		cfg.push_uniforms = draw->push_uniforms;          /* jm_emit_draw_descs */
 		cfg.uniform_buffers = draw->uniform_buffers;
 		cfg.textures = draw->textures;
@@ -531,7 +676,7 @@ hm_v7_tiler_job_mode(void *job, unsigned index, unsigned dependency, uint64_t ne
     uint64_t tiler, const struct hm_v7_draw *draw, unsigned index_count, uint64_t indices, unsigned draw_mode)
 {
 	bool lines = draw_mode == MALI_DRAW_MODE_LINES;
-	pack_invocation(pan_section_ptr(job, TILER_JOB, INVOCATION), vertex_count);
+	pack_invocation(pan_section_ptr(job, TILER_JOB, INVOCATION), vertex_count, draw->instance_count);
 	/* jm_emit_primitive */
 	pan_section_pack(job, TILER_JOB, PRIMITIVE, cfg) {
 		cfg.draw_mode = (enum mali_draw_mode)draw_mode;
@@ -558,9 +703,9 @@ hm_v7_tiler_job_mode(void *job, unsigned index, unsigned dependency, uint64_t ne
 	}
 	/* jm_emit_tiler_draw, v7 */
 	pan_section_pack(job, TILER_JOB, DRAW, cfg) {
-		cfg.cull_front_face = false;
-		cfg.cull_back_face = false;
-		cfg.front_face_ccw = false;
+		cfg.cull_front_face = draw->cull_front;
+		cfg.cull_back_face = draw->cull_back;
+		cfg.front_face_ccw = draw->front_ccw;
 		cfg.position = draw->position;
 		cfg.state = draw->state;
 		cfg.attributes = draw->attributes;
@@ -570,7 +715,7 @@ hm_v7_tiler_job_mode(void *job, unsigned index, unsigned dependency, uint64_t ne
 		cfg.varying_buffers = draw->varyings ? draw->varying_buffers : 0;
 		cfg.thread_storage = draw->thread_storage;
 		cfg.offset_start = 0;
-		cfg.instance_size = 1;
+		cfg.instance_size = draw->instance_count > 1 ? draw->padded_count : 1;    /* jm_emit_draw_descs */
 		cfg.push_uniforms = draw->push_uniforms;
 		cfg.uniform_buffers = draw->uniform_buffers;
 		cfg.textures = draw->textures;
@@ -766,10 +911,10 @@ hm_v7_read_rt(const void *rt, struct hm_v7_rt_read *out, const char **why)
 	out->srgb = r.srgb;
 	out->dithered_clear = r.dithered_clear;
 	out->surface_stride = r.rgb.surface_stride;
-	if (r.swizzle == hm_v7_rt_swizzle(HM_RT_RGBA8_UNORM)) {
-		out->rt.format = HM_RT_RGBA8_UNORM;
-	} else if (r.swizzle == hm_v7_rt_swizzle(HM_RT_BGRA8_UNORM)) {
-		out->rt.format = HM_RT_BGRA8_UNORM;
+	for (enum hm_rt_format f = HM_RT_RGBA8_UNORM; f <= HM_RT_RG8_UNORM; f++) {
+		if (r.swizzle == hm_v7_rt_swizzle(f) && r.writeback_format == hm_v7_rt_writeback(f)) {
+			out->rt.format = f;
+		}
 	}
 	return said(why);
 }
@@ -798,6 +943,70 @@ hm_v7_read_tiler_heap(const void *heap, struct hm_v7_tiler_read *out, const char
 	out->heap_top = h.top;
 	out->heap_size = h.size;
 	return said(why);
+}
+
+static enum mali_stencil_op
+stencil_op(enum hm_stencil_op op)
+{
+	switch (op) {
+	case HM_STENCIL_ZERO: return MALI_STENCIL_OP_ZERO;
+	case HM_STENCIL_REPLACE: return MALI_STENCIL_OP_REPLACE;
+	case HM_STENCIL_INCR_CLAMP: return MALI_STENCIL_OP_INCR_SAT;
+	case HM_STENCIL_DECR_CLAMP: return MALI_STENCIL_OP_DECR_SAT;
+	case HM_STENCIL_INVERT: return MALI_STENCIL_OP_INVERT;
+	case HM_STENCIL_INCR_WRAP: return MALI_STENCIL_OP_INCR_WRAP;
+	case HM_STENCIL_DECR_WRAP: return MALI_STENCIL_OP_DECR_WRAP;
+	default: return MALI_STENCIL_OP_KEEP;
+	}
+}
+
+_Static_assert((int)HM_COMPARE_LESS == (int)MALI_FUNC_LESS && (int)HM_COMPARE_ALWAYS == (int)MALI_FUNC_ALWAYS &&
+    (int)HM_COMPARE_NOT_EQUAL == (int)MALI_FUNC_NOT_EQUAL, "MTLCompareFunction is Mali's");
+
+int
+hm_v7_renderer_state_zs(void *rsd, const struct hm_v7_zs *zs, const char **why)
+{
+	uint32_t *w = rsd;
+
+	hm_invalid[0] = 0;
+	/* the rasterizer's bits of words 8 and 9 kept, the depth and stencil state's replaced */
+	pan_cast_and_unpack(&w[8], MULTISAMPLE_MISC, ms);
+	pan_cast_and_unpack(&w[9], STENCIL_MASK_MISC, sm);
+	if (said(why) != 0) {
+		return -1;
+	}
+	ms.depth_function = (enum mali_func)zs->depth_compare;
+	ms.depth_write_mask = zs->depth_write;
+	sm.stencil_enable = zs->stencil_enable;
+	sm.stencil_mask_front = zs->stencil_enable ? zs->front.write_mask : 0;
+	sm.stencil_mask_back = zs->stencil_enable ? zs->back.write_mask : 0;
+	pan_cast_and_pack(&w[8], MULTISAMPLE_MISC, cfg) {
+		cfg = ms;
+	}
+	pan_cast_and_pack(&w[9], STENCIL_MASK_MISC, cfg) {
+		cfg = sm;
+	}
+	for (int f = 0; f < 2; f++) {
+		const struct hm_v7_stencil *st = f ? &zs->back : &zs->front;
+		pan_cast_and_pack(&w[10 + f], STENCIL, cfg) {
+			if (zs->stencil_enable) {
+				cfg.reference_value = zs->reference;
+				cfg.mask = st->read_mask;
+				cfg.compare_function = (enum mali_func)st->compare;
+				cfg.stencil_fail = stencil_op(st->fail);
+				cfg.depth_fail = stencil_op(st->depth_fail);
+				cfg.depth_pass = stencil_op(st->pass);
+			} else {
+				/* panfrost_create_depth_stencil_state for stencil off */
+				cfg.mask = 0;
+				cfg.compare_function = MALI_FUNC_NEVER;
+				cfg.stencil_fail = MALI_STENCIL_OP_KEEP;
+				cfg.depth_fail = MALI_STENCIL_OP_KEEP;
+				cfg.depth_pass = MALI_STENCIL_OP_KEEP;
+			}
+		}
+	}
+	return 0;
 }
 
 int
