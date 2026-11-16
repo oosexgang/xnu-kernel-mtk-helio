@@ -91,6 +91,17 @@ struct hm_v7_zs {
 };
 /* ZS into the Renderer State RSD (words 8 to 11, the rest kept): 0, or -1 with the unpacker's sentence in *WHY */
 int hm_v7_renderer_state_zs(void *rsd, const struct hm_v7_zs *zs, const char **why);
+/* the rasterizer's multisampling into the Renderer State RSD (panfrost_create_rasterizer_state: word 8
+ * multisample_enable, word 9 single_sampled_lines = !multisample): 0, or -1 with *WHY */
+int hm_v7_renderer_state_multisample(void *rsd, bool multisample, const char **why);
+/* the byte offset of SAMPLES' pattern in the sample positions table (panfrost_sample_positions_offset), and that table:
+ * pan_samples.c's entries for single sampling and ROTATED_4X_GRID, 256 bytes each at their patterns' offsets */
+unsigned hm_v7_sample_pattern_offset(unsigned samples);
+#define HM_V7_SAMPLE_POSITIONS_SIZE 768
+void hm_v7_sample_positions_table(void *out);
+/* a Tiler Context for a frame of SAMPLES (jm_emit_tiler_desc: tiler.sample_pattern) */
+void hm_v7_tiler_context_samples(void *out, uint64_t heap, uint32_t fb_width, uint32_t fb_height, uint32_t hierarchy_mask,
+    unsigned samples);
 
 struct hm_v7_fb {
 	uint32_t width, height;           /* pixels */
@@ -102,6 +113,8 @@ struct hm_v7_fb {
 	uint32_t rt_count;                /* render targets that follow, 1 to 8 */
 	float z_clear;                    /* the tile buffer's depth at the frame's start (pan_emit_fbd: zs.clear_value) */
 	uint8_t s_clear;                  /* and its stencil */
+	unsigned samples;                 /* 0 or 1: single-sampled; 4: ROTATED_4X_GRID (pan_sample_pattern), the
+	                                   * sample locations then that pattern's entry (hm_v7_sample_pattern_offset) */
 };
 struct hm_v7_rt {
 	enum hm_rt_format format;
@@ -112,6 +125,8 @@ struct hm_v7_rt {
 	bool clear;                       /* load action Clear: CLEAR_WORDS are the tile buffer's colour */
 	bool clean_pixel_write;           /* write tiles nothing was drawn into (pan_prepare_rt: set by a clear) */
 	bool dithering;
+	bool msaa_resolve;                /* a multisampled frame written back averaged (MALI_MSAA_AVERAGE: mali_sampling_mode
+	                                   * for a single-sampled image under a multisampled framebuffer) */
 	uint32_t clear_words[4];
 };
 /* Writes FB and the RTS at OUT (whose GPU address is GPU, 64-aligned): the tagged pointer a Fragment Job names

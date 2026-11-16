@@ -402,8 +402,8 @@ uint32_t FakeGpu::runFragment(uint8_t* job, std::string* why) {
                "them for every frame)";
         return kTranslationFault | kAccessRead;
     }
-    if (fb.sample_count != 1 || fb.sample_pattern != 0) {
-        *why = "more than one sample (the fake does not model MSAA)";
+    if (!((fb.sample_count == 1 && fb.sample_pattern == 0) || (fb.sample_count == 4 && fb.sample_pattern == 2))) {
+        *why = "a sample count and pattern the fake does not model (1 single-sampled, 4 ROTATED_4X_GRID)";
         return kJobConfigFault;
     }
     uint32_t tile = fb.effective_tile_size;
@@ -471,8 +471,9 @@ uint32_t FakeGpu::runFragment(uint8_t* job, std::string* why) {
             return kJobConfigFault;
         }
         std::string which = "render target " + std::to_string(i) + ": ";
-        if (r.yuv_enable || r.srgb || r.dithered_clear || r.writeback_msaa != 0) {
-            *why = which + "YUV, sRGB, a dithered clear or MSAA (the fake does not model them)";
+        if (r.yuv_enable || r.srgb || r.dithered_clear || r.writeback_msaa > 1 || (r.writeback_msaa == 1) != (fb.sample_count == 4)) {
+            *why = which + "YUV, sRGB, a dithered clear, or a writeback that is not single for one sample and averaged "
+                           "for four (the fake does not model the rest)";
             return kJobConfigFault;
         }
         if (r.internal_format != 1 || (r.writeback_format != 19 && r.writeback_format != 16 && r.writeback_format != 17)) {

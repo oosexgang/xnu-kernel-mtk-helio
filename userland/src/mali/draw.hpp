@@ -66,6 +66,9 @@ struct DrawInput {
     bool frontCCW = false;
     // MTLDepthStencilState in full, with the reference (overrides depthTest); the stencil's clear value is the first
     // draw's
+    // MTLTextureType2DMultisample with storeAction MultisampleResolve, memoryless: the frame's SAMPLE_COUNT (1 or 4,
+    // the first draw's) samples in the tile buffer, averaged into the single-sampled target as it is written back
+    uint32_t sampleCount = 1;
     const hm_v7_zs* zs = nullptr;
     uint8_t stencilClear = 0;
     // -drawPrimitives:...instanceCount: INSTANCE_COUNT instances of the VERTEX_COUNT vertices; bit a of PER_INSTANCE: attribute

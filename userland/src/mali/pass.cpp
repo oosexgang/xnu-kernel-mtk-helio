@@ -42,11 +42,11 @@ int Device::init(std::string* why) {
     if (gpu_.param(kParamShaderPresent, &cores) == 0 && cores != 0) {
         coreIdRange_ = 64 - static_cast<unsigned>(__builtin_clzll(cores));
     }
-    samplePositions_ = gpu_.newBo(hm_v7_sizes()->sample_positions, why);
+    samplePositions_ = gpu_.newBo(HM_V7_SAMPLE_POSITIONS_SIZE, why);
     if (!samplePositions_) {
         return -1;
     }
-    hm_v7_sample_positions(samplePositions_->cpu());
+    hm_v7_sample_positions_table(samplePositions_->cpu());
     return 0;
 }
 

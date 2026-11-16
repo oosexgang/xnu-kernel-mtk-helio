@@ -45,6 +45,8 @@ hm_fprintf(FILE *fp, const char *format, ...)
 #include "util/rounding.h"
 #include "v7.h"
 
+static enum mali_sample_pattern sample_pattern(unsigned samples);
+
 /* v7.h's numbers are the generated enum's */
 _Static_assert(HM_JOB_NULL == MALI_JOB_TYPE_NULL, "Job Type");
 _Static_assert(HM_JOB_WRITE_VALUE == MALI_JOB_TYPE_WRITE_VALUE, "Job Type");
@@ -169,6 +171,8 @@ hm_v7_framebuffer(void *out, uint64_t gpu, const struct hm_v7_fb *fb, const stru
 		no = "the colour buffer allocation is not a non-zero multiple of 1 KB";
 	} else if (fb->rt_count < 1 || fb->rt_count > 8) {
 		no = "the render target count is outside 1..8";
+	} else if (fb->samples > 1 && fb->samples != 4) {
+		no = "a sample count other than 1 or 4 (ROTATED_4X_GRID is the one pattern here)";
 	} else if (fb->sample_locations == 0) {
 		no = "no sample locations (Bifrost always reads them: pan_jm.c)";
 	}
@@ -209,8 +213,8 @@ hm_v7_framebuffer(void *out, uint64_t gpu, const struct hm_v7_fb *fb, const stru
 		cfg.z_clear = fb->z_clear;
 		cfg.s_clear = fb->s_clear;
 		cfg.color_buffer_allocation = fb->cbuf_allocation;
-		cfg.sample_count = 1;
-		cfg.sample_pattern = MALI_SAMPLE_PATTERN_SINGLE_SAMPLED;
+		cfg.sample_count = fb->samples > 1 ? fb->samples : 1;
+		cfg.sample_pattern = sample_pattern(fb->samples);
 		cfg.z_write_enable = false;
 		cfg.s_write_enable = false;
 		cfg.has_zs_crc_extension = false;
@@ -236,7 +240,7 @@ hm_v7_framebuffer(void *out, uint64_t gpu, const struct hm_v7_fb *fb, const stru
 			}
 			cfg.write_enable = rt->write_enable;
 			cfg.dithering_enable = rt->dithering;
-			cfg.writeback_msaa = MALI_MSAA_SINGLE;
+			cfg.writeback_msaa = rt->msaa_resolve ? MALI_MSAA_AVERAGE : MALI_MSAA_SINGLE;
 			cfg.srgb = false;
 			cfg.internal_format = MALI_COLOR_BUFFER_INTERNAL_FORMAT_R8G8B8A8;
 			cfg.writeback_format = hm_v7_rt_writeback(rt->format);
@@ -289,13 +293,49 @@ hm_v7_tiler_heap(void *out, uint64_t base, uint32_t size)
 void
 hm_v7_tiler_context(void *out, uint64_t heap, uint32_t fb_width, uint32_t fb_height, uint32_t hierarchy_mask)
 {
+	hm_v7_tiler_context_samples(out, heap, fb_width, fb_height, hierarchy_mask, 1);
+}
+
+static enum mali_sample_pattern
+sample_pattern(unsigned samples)
+{
+	return samples == 4 ? MALI_SAMPLE_PATTERN_ROTATED_4X_GRID : MALI_SAMPLE_PATTERN_SINGLE_SAMPLED;
+}
+
+void
+hm_v7_tiler_context_samples(void *out, uint64_t heap, uint32_t fb_width, uint32_t fb_height, uint32_t hierarchy_mask,
+    unsigned samples)
+{
 	pan_cast_and_pack(out, TILER_CONTEXT, tiler) {
 		tiler.hierarchy_mask = hierarchy_mask;
 		tiler.fb_width = fb_width;
 		tiler.fb_height = fb_height;
 		tiler.heap = heap;
-		tiler.sample_pattern = MALI_SAMPLE_PATTERN_SINGLE_SAMPLED;
+		tiler.sample_pattern = sample_pattern(samples);
 	}
+}
+
+unsigned
+hm_v7_sample_pattern_offset(unsigned samples)
+{
+	return sample_pattern(samples) * 256;
+}
+
+void
+hm_v7_sample_positions_table(void *out)
+{
+	/* pan_samples.c: SAMPLE16(x, y) = ((x + 8) * 16, (y + 8) * 16), SAMPLE8(x, y) = SAMPLE16(2x, 2y); positions 0..31,
+	 * the origin at index 32 */
+	uint16_t *p = (uint16_t *)((uint8_t *)out + sample_pattern(4) * 256);
+	static const int rotated[4][2] = { { -1, -3 }, { 3, -1 }, { -3, 1 }, { 1, 3 } };
+
+	memset(out, 0, HM_V7_SAMPLE_POSITIONS_SIZE);
+	hm_v7_sample_positions(out);
+	for (int i = 0; i < 4; i++) {
+		p[2 * i] = (uint16_t)((2 * rotated[i][0] + 8) * 16);
+		p[2 * i + 1] = (uint16_t)((2 * rotated[i][1] + 8) * 16);
+	}
+	p[64] = p[65] = 8 * 16;
 }
 
 uint32_t
@@ -962,6 +1002,28 @@ stencil_op(enum hm_stencil_op op)
 
 _Static_assert((int)HM_COMPARE_LESS == (int)MALI_FUNC_LESS && (int)HM_COMPARE_ALWAYS == (int)MALI_FUNC_ALWAYS &&
     (int)HM_COMPARE_NOT_EQUAL == (int)MALI_FUNC_NOT_EQUAL, "MTLCompareFunction is Mali's");
+
+int
+hm_v7_renderer_state_multisample(void *rsd, bool multisample, const char **why)
+{
+	uint32_t *w = rsd;
+
+	hm_invalid[0] = 0;
+	pan_cast_and_unpack(&w[8], MULTISAMPLE_MISC, ms);
+	pan_cast_and_unpack(&w[9], STENCIL_MASK_MISC, sm);
+	if (said(why) != 0) {
+		return -1;
+	}
+	ms.multisample_enable = multisample;
+	sm.single_sampled_lines = !multisample;
+	pan_cast_and_pack(&w[8], MULTISAMPLE_MISC, cfg) {
+		cfg = ms;
+	}
+	pan_cast_and_pack(&w[9], STENCIL_MASK_MISC, cfg) {
+		cfg = sm;
+	}
+	return 0;
+}
 
 int
 hm_v7_renderer_state_zs(void *rsd, const struct hm_v7_zs *zs, const char **why)

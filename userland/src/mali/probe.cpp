@@ -1441,6 +1441,49 @@ bool runArgumentBuffer(Device& device) {
     return ok;
 }
 
+// Multisampling: the triangle (16,16) (48,16) (32,48) in white on black with four samples a pixel in the tile buffer,
+// averaged as the frame is written back (storeAction MultisampleResolve), and the same with one sample. With four,
+// the pixels its edges cross are between black and white, in quarters (within 2 of 0, 64, 128, 191, 255 -- 255 / 4
+// rounded either way); inside white and outside black exactly. With one, every pixel black or white
+bool runMsaa(Device& device) {
+    const char* stage = "msaa";
+    const float tri[12] = {-0.5f, -0.5f, 0, 1, 0.5f, -0.5f, 0, 1, 0, 0.5f, 0, 1};
+    DrawInput in = colorDraw(tri, kWhite12, 3);
+    in.sampleCount = 4;
+    Frame f4 = drawFrame(device, {{&hm_color, in}});
+    in.sampleCount = 1;
+    Frame f1 = drawFrame(device, {{&hm_color, in}});
+    if (!f4.bo || !f1.bo) return verdict(stage, false, f4.why + f1.why);
+    const float vx[3] = {16, 48, 32}, vy[3] = {16, 16, 48};
+    unsigned inside = 0, insideOk = 0, outside = 0, outsideOk = 0, partial = 0, partialQuarters = 0, partial1 = 0;
+    unsigned levels[5] = {};
+    for (uint32_t y = 0; f4.pass && f1.pass && y < 64; y++) {
+        for (uint32_t x = 0; x < 64; x++) {
+            const uint8_t* q = f4.px(x, y);
+            int side = sideOf(x + 0.5f, y + 0.5f, vx, vy, 1.0f);
+            if (side > 0) inside++, insideOk += samePixel(q, kWhitePx);
+            if (side < 0) outside++, outsideOk += samePixel(q, kBlackPx);
+            if (q[0] != 0 && q[0] != 255) {
+                partial++;
+                for (int l = 1; l < 4; l++) {
+                    if (std::abs(q[0] - 255 * l / 4) <= 2 || std::abs(q[0] - (255 * l + 3) / 4) <= 2) {
+                        partialQuarters++, levels[l]++;
+                        break;
+                    }
+                }
+            }
+            const uint8_t* p1 = f1.px(x, y);
+            partial1 += p1[0] != 0 && p1[0] != 255;
+        }
+    }
+    char d[400];
+    snprintf(d, sizeof(d), "4x: %s; inside %u of %u white, outside %u of %u black, %u edge pixels between (%u in quarters: "
+             "%u at 1/4, %u at 2/4, %u at 3/4); 1x: %s, %u pixels between", jobsText(f4).c_str(), insideOk, inside, outsideOk,
+             outside, partial, partialQuarters, levels[1], levels[2], levels[3], jobsText(f1).c_str(), partial1);
+    return finish(stage, {&f4, &f1}, insideOk == inside && outsideOk == outside && inside > 300 && partial >= 40 &&
+                                         partialQuarters == partial && partial1 == 0, d);
+}
+
 // The fixed list of what a Metal backend for this GPU has to do (README "Capabilities"): each one counted only when
 // every stage named for it said PASS in this run; those with no stage are not done yet
 struct Capability {
@@ -1477,7 +1520,7 @@ void capabilities() {
         {"mipmaps", {"mipmaps"}},
         {"more pixel formats: R8, RG8", {"formats"}},
         {"render to a texture, then sample it", {"render-to-texture"}},
-        {"multisampling", {}},
+        {"multisampling", {"msaa"}},
         {"stencil", {"stencil"}},
         {"scissor and viewport from the API", {"viewport-scissor"}},
         {"culling and winding", {"cull"}},
@@ -2374,6 +2417,7 @@ int main(int argc, char** argv) {
         runAppleRender(device);
         runVertexDescriptor(device);
         runArgumentBuffer(device);
+        runMsaa(device);
         runDepth(device, false);
         runDepth(device, true);
         runCompiler(device);

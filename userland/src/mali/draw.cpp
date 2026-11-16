@@ -14,7 +14,8 @@ namespace hakios::mali {
 // and its tiler job VINDEX + 1, depending on the vertex job and (pan_jc_add_job: tiler jobs are chained) on the tiler
 // job PREV_TILER before it, NEXT after it in the chain. 0, or the reason the draw cannot be written.
 static std::string writeDraw(Device& device, const Target& t, const hm_program& p, const DrawInput& in, uint8_t* cpu,
-                             uint64_t gpu, uint64_t tilerCtx, unsigned vIndex, unsigned prevTiler, uint64_t next) {
+                             uint64_t gpu, uint64_t tilerCtx, unsigned vIndex, unsigned prevTiler, uint64_t next,
+                             unsigned frameSamples) {
     auto no = [&p](const std::string& s) { return std::string(p.name) + ": " + s; };
     const struct hm_v7_sizes* sz = hm_v7_sizes();
     const bool bgra = t.format == Format::BGRA8Unorm;
@@ -152,6 +153,10 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
     if (in.zs != nullptr) {
         const char* bad = nullptr;
         if (hm_v7_renderer_state_zs(rsd, in.zs, &bad) != 0) return no(std::string("the depth and stencil state: ") + bad);
+    }
+    if (frameSamples > 1) {
+        const char* bad = nullptr;
+        if (hm_v7_renderer_state_multisample(rsd, true, &bad) != 0) return no(std::string("multisampling: ") + bad);
     }
     rsd[0] |= static_cast<uint32_t>(gpu + kFsCode);
     rsd[1] |= static_cast<uint32_t>((gpu + kFsCode) >> 32);
@@ -379,22 +384,26 @@ std::unique_ptr<DrawPass> DrawPass::makeMany(Device& device, const Target& t,
         uint64_t next = i + 1 < draws.size() ? gpu + (i + 1) * kSize + kVertexJob : 0;
         unsigned vIndex = static_cast<unsigned>(2 * i + 1);
         std::string e = writeDraw(device, t, *draws[i].first, draws[i].second, cpu + i * kSize, gpu + i * kSize,
-                                  gpu + kTilerCtx, vIndex, i ? vIndex - 1 : 0, next);
+                                  gpu + kTilerCtx, vIndex, i ? vIndex - 1 : 0, next, draws[0].second.sampleCount);
         if (!e.empty()) return no("draw " + std::to_string(i) + ", " + e);
     }
     const DrawInput& in = draws[0].second;
+    if (in.sampleCount != 1 && in.sampleCount != 4) return no("a sample count of 1 or 4");
     hm_v7_tiler_heap(cpu + kHeapDesc, pass->heap_->gpu(), static_cast<uint32_t>(pass->heap_->size()));
-    hm_v7_tiler_context(cpu + kTilerCtx, gpu + kHeapDesc, t.width, t.height,
-                        hm_v7_hierarchy_mask(t.width, t.height, device.tilerLevels()));
+    const unsigned samples = in.sampleCount;
+    hm_v7_tiler_context_samples(cpu + kTilerCtx, gpu + kHeapDesc, t.width, t.height,
+                                hm_v7_hierarchy_mask(t.width, t.height, device.tilerLevels()), samples);
 
     struct hm_v7_fb fb = {};
     fb.width = t.width;
     fb.height = t.height;
     fb.bound_max_x = t.width - 1;
     fb.bound_max_y = t.height - 1;
-    fb.sample_locations = device.samplePositions().gpu();
+    fb.sample_locations = device.samplePositions().gpu() + hm_v7_sample_pattern_offset(samples);
+    fb.samples = samples;
     fb.tiler = gpu + kTilerCtx;
-    hm_v7_tile_size(4, device.tileBufferBudget(), &fb.tile_size, &fb.cbuf_allocation);
+    // pan_select_tile_size: the tile buffer's bytes a pixel times the samples
+    hm_v7_tile_size(4 * (samples > 1 ? samples : 1), device.tileBufferBudget(), &fb.tile_size, &fb.cbuf_allocation);
     fb.rt_count = 1;
     fb.z_clear = 1.0f;
     fb.s_clear = in.stencilClear;
@@ -406,6 +415,7 @@ std::unique_ptr<DrawPass> DrawPass::makeMany(Device& device, const Target& t,
     rt.clear = true;
     rt.clean_pixel_write = true;
     rt.dithering = true;
+    rt.msaa_resolve = samples > 1;
     hm_v7_pack_clear_rgba8(in.clear, rt.clear_words);
     const char* refused = nullptr;
     uint64_t fbd = hm_v7_framebuffer(cpu + kFbd, gpu + kFbd, &fb, &rt, &refused);

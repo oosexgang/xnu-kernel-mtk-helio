@@ -469,6 +469,19 @@ int main() {
     testBuffers();
     testZs();
     testFormats();
+    {
+        // pan_samples.c by hand: the single-sampled entry's position 0 and origin (128, 128); ROTATED_4X_GRID at
+        // pattern 2's 512 bytes, SAMPLE8(-1,-3) = SAMPLE16(-2,-6) = (96, 32), SAMPLE8(3,-1) = (224, 96), SAMPLE8(-3,1) = (32, 160),
+        // SAMPLE8(1,3) = (160, 224), origin (128, 128)
+        uint16_t t[HM_V7_SAMPLE_POSITIONS_SIZE / 2];
+        hm_v7_sample_positions_table(t);
+        CHECK(t[0] == 128 && t[1] == 128 && t[64] == 128 && t[65] == 128, "single-sampled entry");
+        CHECK(hm_v7_sample_pattern_offset(4) == 512 && hm_v7_sample_pattern_offset(1) == 0, "pattern offsets");
+        const uint16_t* r = t + 256;
+        CHECK(r[0] == 96 && r[1] == 32 && r[2] == 224 && r[3] == 96 && r[4] == 32 && r[5] == 160 && r[6] == 160 &&
+              r[7] == 224 && r[64] == 128 && r[65] == 128 && r[8] == 0, "rotated 4x entry %u,%u %u,%u %u,%u %u,%u",
+              r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]);
+    }
     printf("host_test: %d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;
 }
