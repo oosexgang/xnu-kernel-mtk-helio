@@ -120,7 +120,7 @@ main(int argc, char **argv)
 	program("color");
 	program("tex");
 	program("inst");
-	for (const char **name = (const char *[]){ "fill", "share", "copy", "copy2d", NULL }; *name; name++) {
+	for (const char **name = (const char *[]){ "fill", "share", "copy", "copy2d", "argbuf", NULL }; *name; name++) {
 		if (hm_compile_kernel(*name, GPU_ID, &k, why, sizeof(why)) != 0) {
 			fprintf(stderr, "bishaders: %s\n", why);
 			return 1;
@@ -145,6 +145,18 @@ main(int argc, char **argv)
 		}
 		fprintf(out, "\t{ \"%s\", %u, %u, 0x%03x, 0x%08x, 0x%08x },\n", f.name, f.rt_internal, f.rt_writeback,
 		    f.rt_swizzle, f.blend_memory_format, f.texture_format);
+	}
+	fprintf(out, "};\n");
+	fprintf(out, "\n/* vertex formats (MTLVertexFormat): the attribute's format word, its size */\n"
+	    "static const struct hm_vertex_format { const char *name; uint32_t format, size; } hm_vertex_formats[5] = {\n");
+	for (const char **name = (const char *[]){ "Float2", "Float3", "Float4", "UChar4Normalized", "Half4", NULL }; *name;
+	    name++) {
+		uint32_t fmt, size;
+		if (hm_compile_vertex_format(*name, &fmt, &size) != 0) {
+			fprintf(stderr, "bishaders: no vertex format %s\n", *name);
+			return 1;
+		}
+		fprintf(out, "\t{ \"%s\", 0x%08x, %u },\n", *name, fmt, size);
 	}
 	fprintf(out, "};\n");
 	fprintf(out, "\n/* textures: RGBA8Unorm's format word and the identity swizzle */\n"

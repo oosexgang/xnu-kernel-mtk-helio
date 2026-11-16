@@ -49,6 +49,9 @@ int hm_compile_air_program(const void *lib, size_t size, const char *vs, const c
 /* function ENTRY of LIB translated to NIR and described on FP: its stage, resources, varyings, vertex attributes,
  * render targets, and the NIR itself. 0, or -1 with WHY */
 int hm_air_describe(const void *lib, size_t size, const char *entry, void *fp, char *why, size_t why_size);
+/* every function of LIB whose resources include an argument buffer's members: its name, stage and those members
+ * (set, id, kind, the flat index the frontend gave them) on FP; how many functions */
+int hm_air_argbuf_functions(const void *lib, size_t size, void *fp);
 /* the names of the compute functions of the .metallib LIB, NUL-separated into NAMES (at most SIZE bytes): how many */
 int hm_air_kernels(const void *lib, size_t size, char *names, size_t names_size);
 
@@ -57,6 +60,9 @@ int hm_compile_format(const char *name, struct hm_format *out);
 
 /* RGBA8Unorm's texture format word and the identity swizzle (GENX(panfrost_new_texture)) */
 uint32_t hm_compile_texture_format_rgba8(void);
+/* a vertex attribute's format word (GENX(panfrost_format_from_pipe_format), as panfrost_emit_vertex_data writes it)
+ * for MTLVertexFormat NAME (Float2, Float3, Float4, UChar4Normalized, Half4) and its size in bytes: 0, or -1 */
+int hm_compile_vertex_format(const char *name, uint32_t *format, uint32_t *size);
 uint32_t hm_compile_swizzle_identity(void);
 
 #ifdef __cplusplus

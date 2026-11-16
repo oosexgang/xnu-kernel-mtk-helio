@@ -23,6 +23,9 @@ main(int argc, char **argv)
 	if (fread(lib, 1, size, f) != (size_t)size) return 1;
 	fclose(f);
 	hm_compile_init();
+	if (argc == 3 && strcmp(argv[2], "--argbufs") == 0) {
+		return hm_air_argbuf_functions(lib, size, stdout) > 0 ? 0 : 1;
+	}
 	if (argc == 5 && strcmp(argv[2], "--program") == 0) {
 		struct hm_program p;
 		uint32_t dev = 0;

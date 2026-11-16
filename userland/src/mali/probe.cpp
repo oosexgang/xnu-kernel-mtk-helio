@@ -1350,6 +1350,97 @@ bool runAppleRender(Device& device) {
 #endif
 }
 
+// A vertex descriptor (MTLVertexDescriptor): the varyings triangle's position as Float2 at offset 0 and its colour as
+// UChar4Normalized at offset 8 of one interleaved buffer, 12 bytes a vertex; the hardware widens both (z 0, w 1 for
+// the position): the same picture as the varyings stage, every pixel within 2/255
+bool runVertexDescriptor(Device& device) {
+    const char* stage = "vertex-descriptor";
+    struct V { float x, y; uint8_t c[4]; } verts[3] = {
+        {-0.5f, -0.5f, {255, 0, 0, 255}}, {0.5f, -0.5f, {0, 255, 0, 255}}, {0.0f, 0.5f, {0, 0, 255, 255}}};
+    static_assert(sizeof(V) == 12, "12 bytes a vertex");
+    DrawInput in;
+    in.vertexCount = 3;
+    in.uniforms = kOne4;
+    in.uniformSize = 16;
+    in.vertexLayout.set = true;
+    in.vertexLayout.data = verts;
+    in.vertexLayout.stride = 12;
+    in.vertexLayout.format[0] = 0, in.vertexLayout.offset[0] = 0;      // Float2
+    in.vertexLayout.format[1] = 3, in.vertexLayout.offset[1] = 8;      // UChar4Normalized
+    Frame f = drawFrame(device, {{&hm_color, in}});
+    if (!f.bo) return verdict(stage, false, f.why);
+    const float vx[3] = {16, 48, 32}, vy[3] = {16, 16, 48};
+    float area = (vx[1] - vx[0]) * (vy[2] - vy[0]) - (vx[2] - vx[0]) * (vy[1] - vy[0]);
+    unsigned in1 = 0, ok1 = 0, out1 = 0, ok2 = 0;
+    for (uint32_t y = 0; f.pass && y < 64; y++) {
+        for (uint32_t x = 0; x < 64; x++) {
+            int side = sideOf(x + 0.5f, y + 0.5f, vx, vy, 1.0f);
+            if (side > 0) {
+                float b[3];
+                for (int k = 0; k < 3; k++) {
+                    int i = (k + 1) % 3, j = (k + 2) % 3;
+                    b[k] = ((vx[j] - vx[i]) * (y + 0.5f - vy[i]) - (x + 0.5f - vx[i]) * (vy[j] - vy[i])) / area;
+                }
+                uint8_t want[4] = {unorm8(b[0]), unorm8(b[1]), unorm8(b[2]), 255};
+                in1++, ok1 += samePixel(f.px(x, y), want, 2);
+            } else if (side < 0) {
+                out1++, ok2 += samePixel(f.px(x, y), kBlackPx);
+            }
+        }
+    }
+    const uint8_t* mid = f.pass ? f.px(32, 26) : kBlackPx;
+    char d[300];
+    snprintf(d, sizeof(d), "%s; inside %u of %u the interpolated colour, outside %u of %u black; (32,26) %02x%02x%02x%02x",
+             jobsText(f).c_str(), ok1, in1, ok2, out1, mid[0], mid[1], mid[2], mid[3]);
+    return finish(stage, {&f}, in1 > 300 && ok1 == in1 && ok2 == out1, d);
+}
+
+// An argument buffer as Metal 3 has them: a buffer holding the GPU addresses of two other buffers (gpuAddress) and two
+// values, which the argbuf kernel reads and follows -- dst[i] = src[i] + add for i < count; 200 words, the canary after
+bool runArgumentBuffer(Device& device) {
+    const char* stage = "argument-buffer";
+    std::string why;
+    auto args = device.gpu().newBo(4096, &why);
+    auto src = args ? device.gpu().newBo(4096, &why) : nullptr;
+    auto dst = src ? device.gpu().newBo(4096, &why) : nullptr;
+    if (!dst) return verdict(stage, false, why);
+    uint32_t* in = reinterpret_cast<uint32_t*>(src->cpu());
+    for (unsigned i = 0; i < 1024; i++) in[i] = 0x01000193u * (i + 3);
+    memset(dst->cpu(), kCanary, dst->size());
+    const unsigned count = 200;
+    const uint32_t add = 0x1234;
+    uint64_t a = src->gpu(), b = dst->gpu();
+    memcpy(args->cpu(), &a, 8);
+    memcpy(args->cpu() + 8, &b, 8);
+    memcpy(args->cpu() + 16, &count, 4);
+    memcpy(args->cpu() + 20, &add, 4);
+    uint32_t u[4] = {static_cast<uint32_t>(args->gpu()), static_cast<uint32_t>(args->gpu() >> 32), 0, 0};
+    const unsigned groups[3] = {(count + 63) / 64, 1, 1};
+    auto pass = ComputePass::make(device, hm_argbuf, groups, u, sizeof(u), &why);
+    if (!pass) return verdict(stage, false, "refused: " + why);
+    Submission sub;
+    int e = pass->submit({dst.get(), args.get(), src.get()}, &sub);
+    if (e == 0) e = device.gpu().wait(sub, 2000000);
+    const uint32_t* w = reinterpret_cast<const uint32_t*>(dst->cpu());
+    unsigned right = 0, kept = 0;
+    for (unsigned i = 0; i < count; i++) right += w[i] == in[i] + add;
+    for (unsigned i = count; i < dst->size() / 4; i++) kept += w[i] == 0xa5a5a5a5u;
+    char d[200];
+    snprintf(d, sizeof(d), "job %s%s%s; %u of %u words src + 0x1234 through the argument buffer's addresses, canary %u of %llu kept",
+             statusText(pass->status()).c_str(), e ? ", " : "", e ? strerror(e) : "", right, count, kept,
+             (unsigned long long)(dst->size() / 4 - count));
+    bool job = e == 0 && (pass->status() & 0xff) == 1;
+    if (gFake) {
+        say("%s MEASURE (the fake GPU runs no shader: %s) %s", stage, job ? "job accepted" : "job REFUSED", d);
+        if (!job) gFailed++;
+        return job;
+    }
+    bool ok = job && right == count && kept == dst->size() / 4 - count;
+    verdict(stage, ok, d);
+    if (!ok || gDump) pass->dump(stdout);
+    return ok;
+}
+
 // The fixed list of what a Metal backend for this GPU has to do (README "Capabilities"): each one counted only when
 // every stage named for it said PASS in this run; those with no stage are not done yet
 struct Capability {
@@ -1391,7 +1482,7 @@ void capabilities() {
         {"scissor and viewport from the API", {"viewport-scissor"}},
         {"culling and winding", {"cull"}},
         {"instanced draws", {"instanced"}},
-        {"vertex descriptors and argument buffers", {}},
+        {"vertex descriptors and argument buffers", {"vertex-descriptor", "argument-buffer"}},
         {"Apple vertex and fragment functions (AIR)", {"apple-render"}},
         {"blit: textures, generateMipmaps", {"blit-texture", "generate-mipmaps"}},
         {"presenting to the panel (CAMetalLayer)", {}},
@@ -2281,6 +2372,8 @@ int main(int argc, char** argv) {
         runBlitTexture(device);
         runGenerateMipmaps(device);
         runAppleRender(device);
+        runVertexDescriptor(device);
+        runArgumentBuffer(device);
         runDepth(device, false);
         runDepth(device, true);
         runCompiler(device);

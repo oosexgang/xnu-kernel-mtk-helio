@@ -383,12 +383,43 @@ static const struct hm_push_word hm_copy2d_cs_push[8] = {
 };
 static const struct hm_kernel hm_copy2d = { "copy2d", hm_copy2d_cs_code, 256, hm_copy2d_cs_rsd, hm_copy2d_cs_push, 8, { 64, 1, 1 }, 0, 32, 1, 0 };
 
+/* --- argbuf: compute shader 304 bytes, 32 work registers, 0 bytes of threadgroup memory --- */
+static const uint32_t hm_argbuf_cs_code[76] = {
+	0x00004029, 0x80cb1844, 0xc00765b7, 0x29400808, 0x00008025, 0x80cb185c, 0x040718f3, 0x58c16000,
+	0x000080ab, 0x80cb185c, 0xe03718bf, 0x0001b2bc, 0x00000053, 0x80cb1858, 0x000039e3, 0x00000010,
+	0x0000002b, 0x80cb1c78, 0x8006da23, 0x01400840, 0x00008023, 0x80cb182c, 0x000041b3, 0x58c2c000,
+	0x00000044, 0x00000000, 0xe0300000, 0x6000f928, 0x2000402d, 0x8b8acc78, 0xc0071861, 0x31400848,
+	0x20060023, 0x80cb1878, 0x0006cae3, 0x58c2c180, 0x60000005, 0x80cb1858, 0xe03031e3, 0xac01c607,
+	0x00000072, 0x00000020, 0x00000000, 0x00000000, 0x0000002d, 0x80cb1c08, 0x00071807, 0x01800020,
+	0x40000023, 0x80cb1828, 0x0006cae3, 0x58c2c280, 0x10c30001, 0x80cb1a84, 0xe0371807, 0xb401c607,
+	0x00410063, 0x80cb1a86, 0x0000b123, 0x58c2e000, 0x00000046, 0x00000000, 0xe0300000, 0x6000ff34,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000,
+};
+static const uint32_t hm_argbuf_cs_rsd[16] = {
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00002001, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00009000, 0x00000000, 0x00000000, 0x00000000,
+};
+static const struct hm_push_word hm_argbuf_cs_push[2] = {
+	{ 0, 0 }, { 0, 4 },
+};
+static const struct hm_kernel hm_argbuf = { "argbuf", hm_argbuf_cs_code, 304, hm_argbuf_cs_rsd, hm_argbuf_cs_push, 2, { 64, 1, 1 }, 0, 32, 1, 0 };
+
 /* colour formats (pan_format.c, pan_prepare_rt, panfrost_emit_blend, panfrost_new_texture) */
 static const struct hm_format hm_formats[4] = {
 	{ "RGBA8Unorm", 1, 19, 0x688, 0x000ed000, 0x000bb000 },
 	{ "BGRA8Unorm", 1, 19, 0x60a, 0x000ed000, 0x000bb004 },
 	{ "R8Unorm", 1, 16, 0x920, 0x000ed000, 0x000a3010 },
 	{ "RG8Unorm", 1, 17, 0x908, 0x000ed000, 0x000ab010 },
+};
+
+/* vertex formats (MTLVertexFormat): the attribute's format word, its size */
+static const struct hm_vertex_format { const char *name; uint32_t format, size; } hm_vertex_formats[5] = {
+	{ "Float2", 0x000af010, 8 },
+	{ "Float3", 0x000b7010, 12 },
+	{ "Float4", 0x000bf000, 16 },
+	{ "UChar4Normalized", 0x000bb000, 4 },
+	{ "Half4", 0x000df000, 8 },
 };
 
 /* textures: RGBA8Unorm's format word and the identity swizzle */

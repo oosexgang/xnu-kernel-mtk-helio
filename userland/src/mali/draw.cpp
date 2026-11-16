@@ -51,7 +51,18 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
     const uint32_t shaded = padded * in.instanceCount;
     auto elements = [&](uint32_t a) { return (in.perInstance >> a & 1) ? in.instanceCount : in.vertexCount; };
     uint32_t vertexBytes = 0;
-    for (uint32_t a = 0; a < p.attribute_count; a++) {
+    const DrawInput::VertexLayout& vl = in.vertexLayout;
+    if (vl.set) {
+        if (instanced) return no("a vertex descriptor with instances (not served yet)");
+        if (vl.data == nullptr || vl.stride == 0 || vl.stride > 256 || (vl.stride & 3) != 0)
+            return no("a vertex descriptor's buffer and a stride of 4 to 256 bytes, a multiple of 4");
+        for (uint32_t a = 0; a < p.attribute_count; a++) {
+            if (vl.format[a] >= 5 || vl.offset[a] + hm_vertex_formats[vl.format[a]].size > vl.stride)
+                return no("attribute " + std::to_string(a) + ": a vertex format not known here, or past the stride");
+        }
+        if (static_cast<uint64_t>(vl.stride) * in.vertexCount > kGeneral - kVertices) return no("the vertices do not fit");
+    }
+    for (uint32_t a = 0; !vl.set && a < p.attribute_count; a++) {
         if (in.attributes[a] == nullptr) return no("attribute " + std::to_string(a) + " has no data");
         vertexBytes += (p.attribute_sizes[a] * elements(a) + 63) & ~63u;
         for (uint32_t i = 0; i < p.attribute_sizes[a] / 4 * elements(a); i++) {
@@ -153,7 +164,18 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
     // continuation record, and such a pair starts at an even record -- panfrost_emit_vertex_data)
     uint64_t at = kVertices;
     unsigned k = 0;
-    for (uint32_t a = 0; a < p.attribute_count; a++) {
+    if (vl.set) {
+        // one buffer, each attribute a record into it at its offset in its format
+        uint32_t bytes = vl.stride * in.vertexCount;
+        memcpy(cpu + at, vl.data, bytes);
+        hm_v7_attribute_buffer(cpu + kAttributeBuffers, gpu + at, vl.stride, bytes);
+        for (uint32_t a = 0; a < p.attribute_count; a++) {
+            hm_v7_attribute(cpu + kAttributes + a * sz->attribute, 0, hm_vertex_formats[vl.format[a]].format,
+                            static_cast<int32_t>(vl.offset[a]), true);
+        }
+        k = 1;
+    }
+    for (uint32_t a = 0; !vl.set && a < p.attribute_count; a++) {
         uint32_t bytes = p.attribute_sizes[a] * elements(a);
         memcpy(cpu + at, in.attributes[a], bytes);
         uint8_t* rec;

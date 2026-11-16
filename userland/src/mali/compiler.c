@@ -592,9 +592,66 @@ copy2d_kernel(unsigned gpu_id, struct hm_kernel *out)
 	return 0;
 }
 
+/* argbuf: an argument buffer as Metal 3 has them -- a buffer holding other buffers' GPU addresses (MTLBuffer gpuAddress)
+ * and values, which the kernel reads and follows: uniform buffer 0 words 0, 1 the argument buffer's address; in it,
+ * bytes 0..7 the source's address, 8..15 the destination's, 16 the count, 20 a value to add; dst[gid] = src[gid] + add
+ * for gid < count, 64 threads a workgroup */
+static int
+argbuf_kernel(unsigned gpu_id, struct hm_kernel *out)
+{
+	nir_builder c = shader(MESA_SHADER_COMPUTE, "argbuf_cs");
+	c.shader->info.workgroup_size[0] = 64;
+	c.shader->info.workgroup_size[1] = 1;
+	c.shader->info.workgroup_size[2] = 1;
+	c.shader->info.num_ubos = 1;
+	c.shader->info.first_ubo_is_default_ubo = true;
+	nir_def *gid = nir_channel(&c, nir_load_global_invocation_id(&c, 32), 0);
+	nir_def *u = nir_load_ubo(&c, 2, 32, nir_imm_int(&c, 0), nir_imm_int(&c, 0), .align_mul = 16, .align_offset = 0,
+	    .range_base = 0, .range = 8);
+	nir_def *ab = nir_pack_64_2x32_split(&c, nir_channel(&c, u, 0), nir_channel(&c, u, 1));
+	nir_def *args = nir_load_global(&c, ab, 8, 4, 32);
+	nir_def *tail = nir_load_global(&c, nir_iadd_imm(&c, ab, 16), 8, 2, 32);
+	nir_def *count = nir_channel(&c, tail, 0), *add = nir_channel(&c, tail, 1);
+	nir_push_if(&c, nir_ult(&c, gid, count));
+	{
+		nir_def *off = nir_u2u64(&c, nir_imul_imm(&c, gid, 4));
+		nir_def *src = nir_iadd(&c, nir_pack_64_2x32_split(&c, nir_channel(&c, args, 0), nir_channel(&c, args, 1)), off);
+		nir_def *dst = nir_iadd(&c, nir_pack_64_2x32_split(&c, nir_channel(&c, args, 2), nir_channel(&c, args, 3)), off);
+		nir_store_global(&c, dst, 4, nir_iadd(&c, nir_load_global(&c, src, 4, 1, 32), add), 0x1);
+	}
+	nir_pop_if(&c, NULL);
+	NIR_PASS(_, c.shader, nir_lower_compute_system_values, NULL);
+
+	struct util_dynarray bin;
+	struct pan_shader_info cs;
+	compile(c.shader, gpu_id, &bin, &cs);
+	struct mali_renderer_state_packed rsd;
+	pan_pack(&rsd, RENDERER_STATE, cfg) {
+		pan_shader_prepare_rsd(&cs, 0, &cfg);
+	}
+	memset(out, 0, sizeof(*out));
+	out->name = "argbuf";
+	out->code = copy(bin.data, bin.size);
+	out->size = bin.size;
+	out->rsd = copy(rsd.opaque, 64);
+	out->push = push_table(&cs);
+	out->push_count = cs.push.count;
+	out->local[0] = 64, out->local[1] = 1, out->local[2] = 1;
+	out->tls_size = cs.tls_size;
+	out->work_registers = cs.work_reg_count;
+	out->ubo_count = cs.ubo_count;
+	out->wls_size = cs.wls_size;
+	util_dynarray_fini(&bin);
+	ralloc_free(c.shader);
+	return 0;
+}
+
 int
 hm_compile_kernel(const char *name, unsigned gpu_id, struct hm_kernel *out, char *why, size_t why_size)
 {
+	if (strcmp(name, "argbuf") == 0) {
+		return argbuf_kernel(gpu_id, out);
+	}
 	if (strcmp(name, "copy2d") == 0) {
 		return copy2d_kernel(gpu_id, out);
 	}
@@ -656,6 +713,24 @@ hm_kernel_free(struct hm_kernel *k)
 {
 	free((void *)k->code); free((void *)k->rsd); free((void *)k->push);
 	memset(k, 0, sizeof(*k));
+}
+
+int
+hm_compile_vertex_format(const char *name, uint32_t *format, uint32_t *size)
+{
+	static const struct { const char *name; enum pipe_format f; } formats[] = {
+		{ "Float2", PIPE_FORMAT_R32G32_FLOAT }, { "Float3", PIPE_FORMAT_R32G32B32_FLOAT },
+		{ "Float4", PIPE_FORMAT_R32G32B32A32_FLOAT }, { "UChar4Normalized", PIPE_FORMAT_R8G8B8A8_UNORM },
+		{ "Half4", PIPE_FORMAT_R16G16B16A16_FLOAT },
+	};
+	for (unsigned i = 0; i < sizeof(formats) / sizeof(formats[0]); i++) {
+		if (strcmp(name, formats[i].name) == 0) {
+			*format = GENX(panfrost_format_from_pipe_format)(formats[i].f)->hw;
+			*size = util_format_get_blocksize(formats[i].f);
+			return 0;
+		}
+	}
+	return -1;
 }
 
 uint32_t
@@ -944,6 +1019,45 @@ hm_air_describe(const void *lib, size_t size, const char *entry, void *fp, char 
 	nir_print_shader(s, out);
 	ralloc_free(mem);
 	return 0;
+}
+
+int
+hm_air_argbuf_functions(const void *lib, size_t size, void *fp)
+{
+	FILE *out = fp;
+	void *mem = ralloc_context(NULL);
+	struct air_metallib ml;
+	const char *err = NULL;
+	int count = 0;
+
+	if (!air_metallib_parse(mem, lib, size, &ml, &err)) {
+		ralloc_free(mem);
+		return -1;
+	}
+	for (unsigned i = 0; i < ml.num_functions; i++) {
+		void *fmem = ralloc_context(mem);
+		struct air_shader_info info;
+		nir_shader *s = air_to_nir(fmem, ml.functions[i].bitcode, ml.functions[i].bitcode_size, NULL, NULL,
+		    GENX(pan_shader_get_compiler_options)(), &info, &err);
+		bool any = false;
+		for (unsigned r = 0; s != NULL && r < info.num_resources; r++) {
+			const struct air_resource *res = &info.resources[r];
+			if (res->argbuf_set == ~0u) continue;
+			if (!any) {
+				fprintf(out, "%s (%s):", ml.functions[i].name, gl_shader_stage_name(s->info.stage));
+				any = true;
+			}
+			fprintf(out, " [set %u id %u kind %d index %u%s %s]", res->argbuf_set, res->argbuf_id, res->kind, res->index,
+			    res->unused ? " unused" : "", res->type_name ? res->type_name : "");
+		}
+		if (any) {
+			fprintf(out, "\n");
+			count++;
+		}
+		ralloc_free(fmem);
+	}
+	ralloc_free(mem);
+	return count;
 }
 
 int

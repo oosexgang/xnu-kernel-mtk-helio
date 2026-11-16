@@ -74,6 +74,16 @@ struct DrawInput {
     uint32_t perInstance = 0;
     // an Apple vertex function's device buffers (hm_compile_air_program): buffer n at deviceBuffers[n] +
     // deviceOffsets[n], its address in uniform buffer 15 (HM_AIR_SYSVAL_UBO, 8 bytes an index)
+    // MTLVertexDescriptor: the attributes out of one interleaved buffer of VERTEX_COUNT elements STRIDE bytes apart,
+    // attribute a at OFFSET[a] in FORMAT[a] (an index of hm_vertex_formats: Float2, Float3, Float4, UChar4Normalized,
+    // Half4), converted to the shader's floats by the hardware (panfrost_emit_vertex_data); attributes[] unused
+    struct VertexLayout {
+        bool set = false;
+        const void* data = nullptr;
+        uint32_t stride = 0;
+        uint32_t format[4] = {2, 2, 2, 2};
+        uint32_t offset[4] = {};
+    } vertexLayout;
     static constexpr uint32_t kMaxDeviceBuffers = 8;
     const Bo* deviceBuffers[kMaxDeviceBuffers] = {};
     uint64_t deviceOffsets[kMaxDeviceBuffers] = {};
