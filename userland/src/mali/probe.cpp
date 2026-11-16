@@ -935,7 +935,7 @@ bool runInstanced(Device& device) {
     snprintf(d, sizeof(d), "triangles: %s; inside the 4 instances %u of %u their colour, elsewhere %u of %u black; lines: %s; "
              "%u of %u on the 3 instances' rows their colour, %u pixels drawn (96 for three lines of 32)",
              jobsText(fa).c_str(), inOk, in, outOk, out, jobsText(fb).c_str(), onLineOk, onLine, drawnB);
-    return finish(stage, {&fa, &fb}, in > 200 && inOk == in && outOk == out && onLineOk == onLine && drawnB == 96, d);
+    return finish(stage, {&fa, &fb}, in >= 120 && inOk == in && outOk == out && onLineOk == onLine && drawnB == 96, d);
 }
 
 // More pixel formats, R8Unorm and RG8Unorm (pan_format.c: R8G8B8A8 in the tile buffer, written back as R8 or R8G8):

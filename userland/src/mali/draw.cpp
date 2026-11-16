@@ -291,7 +291,10 @@ static std::string writeDraw(Device& device, const Target& t, const hm_program& 
     fragment.samplers = p.sampler_count ? gpu + kSampler : 0;
     fragment.cull_front = in.cull == DrawInput::Cull::Front;
     fragment.cull_back = in.cull == DrawInput::Cull::Back;
-    fragment.front_ccw = in.frontCCW;
+    // the hardware's winding is the target's with row 0 at the top (run 515: CCW front kept the triangle that is
+    // clockwise in NDC); here row 0 is NDC y -1, so the API's winding, which is NDC's, is the other one -- as the state
+    // tracker turns rast->front_ccw over for a framebuffer whose y is the other way (st_update_rasterizer)
+    fragment.front_ccw = !in.frontCCW;
     fragment.instance_count = in.instanceCount;
     fragment.padded_count = padded;
     if (in.indices != nullptr) {

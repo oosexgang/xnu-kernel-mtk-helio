@@ -63,6 +63,15 @@ Runs 500 to 502, the 27 release with `mali=1 metal=1`, `mali-probe` as launchd's
 - Run 513: `blit` (the `copy` kernel: 200 of 200 words, the canary after them kept), `lines` (two lines of width 1:
   58 of 58 pixels judged right, 64 drawn in all, 32 a line, nothing else) and `points` (four of size 1: exactly their
   four pixels). 39 of 39 stages; **capabilities 23 of 37 measured (62%)**.
+- Run 515: `texture-linear` (bilinear exactly: largest difference 0), `render-to-texture` (4096 of 4096), `stencil`
+  (420 of 420 inside the marked triangle, nothing outside), `viewport-scissor`, `formats` (R8 and RG8 targets and
+  textures), `mipmaps` (each level where its LOD puts it, and the LOD clamp), `blit-texture` (777 of 777 texels, nothing
+  outside touched), `generate-mipmaps` (every texel of five levels the 2x2 average of the level before within 1), and
+  **`apple-render`: Apple's own render pipeline, ARKitCore's `resample_v` and `resample_f`, compiled on the phone from
+  the `.metallib` by the AIR frontend and Bifrost in 3.4 ms and drawn right, every pixel**. `cull` showed the hardware's
+  winding is the one with row 0 at the top (here NDC y -1 is row 0, so the API's flag is turned over: draw.cpp), and
+  `instanced` was right but judged with a threshold the four small triangles do not reach (160 pixels); both changed.
+  48 of 50 stages; **capabilities 31 of 37 measured (83%)**.
 
 ## Capabilities: how far along
 
