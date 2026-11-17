@@ -883,7 +883,17 @@ struct ptr {
 	uint64_t gpu;
 };
 
+struct region {
+	const char *name;
+	uint64_t gpu;
+	uint32_t size;
+};
+
 struct batch {
+	/* what the frame's descriptors are, by name: a refused fragment job's fault pointer is told against them */
+	struct region region[24];
+	unsigned nregion;
+	bool always;   /* the frame shader ALWAYS, not INTERSECT */
 	struct km_bo *chunks[512];
 	unsigned nchunks;
 	uint64_t chunk_used;
@@ -933,12 +943,21 @@ static struct {
 	uint64_t seq;
 	char what[400];
 	unsigned flags;
+	struct region region[24];
+	unsigned nregion;
 } ring_slot[RING];
+
+static void
+note(struct batch *b, const char *name, uint64_t gpu, uint64_t size)
+{
+	if (b->nregion < ARRAY_SIZE(b->region) && gpu != 0)
+		b->region[b->nregion++] = (struct region){ name, gpu, (uint32_t)size };
+}
 /* what a pass has, for counting which of them the GPU refuses */
 enum { F_LOAD_RAW = 1, F_LOAD_BLEND = 2, F_TEX_MIP = 4, F_TEX_F16 = 8, F_CLEAR_ONLY = 16, F_RAW_TARGET = 32,
        F_TEX_SURFACE = 64, F_RAW_A = 128, F_RAW_B = 256, F_RAW_C = 512, NFLAGS = 10 };
 static const char *const flag_names[NFLAGS] = { "load-raw", "load-8bit", "tex-mip", "tex-f16", "clear-only",
-						"raw-target", "tex-surface", "multi-frame-shader", "load-by-draw", "unused" };
+						"raw-target", "tex-surface", "multi-frame-shader", "load-by-draw", "multi-always" };
 static uint64_t flag_total[NFLAGS], flag_failed[NFLAGS];
 static unsigned ring_next;
 static uint64_t frag_failed, frag_checked;
@@ -985,8 +1004,34 @@ ring_check(unsigned i, bool wait)
 	if ((status & 0xff) != 1) {
 		frag_failed++;
 		static unsigned said;
-		if (said++ < 12)
-			keep("fragment job %s (%#x): %.330s", job_status_name(status), status, ring_slot[i].what);
+		if (said++ < 12) {
+			/* the header: exception status, first incomplete task, fault pointer */
+			uint32_t task = 0;
+			uint64_t fault = 0;
+			memcpy(&task, ring->cpu + i * 256 + 4, 4);
+			memcpy(&fault, ring->cpu + i * 256 + 8, 8);
+			char at[96] = "in nothing named";
+			for (unsigned r = 0; r < ring_slot[i].nregion; r++) {
+				const struct region *g = &ring_slot[i].region[r];
+				if (fault >= g->gpu && fault < g->gpu + g->size) {
+					snprintf(at, sizeof(at), "%s+%#llx of %#x", g->name, (unsigned long long)(fault - g->gpu),
+						 g->size);
+					break;
+				}
+			}
+			keep("fragment job %s (%#x) task %#x fault %#llx %s", job_status_name(status), status, task,
+			     (unsigned long long)fault, at);
+			char list[300];
+			int n = 0;
+			list[0] = 0;
+			for (unsigned r = 0; r < ring_slot[i].nregion && n < (int)sizeof(list) - 40; r++)
+				n += snprintf(list + n, sizeof(list) - n, " %s=%llx/%x", ring_slot[i].region[r].name,
+					      (unsigned long long)ring_slot[i].region[r].gpu, ring_slot[i].region[r].size);
+			keep("  regions:%s", list);
+			const char *z = strstr(ring_slot[i].what, " z");
+			keep("  targets%.170s", z ? z : "?");
+			keep("  %.180s", ring_slot[i].what);
+		}
 	}
 	ring_slot[i].seq = 0;
 }
@@ -1222,6 +1267,13 @@ emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t
 	struct ptr vp = pool_alloc(b, pan_size(VIEWPORT), 64, why, why_size);
 	if (!rsd.cpu || !tex.cpu || !smp.cpu || !var.cpu || !vp.cpu || !crd.cpu)
 		return -1;
+	note(b, "fs.rsd", rsd.gpu, pan_size(RENDERER_STATE) + nblend * pan_size(BLEND));
+	note(b, "fs.tex", tex.gpu, ALIGN_POT(n * pan_size(TEXTURE), 64) + n * 64);
+	note(b, "fs.smp", smp.gpu, pan_size(SAMPLER));
+	note(b, "fs.var", var.gpu, pan_size(ATTRIBUTE) + 2 * pan_size(ATTRIBUTE_BUFFER));
+	note(b, "fs.crd", crd.gpu, 64);
+	note(b, "fs.vp", vp.gpu, pan_size(VIEWPORT));
+	note(b, "fs.code", ps->code->gpu, ps->code->size);
 	memcpy(rsd.cpu, ps->rsd, 64);
 	for (unsigned i = 0; i < nblend; i++) {
 		void *bd = rsd.cpu + pan_size(RENDERER_STATE) + i * pan_size(BLEND);
@@ -1371,10 +1423,28 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 	struct ptr fb = pool_alloc(b, size, 64, why, why_size);
 	if (fb.cpu == NULL)
 		return 0;
+	note(b, "fbd", fb.gpu, size);
+	if (dcds.gpu)
+		note(b, "dcds", dcds.gpu, 3 * pan_size(DRAW));
+	note(b, "tiler", b->tiler_ctx.gpu, pan_size(TILER_CONTEXT) + pan_size(TILER_HEAP));
+	note(b, "tls", b->tls.gpu, pan_size(LOCAL_STORAGE));
+	note(b, "heap", d->tiler_heap->gpu, d->tiler_heap->size);
+	note(b, "samplepos", d->sample_positions->gpu, d->sample_positions->size);
+	for (unsigned i = 0; i < b->color_count; i++)
+		if (b->color[i]) {
+			static const char *const rtn[8] = { "rt0", "rt1", "rt2", "rt3", "rt4", "rt5", "rt6", "rt7" };
+			struct rwa_texture *t = b->color[i];
+			note(b, rtn[i], t->store->bo->gpu + t->offset, t->store->bo->size - t->offset);
+		}
 	memset(fb.cpu, 0, size);
 	pan_section_pack(fb.cpu, FRAMEBUFFER, PARAMETERS, cfg) {
 		cfg.sample_locations = d->sample_positions->gpu;
-		cfg.pre_frame_0 = !load_mask ? MALI_PRE_POST_FRAME_SHADER_MODE_NEVER : MALI_PRE_POST_FRAME_SHADER_MODE_INTERSECT;
+		/* run 533: every other frame of several targets that loads runs its frame shader ALWAYS (TSIX-2033: a
+		 * forced clean write breaks INTERSECT readbacks), to tell the two apart */
+		static unsigned multi_loads;
+		b->always = load_mask && b->color_count > 1 && (multi_loads++ & 1);
+		cfg.pre_frame_0 = !load_mask ? MALI_PRE_POST_FRAME_SHADER_MODE_NEVER
+			: b->always ? MALI_PRE_POST_FRAME_SHADER_MODE_ALWAYS : MALI_PRE_POST_FRAME_SHADER_MODE_INTERSECT;
 		cfg.pre_frame_1 = mode1;
 		cfg.post_frame = MALI_PRE_POST_FRAME_SHADER_MODE_NEVER;
 		cfg.frame_shader_dcds = dcds.gpu;
@@ -1523,11 +1593,15 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		if (any_clear && !(fl & (F_LOAD_RAW | F_LOAD_BLEND)) && b->draws == 0)
 			fl |= F_CLEAR_ONLY;
 		fl |= b->tex_flags;
+		if (b->always)
+			fl |= F_RAW_C;
 		if (b->drawn_load)
 			fl |= F_RAW_B;
 		else if (util_bitcount(fl & (F_LOAD_RAW | F_LOAD_BLEND)) && b->color_count > 1)
 			fl |= F_RAW_A;
 		ring_slot[slot].flags = fl;
+		memcpy(ring_slot[slot].region, b->region, sizeof(b->region));
+		ring_slot[slot].nregion = b->nregion;
 	}
 	{
 		char *w = ring_slot[slot].what;
@@ -1535,8 +1609,9 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		int n = snprintf(w, room, "tex%s; smp%s; %ux%u %ud z%s:", b->sampled, b->samplers, b->width, b->height,
 				 b->draws, b->depth ? util_format_short_name(b->depth->format) : "-");
 		for (unsigned i = 0; i < b->color_count && n < (int)room - 24; i++)
-			n += snprintf(w + n, room - n, " %.6s%s", b->color[i] ? util_format_short_name(b->color[i]->format) : "none",
-				      b->color[i] && !b->clear[i] ? "(L)" : "");
+			n += snprintf(w + n, room - n, " %.14s%s@%u/%ux%u", b->color[i] ? util_format_short_name(b->color[i]->format) : "none",
+				      b->color[i] && !b->clear[i] ? "(L)" : "", b->level[i],
+				      b->color[i] ? b->color[i]->shape.width : 0, b->color[i] ? b->color[i]->shape.height : 0);
 		for (unsigned i = 0; i < b->nrenders && i < 3 && n < (int)room - 40; i++)
 			n += snprintf(w + n, room - n, "%s %.24s%s", i ? "," : ";", b->renders[i]->fs.name,
 				      b->renders[i]->blend_shader_mask ? "[bs]" : "");
