@@ -19,7 +19,7 @@ for e in json.load(open(sys.argv[1])):
         break
 PY
 )
-INC=(-I"$B/src" -I"$S/src" -I"$S/include" -I"$B/src/compiler/nir" -I"$S/src/compiler/nir" -I"$B/src/compiler"
+INC=(-I"$HERE/../../../../tools/mesa/air" -I"$B/src" -I"$S/src" -I"$S/include" -I"$B/src/compiler/nir" -I"$S/src/compiler/nir" -I"$B/src/compiler"
 	-I"$S/src/compiler" -I"$B/src/panfrost/lib" -I"$S/src/panfrost/lib" -I"$B/src/panfrost/lib/genxml"
 	-I"$S/src/panfrost/lib/genxml" -I"$S/src/panfrost" -I"$B/src/util/format" -I"$S/src/compiler/air"
 	-I"$HERE/../../../../tools/mesa/air" -I"$R")

@@ -76,7 +76,7 @@ PY
 	# mali_native=1 (userland/src/metal/air.cpp)
 	for f in rwa_shader rwa_mali kmali; do
 		# shellcheck disable=SC2086
-		$CC -std=c11 -O2 -w -DPAN_ARCH=7 $DEFS -I"$B" -I"$MESA_SRC/src" -I"$MESA_SRC/include" -I"$B/compiler/nir" \
+		$CC -std=c11 -O2 -w -DPAN_ARCH=7 $DEFS -I"$ROOT/tools/mesa/air" -I"$B" -I"$MESA_SRC/src" -I"$MESA_SRC/include" -I"$B/compiler/nir" \
 			-I"$MESA_SRC/src/compiler/nir" -I"$B/compiler" -I"$MESA_SRC/src/compiler" -I"$B/panfrost/lib" \
 			-I"$MESA_SRC/src/panfrost/lib" -I"$B/panfrost/lib/genxml" -I"$MESA_SRC/src/panfrost/lib/genxml" \
 			-I"$MESA_SRC/src/panfrost" -I"$B/util/format" -I"$MESA_SRC/src/compiler/air" -I"$ROOT/tools/mesa/air" \

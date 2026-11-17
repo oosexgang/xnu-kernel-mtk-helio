@@ -900,6 +900,7 @@ struct batch {
 	unsigned color_count;
 	struct rwa_texture *depth;
 	unsigned width, height, samples;
+	unsigned level[8];          /* the mip level each colour target is drawn into (rwa_draw.color_level) */
 	bool clear[8], clear_z, clear_s;
 	uint32_t clear_words[8][4];
 	float z_clear;
@@ -1091,8 +1092,8 @@ hierarchy_mask(unsigned width, unsigned height)
 }
 
 static struct batch *
-batch_new(struct rwa_texture *const *color, unsigned color_count, struct rwa_texture *depth, char *why,
-	  size_t why_size)
+batch_new(struct rwa_texture *const *color, const unsigned *level, unsigned color_count, struct rwa_texture *depth,
+	  char *why, size_t why_size)
 {
 	struct batch *b = calloc(1, sizeof(*b));
 
@@ -1105,9 +1106,12 @@ batch_new(struct rwa_texture *const *color, unsigned color_count, struct rwa_tex
 	unsigned w = 0, h = 0;
 	for (unsigned i = 0; i < color_count; i++) {
 		b->color[i] = color[i];
+		b->level[i] = level ? level[i] : 0;
 		if (color[i]) {
-			w = w ? MIN2(w, color[i]->shape.width) : color[i]->shape.width;
-			h = h ? MIN2(h, color[i]->shape.height) : color[i]->shape.height;
+			/* the pass is the level's size, the smallest attachment's when they differ (Metal's render area) */
+			unsigned lw = u_minify(color[i]->shape.width, b->level[i]), lh = u_minify(color[i]->shape.height, b->level[i]);
+			w = w ? MIN2(w, lw) : lw;
+			h = h ? MIN2(h, lh) : lh;
 		}
 	}
 	b->depth = depth;
@@ -1154,12 +1158,15 @@ batch_new(struct rwa_texture *const *color, unsigned color_count, struct rwa_tex
 }
 
 static bool
-same_targets(const struct batch *b, struct rwa_texture *const *color, unsigned color_count, struct rwa_texture *depth)
+same_targets(const struct batch *b, struct rwa_texture *const *color, const unsigned *level, unsigned color_count,
+	     struct rwa_texture *depth)
 {
 	if (b->color_count != color_count || b->depth != depth)
 		return false;
 	for (unsigned i = 0; i < color_count; i++) {
 		struct rwa_texture *a = b->color[i], *c = color[i];
+		if (b->level[i] != (level ? level[i] : 0))
+			return false;
 		if (a == c)
 			continue;
 		/* two texture objects over the same memory and layout (a view, or the same surface made twice) */
@@ -1230,9 +1237,10 @@ emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t
 		uint8_t *desc = tex.cpu + k * pan_size(TEXTURE);
 		uint8_t *surf = tex.cpu + n * pan_size(TEXTURE) + k * pan_size(SURFACE_WITH_STRIDE);
 		uint64_t surf_gpu = tex.gpu + n * pan_size(TEXTURE) + k * pan_size(SURFACE_WITH_STRIDE);
-		rwa_surface_desc(surf, t->store->bo->gpu + t->offset, (int32_t)t->row_bytes[0], 0);
-		rwa_texture_desc(desc, t->format, id, MALI_TEXTURE_DIMENSION_2D, t->shape.width, t->shape.height, 1, 1, 1, 1,
-				 surf_gpu);
+		unsigned l = b->level[rt];
+		rwa_surface_desc(surf, t->store->bo->gpu + t->offset + t->level_offset[l], (int32_t)t->row_bytes[l], 0);
+		rwa_texture_desc(desc, t->format, id, MALI_TEXTURE_DIMENSION_2D, u_minify(t->shape.width, l),
+				 u_minify(t->shape.height, l), 1, 1, 1, 1, surf_gpu);
 		k++;
 	}
 	pan_cast_and_pack((smp.cpu), SAMPLER, cfg) {
@@ -1412,8 +1420,8 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 			cfg.writeback_format = writeback[i];
 			cfg.swizzle = swz[i];
 			cfg.writeback_block_format = MALI_BLOCK_FORMAT_LINEAR;
-			cfg.rgb.base = t->store->bo->gpu + t->offset;
-			cfg.rgb.row_stride = t->row_bytes[0];
+			cfg.rgb.base = t->store->bo->gpu + t->offset + t->level_offset[b->level[i]];
+			cfg.rgb.row_stride = t->row_bytes[b->level[i]];
 			cfg.rgb.surface_stride = 0;
 		}
 		if (t)
@@ -1560,14 +1568,15 @@ flush_batch(const char *reason)
 }
 
 static struct batch *
-batch_for(struct rwa_texture *const *color, unsigned color_count, struct rwa_texture *depth, const float *clear_color,
+batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned color_count, struct rwa_texture *depth,
+	  const float *clear_color,
 	  const float *clear_depth, const unsigned *clear_stencil, char *why, size_t why_size)
 {
-	if (open_batch && (!same_targets(open_batch, color, color_count, depth) || clear_color || clear_depth ||
+	if (open_batch && (!same_targets(open_batch, color, level, color_count, depth) || clear_color || clear_depth ||
 			   clear_stencil))
 		flush_batch("another pass");
 	if (open_batch == NULL) {
-		open_batch = batch_new(color, color_count, depth, why, why_size);
+		open_batch = batch_new(color, level, color_count, depth, why, why_size);
 		if (open_batch == NULL)
 			return NULL;
 		struct batch *b = open_batch;
@@ -1600,7 +1609,7 @@ rwa_render_clear(struct rwa_device *device, struct rwa_texture *const *color, un
 		return -1;
 	}
 	static const float black[4] = { 0, 0, 0, 0 };
-	struct batch *b = batch_for(color, color_count, depth, clear_color ? clear_color : black, clear_depth,
+	struct batch *b = batch_for(color, NULL, color_count, depth, clear_color ? clear_color : black, clear_depth,
 				    clear_stencil, why, why_size);
 	return b ? 0 : -1;
 }
@@ -1997,7 +2006,13 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	if (dr->depth && !r->zs_format) {
 		/* a pass with depth and a pipeline without: Metal draws with no depth test */
 	}
-	struct batch *b = batch_for(dr->color, dr->color_count, dr->depth, dr->clear_color, dr->clear_depth,
+	for (unsigned i = 0; dr->color_level && i < dr->color_count; i++)
+		if (dr->color[i] && dr->color_level[i] >= MAX2(dr->color[i]->shape.mip_levels, 1)) {
+			say(why, why_size, "attachment %u drawn into level %u of a texture of %u", i, dr->color_level[i],
+			    MAX2(dr->color[i]->shape.mip_levels, 1));
+			return -1;
+		}
+	struct batch *b = batch_for(dr->color, dr->color_level, dr->color_count, dr->depth, dr->clear_color, dr->clear_depth,
 				    dr->clear_stencil, why, why_size);
 	if (b == NULL)
 		return -1;
