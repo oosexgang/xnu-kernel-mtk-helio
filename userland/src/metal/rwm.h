@@ -259,6 +259,7 @@ struct rwm_draw {
 	unsigned stream_mask;           /* the pipeline's: which vertex buffer indices are streams */
 	unsigned stream_count;          /* ... and the highest it fetches from, plus one */
 	struct rwa_texture *color[8];
+	unsigned color_level[8];        /* the mip level of each (rwa_draw.color_level) */
 	unsigned color_count;
 	const float *clear_color;       /* NULL: kept, not cleared */
 	struct rwa_texture *depth;
@@ -377,6 +378,7 @@ struct rwm_bound_buffer {
 };
 struct rwm_render_state {
 	struct rwa_device *device;
+	unsigned color_level[8];          /* the mip level each colour attachment is drawn into */
 	struct rwm_bound_texture color[8];
 	unsigned color_count;
 	struct rwm_bound_texture depth;
@@ -407,7 +409,7 @@ struct rwm_render_state {
  * store action 2 or 3 or a resolve texture is said and not done), the depth and stencil attachments (one texture
  * carries both aspects; two different ones: said, neither) */
 void rwm_render_begin(struct rwm_render_state *state, struct rwa_device *device);
-void rwm_render_color(struct rwm_render_state *state, unsigned index, void *object, struct rwm_texture *core,
+void rwm_render_color(struct rwm_render_state *state, unsigned index, unsigned level, void *object, struct rwm_texture *core,
 		      bool clears, const double color[4], unsigned long store_action, bool resolve_texture);
 void rwm_render_depth(struct rwm_render_state *state, void *depth, struct rwm_texture *depth_core, bool clears_depth,
 		      double clear_depth, void *stencil, struct rwm_texture *stencil_core, bool clears_stencil,

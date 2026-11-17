@@ -89,6 +89,7 @@ rwm_run_draw(const struct rwm_draw *d, char *why, size_t why_size)
 
 	draw.color = d->color;
 	draw.color_count = d->color_count;
+	draw.color_level = d->color_level;
 	draw.clear_color = d->clear_color;
 	/* the depth attachment, its two load actions, the state that was bound, and the depth range of the
 	 * viewport -- where the quad's own depth comes from (without one, the contract's [0, 1]) */

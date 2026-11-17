@@ -229,6 +229,8 @@ struct rwa_texture {
     * the whole picture loaded into the tiles and written back out, dozens of times a
     * frame */
    struct pipe_surface *rt;
+   /* ... and one for each other mip level drawn into (rwa_draw.color_level), made at the first draw into it */
+   struct pipe_surface *rt_level[16];
 
    /* a view (rwa_texture_view_create): the format its samples and its render surface read the resource as;
     * PIPE_FORMAT_NONE for a texture of its own, which is read as the resource's */
@@ -1884,6 +1886,8 @@ rwa_texture_destroy(struct rwa_texture *texture)
       texture->device->pipe->sampler_view_destroy(texture->device->pipe, texture->view);
    /* by reference and not surface_destroy: a pass not yet sent still holds it */
    pipe_surface_reference(&texture->rt, NULL);
+   for (unsigned l = 0; l < ARRAY_SIZE(texture->rt_level); l++)
+      pipe_surface_reference(&texture->rt_level[l], NULL);
    pipe_resource_reference(&texture->res, NULL);
    free(texture);
 }
@@ -7956,11 +7960,21 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
              render->shape.color_format[i]);
          return -1;
       }
-      unsigned tw = t->shape.width;
-      unsigned th = t->shape.height ? t->shape.height : 1;
+      unsigned level = draw->color_level ? draw->color_level[i] : 0;
+      if (level >= ARRAY_SIZE(t->rt_level) || level > t->res->last_level) {
+         say(why, why_size, "colour attachment %u is drawn into mip level %u of a texture of %u", i, level,
+             t->res->last_level + 1);
+         return -1;
+      }
+      unsigned tw = u_minify(t->shape.width, level);
+      unsigned th = u_minify(t->shape.height ? t->shape.height : 1, level);
       if (i == 0) {
          w = tw;
          h = th;
+      } else if (draw->color_level && (tw != w || th != h)) {
+         /* attachments of different levels: the pass is the size of the smallest (Metal's render area) */
+         w = MIN2(w, tw);
+         h = MIN2(h, th);
       } else if (tw != w || th != h) {
          say(why, why_size, "colour attachment %u is %ux%u and attachment 0 is %ux%u", i,
              tw, th, w, h);
@@ -8041,10 +8055,18 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
                                         .samples = samples };
    for (unsigned i = 0; i < draw->color_count; i++) {
       struct rwa_texture *t = (struct rwa_texture *)draw->color[i];
-      if (!t->rt)
-         t->rt = pipe->create_surface(pipe, t->res,
-            &(struct pipe_surface){ .format = texture_format(t) });
-      surf[i] = t->rt;
+      unsigned level = draw->color_level ? draw->color_level[i] : 0;
+      if (level != 0) {
+         if (!t->rt_level[level])
+            t->rt_level[level] = pipe->create_surface(pipe, t->res,
+               &(struct pipe_surface){ .format = texture_format(t), .u.tex.level = level });
+         surf[i] = t->rt_level[level];
+      } else {
+         if (!t->rt)
+            t->rt = pipe->create_surface(pipe, t->res,
+               &(struct pipe_surface){ .format = texture_format(t) });
+         surf[i] = t->rt;
+      }
       if (!surf[i]) {
          say(why, why_size, "%s would not make a render surface of colour attachment %u",
              rwa_device_name(device), i);

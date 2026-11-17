@@ -1365,6 +1365,11 @@ struct rwa_draw {
 	 * a layer meant for one rectangle drew over the whole frame. */
 	const float *viewport;
 	const unsigned *scissor;
+	/* APPENDED (16 November): the mip level each colour attachment is drawn into -- NULL, or one per attachment
+	 * (MTLRenderPassColorAttachmentDescriptor.level). The 27 release's window server blurs for its glass by drawing
+	 * level after level of one texture, each pass sampling the level above; drawn into level 0, every pass cleared what
+	 * the next was to read, and the glass came out black. The pass is the size of the smallest attachment. */
+	const unsigned *color_level;
 };
 
 int rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,

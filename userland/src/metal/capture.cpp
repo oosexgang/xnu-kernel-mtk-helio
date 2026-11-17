@@ -12,6 +12,7 @@
 #include "rwm.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
 
@@ -139,7 +140,17 @@ rwm_capture_draw(const struct rwm_draw *d)
 	const struct rwm_air *air = rwm_air();
 	char line[240];
 
-	if (draw_captured || captured_render == nullptr || d->render != captured_render || ++seen < 50 ||
+	/* the 50th draw of the pipeline, or the Nth with boot-arg rwm_capture_after=N: a pipeline drawn twice a frame in
+	 * the few frames a still home screen presents never reached 50 (the 27 release's downsample, run 240) */
+	static unsigned long after;
+
+	if (after == 0) {
+		const char *at = strstr(rwm_boot_args(), "rwm_capture_after=");
+
+		after = at != nullptr ? strtoul(at + 18, nullptr, 10) : 50;
+		after = after != 0 ? after : 1;
+	}
+	if (draw_captured || captured_render == nullptr || d->render != captured_render || ++seen < after ||
 	    air->buffer_map == nullptr) {
 		return;
 	}

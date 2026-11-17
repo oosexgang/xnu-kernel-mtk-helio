@@ -289,6 +289,10 @@ main(int argc, char **argv)
 	/* the target: the display's size, cleared to nothing */
 	struct rwa_texture_shape ts = { .pixel_format = 80, .width = 750, .height = 1624, .depth = 1, .array_length = 1,
 					.mip_levels = 1, .sample_count = 1, .type = 2, .usage = 0x5 };
+	/* attachment 0 of the shape's own format when it names one (the downsample of the 27 release draws into an
+	 * RGBA16Float, run 242); read back as BGRA8 bytes below either way */
+	if (shape.color_format[0] == 115)
+		ts.pixel_format = 115;
 	struct rwa_texture *target = rwa_texture_create(dev, &ts, why, sizeof(why));
 	if (!target) { fprintf(stderr, "target: %s\n", why); return 1; }
 	/* and the pipeline's other colour attachments (the 27 release's passes have 2 or 3: RGBA16Float, R32Float), of
@@ -389,7 +393,22 @@ main(int argc, char **argv)
 
 	uint32_t *px = malloc(750 * 1624 * 4);
 	unsigned o[3] = { 0, 0, 0 }, z[3] = { 750, 1624, 1 };
-	if (rwa_texture_read(target, 0, 0, o, z, px, 750 * 4, why, sizeof(why)) != 0) { fprintf(stderr, "read: %s\n", why); return 1; }
+	if (ts.pixel_format == 115) {
+		/* halves made 8-bit BGRA, clamped to 0..1 */
+		uint16_t *hp = malloc((size_t)750 * 1624 * 8);
+		if (!hp || rwa_texture_read(target, 0, 0, o, z, hp, 750 * 8, why, sizeof(why)) != 0) { fprintf(stderr, "read: %s\n", why); return 1; }
+		for (size_t k = 0; k < (size_t)750 * 1624; k++) {
+			uint8_t c8[4];
+			for (unsigned c = 0; c < 4; c++) {
+				_Float16 h;
+				memcpy(&h, &hp[k * 4 + c], 2);
+				float v = (float)h;
+				c8[c] = v != v || v <= 0 ? 0 : v >= 1 ? 255 : (uint8_t)(v * 255 + 0.5f);
+			}
+			px[k] = (uint32_t)c8[3] << 24 | (uint32_t)c8[0] << 16 | (uint32_t)c8[1] << 8 | c8[2];
+		}
+		free(hp);
+	} else if (rwa_texture_read(target, 0, 0, o, z, px, 750 * 4, why, sizeof(why)) != 0) { fprintf(stderr, "read: %s\n", why); return 1; }
 	unsigned x0 = have_scissor ? scissor[0] : 0, y0 = have_scissor ? scissor[1] : 0;
 	unsigned x1 = have_scissor ? scissor[0] + scissor[2] : 750, y1 = have_scissor ? scissor[1] + scissor[3] : 1624;
 	unsigned long n = 0, lit = 0, sum[4] = { 0 };

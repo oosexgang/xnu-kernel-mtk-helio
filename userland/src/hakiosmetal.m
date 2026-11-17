@@ -4348,8 +4348,26 @@ rw_core_of(id texture)
 		if (texture == nil) {
 			continue;
 		}
+		/* a pass into a mip level or slice other than 0: said (the first few), since this driver draws into level 0
+		 * of slice 0 whatever is asked (16 November: the 27 release's glass blurs a 320x320 texture down a chain of
+		 * passes whose viewports halve, 160 to 10, each clearing and sampling the same texture) */
+		if ([attachment level] != 0 || [attachment slice] != 0 || [attachment depthPlane] != 0) {
+			static unsigned said;
+
+			if (said++ < 16) {
+				char line[200];
+
+				snprintf(line, sizeof(line), "!!rwm attachment %u: level %lu slice %lu plane %lu of a %lux%lu texture "
+					 "of %lu levels, format %lu", i, (unsigned long)[attachment level],
+					 (unsigned long)[attachment slice], (unsigned long)[attachment depthPlane],
+					 (unsigned long)[texture width], (unsigned long)[texture height],
+					 (unsigned long)[texture mipmapLevelCount], (unsigned long)[texture pixelFormat]);
+				sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+			}
+		}
 		c = [attachment clearColor];
-		rwm_render_color(&_state, i, texture, rw_core_of(texture), [attachment loadAction] == MTLLoadActionClear,
+		rwm_render_color(&_state, i, (unsigned)[attachment level], texture, rw_core_of(texture),
+				 [attachment loadAction] == MTLLoadActionClear,
 				 (const double[4]){ c.red, c.green, c.blue, c.alpha }, [attachment storeAction],
 				 [attachment resolveTexture] != nil);
 	}

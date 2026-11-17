@@ -203,19 +203,20 @@ rwm_render_begin(struct rwm_render_state *s, struct rwa_device *device)
  * held before -- a pass that seems to have drawn nothing. (MTLStoreActionMultisampleResolve is 2, ...AndStore... 3.)
  */
 extern "C" void
-rwm_render_color(struct rwm_render_state *s, unsigned index, void *object, struct rwm_texture *core, bool clears,
+rwm_render_color(struct rwm_render_state *s, unsigned index, unsigned level, void *object, struct rwm_texture *core, bool clears,
 		 const double color[4], unsigned long store, bool resolve_texture)
 {
 	if (index >= 8 || object == nullptr) {
 		return;
 	}
 	s->color[index] = rwm_bound_texture{ object, core };
+	s->color_level[index] = level;
 	if (core != nullptr && passlog_on()) {
 		const struct rwa_texture_shape *sh = rwm_texture_shape(core);
 
 		/* and the IOSurface it lies over (0: none), to be matched with the swaps' surfaces (15 November) */
-		passlog("c %u %04x %ux%u %u %d %lu s%u", index, tex_id(core), sh->width, sh->height, sh->pixel_format, clears ? 1 : 0,
-			store, rwm_texture_in_place(core));
+		passlog("c %u %04x %ux%u %u %d %lu s%u L%u", index, tex_id(core), sh->width, sh->height, sh->pixel_format,
+			clears ? 1 : 0, store, rwm_texture_in_place(core), level);
 	}
 	s->color_count = index + 1;
 	if (store == 2 || store == 3 || resolve_texture) {
@@ -567,6 +568,7 @@ rwm_render_draw(struct rwm_render_state *s, const struct rwm_draw_call *call, st
 	d->color_count = s->color_count;
 	for (unsigned i = 0; i < s->color_count; i++) {
 		d->color[i] = mesa_of(s->color[i].core);
+		d->color_level[i] = s->color_level[i];
 	}
 	memcpy(w->clear_color, s->clear_color, sizeof(w->clear_color));
 	d->clear_color = s->clears ? w->clear_color : nullptr;
