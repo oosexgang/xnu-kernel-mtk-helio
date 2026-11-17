@@ -821,6 +821,7 @@ rwa_render_create(struct rwa_device *device, const void *vertex_bitcode, size_t 
 	/* compiling is not under the lock: the window server builds pipelines on other threads while it draws */
 	if (rwa_stage_compile(device, &r->fs, fragment_bitcode, fragment_size, fragment_entry, MESA_SHADER_FRAGMENT,
 			      next_fconst, nf, fcs ? next_fconfig : NULL, fcs, shape, why, why_size) != 0 ||
+	    (rwa_next_noperspective = r->fs.noperspective, false) ||
 	    rwa_stage_compile(device, &r->vs, vertex_bitcode, vertex_size, vertex_entry, MESA_SHADER_VERTEX, next_vconst,
 			      nv, vcs ? next_vconfig : NULL, vcs, shape, why, why_size) != 0 ||
 	    rwa_render_prepare(r, why, why_size) != 0) {
@@ -1722,16 +1723,16 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 	nsamp = MAX2(nsamp, st->sampler_count);
 	if (ntex) {
 		/* the descriptors, then each one's surfaces (GENX(panfrost_new_texture): levels x layers of them) */
+		/* each texture's surfaces on 64 bytes of their own, as panfrost_create_sampler_view_bo allocates a payload */
 		size_t surfaces = 0;
 		for (unsigned i = 0; i < ntex; i++)
-			if (tex[i])
-				surfaces += (size_t)MAX2(tex[i]->shape.mip_levels, 1) * tex[i]->layers;
-		struct ptr tp = pool_alloc(b, ntex * pan_size(TEXTURE) + MAX2(surfaces, 1) * pan_size(SURFACE_WITH_STRIDE), 64,
-					   why, why_size);
+			surfaces += ALIGN_POT((tex[i] ? (size_t)MAX2(tex[i]->shape.mip_levels, 1) * tex[i]->layers : 1) *
+					      pan_size(SURFACE_WITH_STRIDE), 64);
+		struct ptr tp = pool_alloc(b, ALIGN_POT(ntex * pan_size(TEXTURE), 64) + surfaces, 64, why, why_size);
 		if (tp.cpu == NULL)
 			return -1;
-		uint8_t *sc = tp.cpu + ntex * pan_size(TEXTURE);
-		uint64_t sg = tp.gpu + ntex * pan_size(TEXTURE);
+		uint8_t *sc = tp.cpu + ALIGN_POT(ntex * pan_size(TEXTURE), 64);
+		uint64_t sg = tp.gpu + ALIGN_POT(ntex * pan_size(TEXTURE), 64);
 		for (unsigned i = 0; i < ntex; i++) {
 			const struct rwa_texture *t = tex[i];
 			void *desc = tp.cpu + i * pan_size(TEXTURE);
@@ -1741,8 +1742,8 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 				const unsigned char id[4] = { PIPE_SWIZZLE_X, PIPE_SWIZZLE_Y, PIPE_SWIZZLE_Z, PIPE_SWIZZLE_W };
 				rwa_texture_desc(desc, PIPE_FORMAT_R8G8B8A8_UNORM, id, MALI_TEXTURE_DIMENSION_2D, 1, 1, 1, 1, 1, 1,
 						 sg);
-				sc += pan_size(SURFACE_WITH_STRIDE);
-				sg += pan_size(SURFACE_WITH_STRIDE);
+				sc += 64;
+				sg += 64;
 				continue;
 			}
 			if (!rwa_samplable(t->format)) {
@@ -1774,6 +1775,10 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 			rwa_texture_desc(desc, t->format, t->swizzle, t->dim, t->shape.width, t->shape.height,
 					 MAX2(t->shape.depth, 1), levels,
 					 t->dim == MALI_TEXTURE_DIMENSION_CUBE ? t->layers / 6 : t->layers, 1, first);
+			/* the next texture's surfaces on 64 bytes */
+			uint64_t pad = ALIGN_POT(sg, 64) - sg;
+			sc += pad;
+			sg += pad;
 		}
 		out->textures = tp.gpu;
 	}

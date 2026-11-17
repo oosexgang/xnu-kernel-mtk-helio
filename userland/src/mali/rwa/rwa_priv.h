@@ -68,6 +68,7 @@ struct rwa_stage {
 	/* a vertex stage's inputs, compacted (air_metal.c compact_vertex_inputs): driver location -> [[attribute(n)]] */
 	uint8_t vs_attr[32];
 	unsigned vs_attr_count;
+	uint32_t noperspective;       /* a fragment stage's noperspective inputs (pan_nir_collect_noperspective_varyings_fs) */
 };
 
 struct rwa_varying_rec {
@@ -131,6 +132,8 @@ struct rwa_compute {
 };
 
 /* rwa_shader.c */
+/* the fragment stage's noperspective set, for the vertex stage compiled next on this thread */
+extern _Thread_local uint32_t rwa_next_noperspective;
 int rwa_shader_init(struct rwa_device *device, char *why, size_t why_size);
 int rwa_preload_shader(struct rwa_device *device, struct rwa_stage *st, unsigned mask, char *why, size_t why_size);
 /* AIR's stage to a compiled stage: CONSTANTS and CONFIG as rwa_render_constants and rwa_render_config gave them */

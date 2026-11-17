@@ -36,6 +36,8 @@
 
 #include "rwa_priv.h"
 
+_Thread_local uint32_t rwa_next_noperspective;
+
 /* the patched pan_blend.c counts the blend shaders it compiles (for the Gallium library's lines); this library compiles
  * none, but links the file */
 uint64_t hakios_pan_blend_compiles;
@@ -639,8 +641,12 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 		}
 	}
 	bifrost_preprocess_nir(nir, device->gpu_id);   /* pan_shader_preprocess, v6 and later */
+	/* noperspective varyings: the fragment stage's set (pan_nir_collect_noperspective_varyings_fs, as
+	 * panfrost_create_shader_state keeps it), and the vertex stage multiplied by W for exactly that set */
+	if (want == MESA_SHADER_FRAGMENT)
+		st->noperspective = pan_nir_collect_noperspective_varyings_fs(nir);
 	if (want == MESA_SHADER_VERTEX)
-		NIR_PASS(_, nir, pan_nir_lower_static_noperspective, 0);
+		NIR_PASS(_, nir, pan_nir_lower_static_noperspective, rwa_next_noperspective);
 
 	/* the system values: one buffer after the shader's own (panfrost_nir_lower_sysvals) */
 	st->sysval_ubo = nir->info.num_ubos;
