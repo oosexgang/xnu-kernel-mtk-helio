@@ -915,6 +915,7 @@ struct batch {
 	unsigned minx, miny, maxx, maxy;   /* what the draws touched, inclusive pixels */
 	char sampled[200];                 /* the textures the draws sample, for a refused pass's line */
 	char samplers[120];
+	unsigned tex_flags;
 	unsigned nsampled;
 };
 
@@ -928,7 +929,14 @@ static struct km_bo *ring;
 static struct {
 	uint64_t seq;
 	char what[400];
+	unsigned flags;
 } ring_slot[RING];
+/* what a pass has, for counting which of them the GPU refuses */
+enum { F_LOAD_RAW = 1, F_LOAD_BLEND = 2, F_TEX_MIP = 4, F_TEX_F16 = 8, F_CLEAR_ONLY = 16, F_RAW_TARGET = 32,
+       F_TEX_SURFACE = 64, NFLAGS = 7 };
+static const char *const flag_names[NFLAGS] = { "load-raw", "load-8bit", "tex-mip", "tex-f16", "clear-only",
+						"raw-target", "tex-surface" };
+static uint64_t flag_total[NFLAGS], flag_failed[NFLAGS];
 static unsigned ring_next;
 static uint64_t frag_failed, frag_checked;
 
@@ -965,6 +973,12 @@ ring_check(unsigned i, bool wait)
 		if (good++ < 6)
 			keep("fragment job DONE: %.330s", ring_slot[i].what);
 	}
+	for (unsigned f = 0; f < NFLAGS; f++)
+		if (ring_slot[i].flags & (1u << f)) {
+			flag_total[f]++;
+			if ((status & 0xff) != 1)
+				flag_failed[f]++;
+		}
 	if ((status & 0xff) != 1) {
 		frag_failed++;
 		static unsigned said;
@@ -1448,6 +1462,25 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	struct ptr frag = { ring->cpu + slot * 256, ring->gpu + slot * 256 };
 	memset(frag.cpu, 0, 256);
 	{
+		unsigned fl = 0;
+		bool any_clear = false;
+		for (unsigned i = 0; i < b->color_count; i++) {
+			if (b->color[i] == NULL)
+				continue;
+			bool raw = !rwa_rt_blendable(b->color[i]->format);
+			if (raw)
+				fl |= F_RAW_TARGET;
+			if (!b->clear[i])
+				fl |= raw ? F_LOAD_RAW : F_LOAD_BLEND;
+			else
+				any_clear = true;
+		}
+		if (any_clear && !(fl & (F_LOAD_RAW | F_LOAD_BLEND)) && b->draws == 0)
+			fl |= F_CLEAR_ONLY;
+		fl |= b->tex_flags;
+		ring_slot[slot].flags = fl;
+	}
+	{
 		char *w = ring_slot[slot].what;
 		size_t room = sizeof(ring_slot[slot].what);
 		int n = snprintf(w, room, "tex%s; smp%s; %ux%u %ud z%s:", b->sampled, b->samplers, b->width, b->height,
@@ -1752,6 +1785,12 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 				return -1;
 			}
 			use_store(b, t->store);
+			if (MAX2(t->shape.mip_levels, 1) > 1)
+				b->tex_flags |= F_TEX_MIP;
+			if (t->format == PIPE_FORMAT_R16G16B16A16_FLOAT)
+				b->tex_flags |= F_TEX_F16;
+			if (t->store->surface_id)
+				b->tex_flags |= F_TEX_SURFACE;
 			if (b->nsampled < 8) {
 				size_t l = strlen(b->sampled);
 				snprintf(b->sampled + l, sizeof(b->sampled) - l, " %.10s %ux%u/%u r%u%s%s%s",
@@ -2544,8 +2583,17 @@ report(void)
 		return;
 	uint64_t k[4];
 	km_counts(k);
-	keep("30s: fragment jobs %llu checked, %llu failed", (unsigned long long)frag_checked,
-	     (unsigned long long)frag_failed);
+	{
+		char line[300];
+		int n = snprintf(line, sizeof(line), "30s: fragment jobs %llu checked, %llu failed;",
+				 (unsigned long long)frag_checked, (unsigned long long)frag_failed);
+		for (unsigned f = 0; f < NFLAGS; f++) {
+			n += snprintf(line + n, sizeof(line) - n, " %s %llu/%llu", flag_names[f],
+				      (unsigned long long)flag_failed[f], (unsigned long long)flag_total[f]);
+			flag_failed[f] = flag_total[f] = 0;
+		}
+		keep("%s", line);
+	}
 	frag_checked = frag_failed = 0;
 	keep("30s: %llu draws (%llu refused), %llu passes, %llu loaded, %llu cleared, %llu waits by the processor; "
 	     "draws %llu us, submits %llu us; %llu pipelines in %llu ms (%llu refused), %llu surfaces; buffers %llu made, "
