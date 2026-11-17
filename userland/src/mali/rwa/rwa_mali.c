@@ -1088,6 +1088,8 @@ ring_check(unsigned i, bool wait)
 static uint8_t *shadow_free[64];
 static unsigned shadow_nfree;
 static uint64_t upload_ns, upload_bytes;
+static uint64_t ubo_copied, ubo_copied_bytes, ubo_given;   /* uniform buffers off 16 bytes: copied, or given as they are */
+static uint64_t surface_passes;   /* passes into an IOSurface (the window server's frames), for the 30-second lines */
 
 static uint8_t *
 shadow_get(void)
@@ -1746,6 +1748,8 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		use_bo(b, b->chunks[i]);
 	use_bo(b, ring);
 	pool_upload(b);
+	if (b->color_count && b->color[0] && b->color[0]->store->surface_id)
+		surface_passes++;
 	uint64_t seq = 0;
 	int e = 0;
 	if (b->first_job) {
@@ -1952,6 +1956,7 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 	struct ubo_view views[RWA_MAX_UBOS];
 	uint64_t ssbo_addr[RWA_MAX_UBOS] = { 0 };
 	uint32_t ssbo_size[RWA_MAX_UBOS] = { 0 };
+	uint8_t misalign[RWA_MAX_UBOS] = { 0 };
 
 	const unsigned es_kind = st->info.stage == MESA_SHADER_FRAGMENT;
 	uint64_t es_t = now_ns(), es_t1;
@@ -2016,10 +2021,28 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 				want = r->size;
 			if (r->reads && r->reads < want)
 				want = r->reads;
+			bool dynamic = (st->ubo_dynamic[r->index / 64] >> (r->index % 64)) & 1;
+			if (!dynamic && st->ubo_extent_known && st->ubo_extent[r->index] < want)
+				want = st->ubo_extent[r->index];   /* what the shader's constant offsets reach (0: none) */
 			want = MAX2(want, 4);
 			uint64_t gpu = buf->store->bo->gpu + off;
 			const uint8_t *cpu = buf->store->bo->cpu + off;
+			if ((gpu & 15) != 0 && dynamic && (gpu & 3) == 0) {
+				/* read at computed offsets: the descriptor on the 16 bytes before, the shader adds the rest
+				 * (RWA_SV_UBO_MISALIGN) -- no copy out of write-combined memory */
+				misalign[r->index] = gpu & 15;
+				pan_cast_and_pack((ubos.cpu + r->index * pan_size(UNIFORM_BUFFER)), UNIFORM_BUFFER, cfg) {
+					cfg.pointer = gpu & ~15ull;
+					cfg.entries = DIV_ROUND_UP(want + (gpu & 15), 16);
+				}
+				views[r->index].cpu = cpu;
+				views[r->index].size = (uint32_t)want;
+				ubo_given++;
+				break;
+			}
 			if ((gpu & 15) != 0) {
+				ubo_copied++;
+				ubo_copied_bytes += want;
 				/* the hardware's uniform buffers start on 16 bytes: a copy (Gallium's user_buffer upload) */
 				struct ptr c = pool_alloc(b, ALIGN_POT(want, 16), 16, why, why_size);
 				if (c.cpu == NULL)
@@ -2204,6 +2227,7 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 				break;
 			}
 			case RWA_SV_MULTISAMPLED: u[0] = 0; break;
+			case RWA_SV_UBO_MISALIGN: u[0] = arg < RWA_MAX_UBOS ? misalign[arg] : 0; break;
 			case RWA_SV_NUM_WORKGROUPS: u[0] = in->groups[0]; u[1] = in->groups[1]; u[2] = in->groups[2]; break;
 			case RWA_SV_LOCAL_SIZE: u[0] = in->local[0]; u[1] = in->local[1]; u[2] = in->local[2]; break;
 			case RWA_SV_RT_CONVERSION: {
@@ -2961,19 +2985,25 @@ report(void)
 		/* microseconds a draw, by part (phase_ns) */
 		uint64_t n = MAX2(stats.draws + stats.refused, 1);
 		keep("30s: us a draw: checks %.1f, batch %.1f, index+viewport %.1f, vs %.1f, fs %.1f, attrs %.1f, "
-		     "varyings+jobs %.1f; %llu cleared instead of loaded; %llu surface frames (%.1f a second)",
+		     "varyings+jobs %.1f; %llu cleared instead of loaded; %llu surface frames (%.1f a second), %llu passes into "
+		     "surfaces (%.1f a second)",
 		     phase_ns[0] / 1e3 / n, phase_ns[1] / 1e3 / n, phase_ns[2] / 1e3 / n, phase_ns[3] / 1e3 / n,
 		     phase_ns[4] / 1e3 / n, phase_ns[5] / 1e3 / n, phase_ns[6] / 1e3 / n,
 		     (unsigned long long)stats.multiload_cleared, (unsigned long long)surface_frames,
-		     surface_frames * 1e9 / (double)MAX2(now - stats.since, 1));
+		     surface_frames * 1e9 / (double)MAX2(now - stats.since, 1), (unsigned long long)surface_passes,
+		     surface_passes * 1e9 / (double)MAX2(now - stats.since, 1));
+		surface_passes = 0;
 		memset(phase_ns, 0, sizeof(phase_ns));
 		surface_frames = 0;
 		keep("30s: us a draw, vs/fs: buffers %.1f/%.1f, textures %.1f/%.1f, samplers %.1f/%.1f, sysvals %.1f/%.1f, "
-		     "pushed %.1f/%.1f; upload %.1f us a pass, %.1f KB a pass",
+		     "pushed %.1f/%.1f; upload %.1f us a pass, %.1f KB a pass; buffers off 16 bytes %llu copied (%.1f KB "
+		     "each), %llu given as they are",
 		     stage_ns[0][0] / 1e3 / n, stage_ns[1][0] / 1e3 / n, stage_ns[0][1] / 1e3 / n, stage_ns[1][1] / 1e3 / n,
 		     stage_ns[0][2] / 1e3 / n, stage_ns[1][2] / 1e3 / n, stage_ns[0][3] / 1e3 / n, stage_ns[1][3] / 1e3 / n,
 		     stage_ns[0][4] / 1e3 / n, stage_ns[1][4] / 1e3 / n, upload_ns / 1e3 / MAX2(stats.batches, 1),
-		     upload_bytes / 1024.0 / MAX2(stats.batches, 1));
+		     upload_bytes / 1024.0 / MAX2(stats.batches, 1), (unsigned long long)ubo_copied,
+		     ubo_copied_bytes / 1024.0 / MAX2(ubo_copied, 1), (unsigned long long)ubo_given);
+		ubo_copied = ubo_copied_bytes = ubo_given = 0;
 		memset(stage_ns, 0, sizeof(stage_ns));
 		upload_ns = upload_bytes = 0;
 	}

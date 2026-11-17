@@ -44,6 +44,7 @@ enum rwa_sysval {
 	RWA_SV_NUM_VERTICES,
 	RWA_SV_DRAW_ID,
 	RWA_SV_TEXTURE_LEVELS,        /* arg: texture */
+	RWA_SV_UBO_MISALIGN,          /* arg: the buffer; x: how far its binding is past the 16 bytes its descriptor starts on */
 };
 #define RWA_SV(kind, arg) ((uint32_t)(kind) | ((uint32_t)(arg) << 8))
 #define RWA_SV_KIND(sv) ((sv) & 0xff)
@@ -69,6 +70,13 @@ struct rwa_stage {
 	uint8_t vs_attr[32];
 	unsigned vs_attr_count;
 	uint32_t noperspective;       /* a fragment stage's noperspective inputs (pan_nir_collect_noperspective_varyings_fs) */
+	/* uniform buffers read at offsets the shader computes: their loads add RWA_SV_UBO_MISALIGN, and a binding off
+	 * 16 bytes is given as it is, its descriptor on the 16 bytes before it, instead of copied */
+	uint64_t ubo_dynamic[2];
+	/* the others: how far into the buffer the shader reads -- what a copy needs; 0 with ubo_extent_known: not read at
+	 * all (its loads folded away, or pushed from words it no longer reads) */
+	uint32_t ubo_extent[RWA_MAX_UBOS];
+	bool ubo_extent_known;        /* every uniform load names its buffer by a constant */
 };
 
 struct rwa_varying_rec {

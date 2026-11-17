@@ -263,6 +263,17 @@ main(int argc, char **argv)
 		d.vertex_count = 4;
 		d.vertex_streams = streams;
 		d.vertex_stream_count = info.vertex_streams;   /* what the plug-in covers (air.cpp, render.cpp) */
+		/* RWACHECK_OFFSET=N: every buffer argument bound N bytes in (a binding off 16 bytes, as the window server's) */
+		struct rwa_buffer_bind table[31];
+		const char *bind_off = getenv("RWACHECK_OFFSET");
+		if (bind_off != NULL) {
+			for (unsigned i = 0; i < 31; i++) {
+				table[i].buffer = bufs[i];
+				table[i].offset = strtoul(bind_off, NULL, 0);
+			}
+			d.vertex_buffer_table = d.fragment_buffer_table = table;
+			d.vertex_buffer_table_count = d.fragment_buffer_table_count = 31;
+		}
 		int code = 0;
 		if (!(fine && rwa_render_draw(p, &d, why, sizeof(why)) == 0 && rwa_finish(dev, why, sizeof(why)) == 0)) {
 			printf("  draw refused: %s\n", why);

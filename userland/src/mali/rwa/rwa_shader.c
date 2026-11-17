@@ -491,6 +491,72 @@ lower_sysval(nir_builder *b, nir_instr *instr, void *data)
 	return true;
 }
 
+/* a boot-arg (the host build: RWA_BOOTARGS) */
+static bool
+boot_arg_set(const char *text)
+{
+#ifndef RWA_HOST_FAKE
+	char args[1024] = "";
+	size_t n = sizeof(args) - 1;
+	return sysctlbyname("kern.bootargs", args, &n, NULL, 0) == 0 && strstr(args, text) != NULL;
+#else
+	const char *args = getenv("RWA_BOOTARGS");
+	return args != NULL && strstr(args, text) != NULL;
+#endif
+}
+
+/* uniform buffers read at computed offsets: noted (pass 1), and every load of them given the binding's distance past
+ * 16 bytes (pass 2) -- a copy of such a buffer, its extent unknown, was up to 64 KB read out of write-combined memory a
+ * draw (run 537: ~95 us of a fragment stage's ~100) */
+static bool
+ubo_scan(nir_builder *b, nir_intrinsic_instr *intr, void *data)
+{
+	struct rwa_stage *st = data;
+	(void)b;
+	if (intr->intrinsic != nir_intrinsic_load_ubo)
+		return false;
+	if (!nir_src_is_const(intr->src[0])) {
+		st->ubo_extent_known = false;
+		return false;
+	}
+	unsigned u = nir_src_as_uint(intr->src[0]);
+	if (u >= RWA_MAX_UBOS)
+		return false;
+	if (!nir_src_is_const(intr->src[1])) {
+		st->ubo_dynamic[u / 64] |= 1ull << (u % 64);
+		return false;
+	}
+	uint32_t end = nir_src_as_uint(intr->src[1]) + intr->def.num_components * intr->def.bit_size / 8;
+	st->ubo_extent[u] = MAX2(st->ubo_extent[u], end);
+	return false;
+}
+
+static bool
+ubo_misalign(nir_builder *b, nir_intrinsic_instr *intr, void *data)
+{
+	struct sysval_ctx *ctx = data;
+	struct rwa_stage *st = ctx->st;
+	if (intr->intrinsic != nir_intrinsic_load_ubo || !nir_src_is_const(intr->src[0]))
+		return false;
+	unsigned u = nir_src_as_uint(intr->src[0]);
+	if (u >= RWA_MAX_UBOS || u == st->sysval_ubo || !(st->ubo_dynamic[u / 64] & (1ull << (u % 64))))
+		return false;
+	unsigned slot = sysval_slot(st, RWA_SV(RWA_SV_UBO_MISALIGN, u));
+	if (slot == ~0u)
+		return false;
+	ctx->need_ubo = true;
+	b->cursor = nir_before_instr(&intr->instr);
+	nir_def *mis = nir_load_ubo(b, 1, 32, nir_imm_int(b, st->sysval_ubo), nir_imm_int(b, slot * 16), .align_mul = 4,
+				    .align_offset = 0, .range_base = slot * 16, .range = 4);
+	nir_src_rewrite(&intr->src[1], nir_iadd(b, intr->src[1].ssa, mis));
+	/* a binding is 4-byte aligned at least (one that is not is copied), and what the load knew of its offset's
+	 * alignment beyond that is gone */
+	nir_intrinsic_set_align(intr, MIN2(nir_intrinsic_align_mul(intr), 4), 0);
+	nir_intrinsic_set_range_base(intr, 0);
+	nir_intrinsic_set_range(intr, ~0);
+	return true;
+}
+
 /* --- a stage -------------------------------------------------------------------------------------------------------- */
 
 /* Metal's discard_fragment is NIR's demote (air_intrinsics.c); Bifrost knows terminate, and its DISCARD leaves the
@@ -655,6 +721,14 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 	NIR_PASS(_, nir, nir_opt_constant_folding);
 	NIR_PASS(_, nir, nir_opt_dce);
 	nir_shader_instructions_pass(nir, lower_sysval, nir_metadata_control_flow, &sctx);
+	memset(st->ubo_dynamic, 0, sizeof(st->ubo_dynamic));
+	memset(st->ubo_extent, 0, sizeof(st->ubo_extent));
+	st->ubo_extent_known = true;
+	nir_shader_intrinsics_pass(nir, ubo_scan, nir_metadata_all, st);
+	if (!boot_arg_set("rwn_ubocopy=1"))
+		nir_shader_intrinsics_pass(nir, ubo_misalign, nir_metadata_control_flow, &sctx);
+	else
+		memset(st->ubo_dynamic, 0, sizeof(st->ubo_dynamic));
 	if (sctx.need_ubo)
 		nir->info.num_ubos = st->sysval_ubo + 1;
 	st->ubo_count = nir->info.num_ubos;
