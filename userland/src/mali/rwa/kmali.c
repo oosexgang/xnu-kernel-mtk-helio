@@ -83,12 +83,23 @@ call(uint32_t request, void *data, size_t size)
 static bool fake;
 static uint64_t fake_gpu = 0x100000000ull;
 
+#ifdef RWA_PANDECODE
+/* the host build with RWA_PANDECODE=1: every buffer known to Panfrost's decoder, every chain submitted decoded to
+ * stderr -- the descriptors as the GPU would read them, and the decoder's complaints */
+#include "wrap.h"
+static struct pandecode_context *decode;
+#endif
+
 int
 km_open(char *why, size_t why_size)
 {
 	if (getenv("RWA_HOST") != NULL) {
 		fake = true;
 		gpu_id = 0x7212;
+#ifdef RWA_PANDECODE
+		if (getenv("RWA_PANDECODE") != NULL)
+			decode = pandecode_create_context(true);
+#endif
 		return 0;
 	}
 	pthread_mutex_lock(&lock);
@@ -193,6 +204,10 @@ km_bo_new(uint64_t size, char *why, size_t why_size)
 		bo->gpu = fake_gpu;
 		fake_gpu += size;
 		bo->handle = 1;
+#ifdef RWA_PANDECODE
+		if (decode)
+			pandecode_inject_mmap(decode, bo->gpu, bo->cpu, (unsigned)size, NULL);
+#endif
 		return bo;
 	}
 	pthread_mutex_lock(&lock);
@@ -281,6 +296,10 @@ km_bo_release(struct km_bo *bo, uint64_t seq)
 	if (bo == NULL)
 		return;
 	if (fake) {
+#ifdef RWA_PANDECODE
+		if (decode)
+			pandecode_inject_free(decode, bo->gpu, (unsigned)bo->size);
+#endif
 		free(bo->cpu);
 		free(bo);
 		return;
@@ -399,6 +418,12 @@ int
 km_submit(uint64_t jc, bool fragment, struct km_bo *const *bos, unsigned count, uint64_t *seq)
 {
 	if (fake) {
+#ifdef RWA_PANDECODE
+		if (decode) {
+			fprintf(stderr, "=== %s chain %#llx\n", fragment ? "fragment" : "vertex/tiler", (unsigned long long)jc);
+			pandecode_jc(decode, jc, gpu_id);
+		}
+#endif
 		*seq = ++last_seq;
 		return 0;
 	}

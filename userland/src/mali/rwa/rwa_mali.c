@@ -121,8 +121,8 @@ static bool
 boot_arg(const char *text)
 {
 #ifdef RWA_HOST_FAKE
-	(void)text;
-	return false;
+	const char *args = getenv("RWA_BOOTARGS");   /* the host's stand-in for kern.bootargs */
+	return args != NULL && strstr(args, text) != NULL;
 #else
 	static char args[1024];
 	static int read = 0;
@@ -1679,31 +1679,28 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 		}
 		if (clear_color)
 			stats.clears++;
-		/* A frame of several targets that loads one is refused by the GPU however it is loaded -- a frame shader for
-		 * all of them or some, or a first draw (runs 526 to 530, every such pass; a frame of one target loads and
-		 * finishes). Until that is understood such targets are cleared to transparent black: the window server's
-		 * frames of three targets draw the whole screen over again, the wallpaper first. Boot-arg rwn_multiload=1
-		 * loads them by a first draw (emit_preload_draw), to go on looking. */
+		/* A frame of several targets loads them by its frame shader, as a frame of one does. Runs 526 to 530 had every
+		 * such frame refused: the frame shader's renderer state named as many samplers as textures, and there is one
+		 * (fixed in rwa_preload_shader). Boot-arg rwn_multiload=1 loads them by a first draw instead
+		 * (emit_preload_draw); rwn_multiclear=1 clears them to transparent black, as runs 531.. did. */
 		unsigned load = 0;
 		for (unsigned i = 0; i < color_count; i++)
 			if (color[i] && !b->clear[i])
 				load |= 1u << i;
-		if (color_count > 1 && load) {
-			if (boot_arg("rwn_multiload=1")) {
-				if (emit_preload_draw(b, load, why, why_size) != 0) {
-					batch_free(b, 0);
-					open_batch = NULL;
-					return NULL;
-				}
-			} else {
-				static const float zero[4] = { 0, 0, 0, 0 };
-				for (unsigned i = 0; i < color_count; i++)
-					if (load & (1u << i)) {
-						b->clear[i] = true;
-						rwa_pack_clear(color[i]->format, zero, b->clear_words[i]);
-					}
-				stats.multiload_cleared++;
+		if (color_count > 1 && load && boot_arg("rwn_multiload=1")) {
+			if (emit_preload_draw(b, load, why, why_size) != 0) {
+				batch_free(b, 0);
+				open_batch = NULL;
+				return NULL;
 			}
+		} else if (color_count > 1 && load && boot_arg("rwn_multiclear=1")) {
+			static const float zero[4] = { 0, 0, 0, 0 };
+			for (unsigned i = 0; i < color_count; i++)
+				if (load & (1u << i)) {
+					b->clear[i] = true;
+					rwa_pack_clear(color[i]->format, zero, b->clear_words[i]);
+				}
+			stats.multiload_cleared++;
 		}
 	}
 	return open_batch;

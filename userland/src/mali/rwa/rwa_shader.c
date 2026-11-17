@@ -1246,6 +1246,10 @@ rwa_preload_shader(struct rwa_device *device, struct rwa_stage *st, unsigned mas
 	struct mali_renderer_state_packed rsd;
 	pan_pack(&rsd, RENDERER_STATE, cfg) {
 		pan_shader_prepare_rsd(&st->info, st->code->gpu, &cfg);
+		/* one sampler for all the targets: pan_shader_compile counts as many samplers as textures, and a frame
+		 * shader of three targets read two sampler descriptors past the one there is -- DATA_INVALID, every
+		 * frame of several targets that loaded (runs 526 to 530; pandecode on the host build) */
+		cfg.shader.sampler_count = 1;
 		cfg.multisample_misc.sample_mask = 0xFFFF;
 		cfg.multisample_misc.depth_function = MALI_FUNC_ALWAYS;
 		cfg.stencil_front.compare_function = MALI_FUNC_ALWAYS;
