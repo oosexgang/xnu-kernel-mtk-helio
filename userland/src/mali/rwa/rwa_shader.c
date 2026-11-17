@@ -1275,9 +1275,9 @@ rwa_shader_init(struct rwa_device *device, char *why, size_t why_size)
 }
 
 /* the preload's Blend descriptor of target RT in FORMAT (pan_preload_emit_blend: replace, the shader's register format) */
-void rwa_preload_blend(const struct rwa_device *device, enum pipe_format format, unsigned rt, void *out);
+void rwa_preload_blend(const struct rwa_device *device, enum pipe_format format, unsigned rt, void *out, bool format_comps);
 void
-rwa_preload_blend(const struct rwa_device *device, enum pipe_format format, unsigned rt, void *out)
+rwa_preload_blend(const struct rwa_device *device, enum pipe_format format, unsigned rt, void *out, bool format_comps)
 {
 	struct mali_blend_packed *packed = out;
 
@@ -1285,7 +1285,8 @@ rwa_preload_blend(const struct rwa_device *device, enum pipe_format format, unsi
 		cfg.round_to_fb_precision = true;
 		cfg.srgb = util_format_is_srgb(format);
 		cfg.internal.mode = MALI_BLEND_MODE_OPAQUE;
-		cfg.internal.fixed_function.num_comps = 4;
+		/* 4, as panfrost_emit_blend; or the format's own channels, as pan_blend_get_internal_desc (run 528's B) */
+		cfg.internal.fixed_function.num_comps = format_comps ? util_format_description(format)->nr_channels : 4;
 		cfg.internal.fixed_function.conversion.memory_format =
 		    GENX(panfrost_dithered_format_from_pipe_format)(format, false);
 		cfg.internal.fixed_function.rt = rt;

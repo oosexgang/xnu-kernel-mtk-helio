@@ -36,7 +36,7 @@
 
 #include "rwa_priv.h"
 
-void rwa_preload_blend(const struct rwa_device *device, enum pipe_format format, unsigned rt, void *out);
+void rwa_preload_blend(const struct rwa_device *device, enum pipe_format format, unsigned rt, void *out, bool format_comps);
 
 /* --- the lock, the kept lines -------------------------------------------------------------------------------------- */
 
@@ -917,6 +917,7 @@ struct batch {
 	char sampled[200];                 /* the textures the draws sample, for a refused pass's line */
 	char samplers[120];
 	unsigned tex_flags;
+	unsigned raw_variant;        /* 0 INTERSECT, 1 ALWAYS, 2 the format's channel count in the frame shader's blend */
 	unsigned nsampled;
 };
 
@@ -934,9 +935,9 @@ static struct {
 } ring_slot[RING];
 /* what a pass has, for counting which of them the GPU refuses */
 enum { F_LOAD_RAW = 1, F_LOAD_BLEND = 2, F_TEX_MIP = 4, F_TEX_F16 = 8, F_CLEAR_ONLY = 16, F_RAW_TARGET = 32,
-       F_TEX_SURFACE = 64, NFLAGS = 7 };
+       F_TEX_SURFACE = 64, F_RAW_A = 128, F_RAW_B = 256, F_RAW_C = 512, NFLAGS = 10 };
 static const char *const flag_names[NFLAGS] = { "load-raw", "load-8bit", "tex-mip", "tex-f16", "clear-only",
-						"raw-target", "tex-surface" };
+						"raw-target", "tex-surface", "raw-intersect", "raw-always", "raw-ncomps" };
 static uint64_t flag_total[NFLAGS], flag_failed[NFLAGS];
 static unsigned ring_next;
 static uint64_t frag_failed, frag_checked;
@@ -1197,6 +1198,9 @@ batch_free(struct batch *b, uint64_t seq)
 
 /* --- the frame: frame descriptor, render targets, the frame shader, the fragment job ------------------------------- */
 
+/* runs 528..: a pass that loads a raw target tries one of three ways in turn (the kept lines count each) */
+static unsigned raw_variant_next;
+
 static int
 emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t why_size)
 {
@@ -1221,7 +1225,7 @@ emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t
 	for (unsigned i = 0; i < nblend; i++) {
 		void *bd = rsd.cpu + pan_size(RENDERER_STATE) + i * pan_size(BLEND);
 		if (rt_mask & (1u << i))
-			rwa_preload_blend(d, b->color[i]->format, i, bd);
+			rwa_preload_blend(d, b->color[i]->format, i, bd, b->raw_variant == 2);
 		else
 			pan_cast_and_pack((bd), BLEND, cfg) {
 				cfg.enable = false;
@@ -1322,6 +1326,10 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 		say(why, why_size, "a depth attachment that is loaded, not cleared, is not served yet");
 		return 0;
 	}
+	b->raw_variant = 0;
+	for (unsigned i = 0; i < b->color_count; i++)
+		if ((load_mask & (1u << i)) && !rwa_rt_blendable(b->color[i]->format))
+			b->raw_variant = raw_variant_next++ % 3;
 	struct ptr dcds = { NULL, 0 };
 	if (load_mask) {
 		dcds = pool_alloc(b, 3 * pan_size(DRAW), 64, why, why_size);
@@ -1338,7 +1346,9 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 	memset(fb.cpu, 0, size);
 	pan_section_pack(fb.cpu, FRAMEBUFFER, PARAMETERS, cfg) {
 		cfg.sample_locations = d->sample_positions->gpu;
-		cfg.pre_frame_0 = load_mask ? MALI_PRE_POST_FRAME_SHADER_MODE_INTERSECT : MALI_PRE_POST_FRAME_SHADER_MODE_NEVER;
+		cfg.pre_frame_0 = !load_mask ? MALI_PRE_POST_FRAME_SHADER_MODE_NEVER
+				  : b->raw_variant == 1 ? MALI_PRE_POST_FRAME_SHADER_MODE_ALWAYS
+							 : MALI_PRE_POST_FRAME_SHADER_MODE_INTERSECT;
 		cfg.pre_frame_1 = MALI_PRE_POST_FRAME_SHADER_MODE_NEVER;
 		cfg.post_frame = MALI_PRE_POST_FRAME_SHADER_MODE_NEVER;
 		cfg.frame_shader_dcds = dcds.gpu;
@@ -1487,6 +1497,8 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		if (any_clear && !(fl & (F_LOAD_RAW | F_LOAD_BLEND)) && b->draws == 0)
 			fl |= F_CLEAR_ONLY;
 		fl |= b->tex_flags;
+		if (fl & F_LOAD_RAW)
+			fl |= b->raw_variant == 1 ? F_RAW_B : b->raw_variant == 2 ? F_RAW_C : F_RAW_A;
 		ring_slot[slot].flags = fl;
 	}
 	{
