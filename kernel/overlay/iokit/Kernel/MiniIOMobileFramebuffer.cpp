@@ -395,6 +395,7 @@ public:
 	void present(const uint8_t * swap);
 	void shot(MiniIOSurface * s);
 	void keepShot(void);
+	void frameShot(uint32_t when);
 	bool grab(uint8_t * out, uint32_t max, uint32_t * width, uint32_t * height, uint32_t * stride);
 	uint32_t        fShotStats;
 	bool            fShotKept;      /* the fbshot_keep picture taken */
@@ -1385,7 +1386,8 @@ IOMobileFramebuffer::keepShot(void)
 	}
 	IOLockLock(fLock);
 	shot_keep = true;
-	shot_pixels(from, w, h, fRowBytes, 60, 0, 1);
+	/* fbshot_w=N: N pixels wide instead of 60 (a crop's detail: what an icon's name says, 16 November) */
+	shot_pixels(from, w, h, fRowBytes, gShotWidth >= 16 && gShotWidth <= 240 ? gShotWidth : 60, 0, 1);
 	shot_keep = false;
 	IOLockUnlock(fLock);
 }
@@ -1395,6 +1397,115 @@ keepShotFired(thread_call_param_t fb, thread_call_param_t unused)
 {
 	(void) unused;
 	((IOMobileFramebuffer *) fb)->keepShot();
+}
+
+/*
+ * Boot-arg fbframes=SECONDS[,SECONDS...] (up to six, uptime): the picture on the panel at each of those times, every
+ * fbframes_step-th pixel across and down (4 by default: 187 x 406 of the 750 x 1624 panel), as RGB565, into
+ * hakios_host_frames (bsd/dev/mtk_mali.c), which mtkloader lays over ramoops' dump zone for the host
+ * (tools/fbframes.py). A picture that does not fit what is left is not taken, and says so.
+ */
+extern "C" char hakios_host_frames[];
+extern "C" uint32_t hakios_host_frames_len;
+extern "C" const uint32_t hakios_host_frames_size;
+
+static uint32_t gFrameTimes[6];
+static unsigned gFrameCount = (unsigned) -1;
+static uint32_t gFrameStep;
+
+static void
+frames_parse(void)
+{
+	char args[256] = "";
+	const char *at;
+
+	gFrameCount = 0;
+	gFrameStep = 4;
+	if (!PE_parse_boot_argn("fbframes", args, sizeof(args))) {
+		return;
+	}
+	/* one number alone comes back as a binary integer (XNU's boot-args take "300" for a number, "300,320" for text) */
+	if ((args[0] < '0' || args[0] > '9') && args[0] != 0) {
+		uint32_t one;
+
+		memcpy(&one, args, sizeof(one));
+		if (one != 0) {
+			gFrameTimes[gFrameCount++] = one;
+		}
+		args[0] = 0;
+	}
+	at = args;
+	while (*at != 0 && gFrameCount < 6) {
+		uint32_t v = 0;
+
+		while (*at >= '0' && *at <= '9') {
+			v = v * 10 + (uint32_t) (*at++ - '0');
+		}
+		if (v != 0) {
+			gFrameTimes[gFrameCount++] = v;
+		}
+		if (*at != ',') {
+			break;
+		}
+		at++;
+	}
+	uint32_t step = 0;
+
+	if (PE_parse_boot_argn("fbframes_step", &step, sizeof(step)) && step >= 1 && step <= 16) {
+		gFrameStep = step;
+	}
+}
+
+void
+IOMobileFramebuffer::frameShot(uint32_t when)
+{
+	const uint8_t * from = fFlip ? fFlipVA[fFront] : fBase;
+	struct {
+		char mark[4];
+		uint16_t width, height;
+		uint32_t uptime, bytes;
+	} head = { { 'H', 'K', 'F', 'P' }, 0, 0, when, 0 };
+
+	if (from == NULL || fPanelWidth == 0 || fPanelHeight == 0) {
+		hakios_host_keep_add("fbframes: no picture on the panel at %u s", when);
+		return;
+	}
+	head.width = (uint16_t) (fPanelWidth / gFrameStep);
+	head.height = (uint16_t) (fPanelHeight / gFrameStep);
+	head.bytes = (uint32_t) head.width * head.height * 2;
+	IOLockLock(fLock);
+	if (hakios_host_frames_len + sizeof(head) + head.bytes > hakios_host_frames_size) {
+		IOLockUnlock(fLock);
+		hakios_host_keep_add("fbframes: the picture at %u s (%ux%u) does not fit what is left (%u of %u bytes)", when,
+		    head.width, head.height, hakios_host_frames_size - hakios_host_frames_len, hakios_host_frames_size);
+		return;
+	}
+	uint8_t * out = (uint8_t *) hakios_host_frames + hakios_host_frames_len;
+
+	memcpy(out, &head, sizeof(head));
+	out += sizeof(head);
+	for (uint32_t y = 0; y < head.height; y++) {
+		const uint32_t * row = (const uint32_t *) (from + (size_t) (y * gFrameStep + gFrameStep / 2) * fRowBytes);
+
+		for (uint32_t x = 0; x < head.width; x++) {
+			uint32_t pixel = row[x * gFrameStep + gFrameStep / 2];  /* B G R A in memory */
+			uint32_t r = (pixel >> 16) & 0xff, g = (pixel >> 8) & 0xff, b = pixel & 0xff;
+			uint16_t v = (uint16_t) ((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3));
+
+			*out++ = (uint8_t) (v & 0xff);
+			*out++ = (uint8_t) (v >> 8);
+		}
+	}
+	hakios_host_frames_len += (uint32_t) sizeof(head) + head.bytes;
+	IOLockUnlock(fLock);
+	hakios_host_keep_add("fbframes: a picture at %u s, %ux%u RGB565, %u bytes kept of %u", when, head.width,
+	    head.height, hakios_host_frames_len, hakios_host_frames_size);
+}
+
+static void
+frameShotFired(thread_call_param_t fb, thread_call_param_t when)
+{
+	((IOMobileFramebuffer *) fb)->frameShot((uint32_t) (uintptr_t) when);
 }
 
 extern "C" bool
@@ -1412,6 +1523,19 @@ IOMobileFramebuffer::present(const uint8_t * swap)
 	uint64_t now = mach_absolute_time(), period, pause;
 
 	gLiveFB = this;
+	if (gFrameCount == (unsigned) -1) {
+		frames_parse();
+		for (unsigned i = 0; i < gFrameCount; i++) {
+			thread_call_t fcall = thread_call_allocate_with_options(frameShotFired, this, THREAD_CALL_PRIORITY_KERNEL,
+			    THREAD_CALL_OPTIONS_ONCE);
+			uint64_t fwhen;
+
+			nanoseconds_to_absolutetime((uint64_t) gFrameTimes[i] * NSEC_PER_SEC, &fwhen);
+			if (fcall != NULL) {
+				thread_call_enter1_delayed(fcall, (thread_call_param_t) (uintptr_t) gFrameTimes[i], fwhen);
+			}
+		}
+	}
 	if (gShotKeep != 0 && !fShotKept) {
 		thread_call_t call = thread_call_allocate(keepShotFired, this);
 		uint64_t when;
@@ -1429,6 +1553,25 @@ IOMobileFramebuffer::present(const uint8_t * swap)
 	clock_interval_to_deadline(SWAP_HELD_MS, kMillisecondScale, &deadline);
 	if (gTouchLat) {
 		hakios_tl("tl: s %u at %llu\n", swapWord(swap, SWAP_ID), micros(now));
+	}
+	/* fbswaplog=S: every 20 s from S, how many swaps came in, were shown and were given up */
+	{
+		static int from = -2;
+		static unsigned came, told;
+		static uint64_t next_ns;
+		uint64_t now_ns;
+
+		if (from == -2 && !PE_parse_boot_argn("fbswaplog", &from, sizeof(from))) {
+			from = -1;
+		}
+		came++;
+		absolutetime_to_nanoseconds(now, &now_ns);
+		if (from >= 0 && told < 20 && now_ns >= (uint64_t)from * NSEC_PER_SEC && now_ns >= next_ns) {
+			told++;
+			next_ns = now_ns + 20 * NSEC_PER_SEC;
+			hakios_keep("fbswaplog: at %llu ms %u swaps came, %u shown, %u given up, %u waiting", now_ns / NSEC_PER_MSEC,
+			    came, fSwapsShown, fStatLost, fSwapsWaiting);
+		}
 	}
 	IOLockLock(fSwapLock);
 	fStatSwapsLate += fSwapTime != 0 && now - fSwapTime > period && now - fSwapTime < pause;
@@ -1622,6 +1765,19 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			}
 		}
 	}
+	/* a swap that shows more than its bottom layer, the first twenty, into the host's kept lines (15 November: the
+	 * 27 release's icons are drawn into the shown surfaces once and wiped by their next frame -- are they meant to be
+	 * a layer of their own?) */
+	{
+		static unsigned said;
+
+		if ((layers & ~1u) != 0 && said < 20) {
+			said++;
+			hakios_host_keep_add("swap %u layers 0x%x: surfaces %u %u %u %u",
+			    swapWord(swap, SWAP_ID), layers, swapWord(swap, SWAP_SURFACE(0)), swapWord(swap, SWAP_SURFACE(1)),
+			    swapWord(swap, SWAP_SURFACE(2)), swapWord(swap, SWAP_SURFACE(3)));
+		}
+	}
 	if (gFBText) {
 		/*
 		 * The driver's lines, white on black, 8 x 16 (the console's own font, iso_font: its lowest bit the
@@ -1678,11 +1834,45 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		flicker(recorded);
 	}
 	fSwapsShown++;
+	/* boot-arg fbswaplog=S: from S seconds of uptime, the surface each swap put on the panel, a line for each change
+	 * of it (60 at most) -- which of the window server's surfaces the panel shows (16 November) */
+	{
+		static int from = -2;
+		static unsigned said, last_surface;
+		static uint64_t repeats;
+
+		if (from == -2 && !PE_parse_boot_argn("fbswaplog", &from, sizeof(from))) {
+			from = -1;
+		}
+		if (from >= 0 && said < 60) {
+			uint64_t now_ns;
+
+			absolutetime_to_nanoseconds(mach_absolute_time(), &now_ns);
+			unsigned surface = swapWord(swap, SWAP_SURFACE(0));
+
+			if (now_ns >= (uint64_t)from * NSEC_PER_SEC && surface != last_surface) {
+				said++;
+				hakios_keep("fbswaplog: swap #%u at %llu ms: surface %u (after %llu swaps of %u)", fSwapsShown,
+				    now_ns / NSEC_PER_MSEC, surface, repeats, last_surface);
+				last_surface = surface;
+				repeats = 0;
+			} else {
+				repeats++;
+			}
+		}
+	}
 	if (gTouchLat) {
 		hakios_tl("tl: v %u ready %llu shown %llu done %llu\n", swapWord(swap, SWAP_ID), micros(ready), micros(shown),
 		    micros(drawn));
 	}
 	if (layers != fLayersShown) {
+		static unsigned kept_layers;
+
+		if (kept_layers++ < 40) {
+			hakios_keep("fbswaplog: swap #%u: layers 0x%x now (0x%x before): %u %u %u %u", fSwapsShown, layers,
+			    fLayersShown, swapWord(swap, SWAP_SURFACE(0)), swapWord(swap, SWAP_SURFACE(1)),
+			    swapWord(swap, SWAP_SURFACE(2)), swapWord(swap, SWAP_SURFACE(3)));
+		}
 		IOLog("MiniIOMobileFramebuffer: swap #%u: surfaces in layers 0x%x now (0x%x before): %u %u %u %u\n", fSwapsShown, layers,
 		    fLayersShown, swapWord(swap, SWAP_SURFACE(0)), swapWord(swap, SWAP_SURFACE(1)), swapWord(swap, SWAP_SURFACE(2)),
 		    swapWord(swap, SWAP_SURFACE(3)));

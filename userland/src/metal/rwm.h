@@ -169,6 +169,11 @@ struct rwm_texture *rwm_texture_new(struct rwa_texture *texture, const struct rw
 void rwm_texture_free(struct rwm_texture *texture);
 struct rwa_texture *rwm_texture_mesa(const struct rwm_texture *texture);
 const struct rwa_texture_shape *rwm_texture_shape(const struct rwm_texture *texture);
+/* a copy of what a target holds now (rwm_drawshot); the caller frees it */
+uint8_t *rwm_texture_snapshot(struct rwm_texture *texture, size_t *bytes);
+unsigned rwm_texture_fill_kind(const struct rwm_texture *texture);
+/* rwm_texshot_draw: a marked draw has been recorded since the last texshot */
+extern bool rwm_texshot_marked;
 void rwm_texture_copy_in_from(struct rwm_texture *texture, IOSurfaceRef surface, bool two_planes);
 /* ... or the caller's memory (-newTextureWithBytesNoCopy:...): stride 0 is rows packed, as the library counts them */
 void rwm_texture_copy_in_from_memory(struct rwm_texture *texture, const void *bytes, size_t length, size_t stride,

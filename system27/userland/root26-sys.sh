@@ -46,8 +46,36 @@ if [ -n "${METAL27:-}" ]; then
 	cp $METAL27/libOSMesa.8.dylib $T/lib/
 	ln -sf libOSMesa.8.dylib $T/lib/libhakiosair.dylib
 	cp $METAL27/QuartzCore-default.metallib $T/share/
+	# the 27 release's CoreAnimation pipelines, built ahead by each process's warm-up thread (tools/rwm-recipes.py)
+	[ -f "$(dirname "$RN")/userland/share/rwm-recipes27.txt" ] && cp "$(dirname "$RN")/userland/share/rwm-recipes27.txt" $T/share/rwm-recipes.txt
+	# ... and the generic pipelines' variants, built ahead the same way (tools/rwm-variants.py)
+	[ -f "$(dirname "$RN")/userland/share/rwm-variants27.txt" ] && cp "$(dirname "$RN")/userland/share/rwm-variants27.txt" $T/share/rwm-variants.txt
 	{ echo "/hakios/bin/tolog /hakios/bin/metal_props on ../../../hakios/lib/HakiosMetal HakiosMetalDevice"; cat $T/etc/rc; } > $T/etc/rc.m
 	mv $T/etc/rc.m $T/etc/rc
+	# RWA_REPLAY_DIR=DIR: captured draws (capNNN.txt) and the two shader modules (vspc.bc, fcph.bc) drawn again on the
+	# Mali before launchd by ca27_replay, when boot-arg rwa_replay=1 asks (it returns at once otherwise); the
+	# captures stay out of the tree, they hold Apple's shaders
+	if [ -n "${RWA_REPLAY_DIR:-}" ] && [ -f $METAL27/ca27_replay ]; then
+		mkdir -p $T/share/replay
+		cp $METAL27/ca27_replay $T/bin/
+		cp "$RWA_REPLAY_DIR"/vspc.bc "$RWA_REPLAY_DIR"/fcph.bc $T/share/replay/
+		# runs.txt in it, if there: one replay a line, "CAPTURE [NAME=VALUE...]" (the switches of the compiler library
+		# for that one process); without it every capture once, as it is
+		{ if [ -f "$RWA_REPLAY_DIR"/runs.txt ]; then
+			# "CAPTURE VERTEX.bc FRAGMENT.bc [NAME=VALUE...]"
+			while read -r c v f envs; do
+				[ -z "$c" ] || [ "${c#\#}" != "$c" ] && continue
+				cp "$RWA_REPLAY_DIR/$c" "$RWA_REPLAY_DIR/$v" "$RWA_REPLAY_DIR/$f" $T/share/replay/
+				echo "/hakios/bin/tolog $envs /hakios/bin/ca27_replay /hakios/share/replay/$c /hakios/share/replay/$v /hakios/share/replay/$f"
+			done < "$RWA_REPLAY_DIR"/runs.txt
+		  else
+			for c in "$RWA_REPLAY_DIR"/cap*.txt; do
+				cp "$c" $T/share/replay/
+				echo "/hakios/bin/tolog /hakios/bin/ca27_replay /hakios/share/replay/$(basename $c) /hakios/share/replay/vspc.bc /hakios/share/replay/fcph.bc"
+			done
+		  fi; cat $T/etc/rc; } > $T/etc/rc.m
+		mv $T/etc/rc.m $T/etc/rc
+	fi
 fi
 # MALI27=DIR (the MTK port): hakios-mali's probe (mali27.sh: the Mali's job descriptors written by our own library, no
 # Panfrost), /hakios/bin/mali-probe; the job list runs it (RC_JOBS=userland/rc.jobs.maliprobe), or a shell by hand
@@ -120,7 +148,8 @@ PY
 # airplayd: the audio server starts it to look for AirPlay routes, and it dies at once (SIGSEGV), every 5 s.
 # PerfPowerServices is refused by the kernel (its busy loop does not work here). Do not leave its
 # Mach services advertised: PLClientLogger's synchronous permission request otherwise waits forever.
-for job in com.apple.ScreenTimeAgent com.apple.airplayd com.apple.PerfPowerServices; do
+# NO_JOBS="LABEL ...": more of them left out, for a run (a test of what a job does)
+for job in com.apple.ScreenTimeAgent com.apple.airplayd com.apple.PerfPowerServices ${NO_JOBS:-}; do
 	rm -f "$J/$job.plist" && echo "  no job $job"
 done
 # The last migration: darwin-renoir's skeleton says 20F66 (16.5), so the 26 release took itself for just updated

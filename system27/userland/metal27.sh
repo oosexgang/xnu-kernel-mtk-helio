@@ -28,7 +28,11 @@ $DYN -Os -bundle -framework Foundation -framework IOKit -framework IOSurface -fr
 	-I../tools/mesa/air -Isrc -o $O/HakiosMetal src/hakiosmetal.m $O/*.o
 $DYN -framework CoreFoundation -framework IOKit -o $O/metal_props src/metal_props.c
 $DYN -o $O/psgrep src/psgrep.c
-for f in HakiosMetal metal_props psgrep; do
+MESA=${MESA:-${OBJ:-$RN/userland/obj26}/libOSMesa.8.dylib}
+# a captured draw of the window server's drawn again on the Mali at boot (tools/air/ca27_replay.c, boot-arg rwa_replay=1)
+$DYN -I../tools/mesa/air -o $O/ca27_replay ../tools/air/ca27_replay.c "$MESA"
+install_name_tool -change "$(otool -L $O/ca27_replay | awk '/libOSMesa/ {print $1; exit}')" /hakios/lib/libOSMesa.8.dylib $O/ca27_replay 2>/dev/null || true
+for f in HakiosMetal metal_props psgrep ca27_replay; do
 	$RN/tools/pacstrip macho $O/$f $O/$f.strip > /dev/null && mv $O/$f.strip $O/$f
 	${LDID:-$THEOS/toolchain/linux/iphone/bin/ldid} -S $O/$f
 	file -b $O/$f | cut -c1-50

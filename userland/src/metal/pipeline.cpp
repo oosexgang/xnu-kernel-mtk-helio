@@ -62,7 +62,9 @@ pipelog(const char *label, const struct rwm_render_request *r, const struct rwa_
 bool
 coreanimation_draw(const char *label)
 {
-	static const char prefix[] = "com.apple.coreanimation.draw.";
+	/* 16.5's labels are com.apple.coreanimation.draw.*, the 27 release's com.apple.coreanimation.PBGRA... and the
+	 * like: no pipeline of 27 was recorded as a recipe, so none was built ahead (16 November) */
+	static const char prefix[] = "com.apple.coreanimation.";
 
 	return label != nullptr && strncmp(label, prefix, sizeof(prefix) - 1) == 0;
 }
@@ -119,6 +121,7 @@ namespace {
 struct generic_variant {
 	uint8_t vertex[8], fragment[64];
 	struct rwa_render *render;      /* NULL: the build failed, said once */
+	bool building;                  /* being built (by a draw or ahead, prebuild_main): wait for generic_cond */
 };
 
 struct generic_record {
@@ -137,6 +140,8 @@ struct generic_record {
 };
 
 pthread_mutex_t generic_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t generic_cond = PTHREAD_COND_INITIALIZER;   /* a variant's build ended */
+void prebuild_start(struct generic_record *g);
 /* the number of the variant the last rwm_generic_variant on this thread gave (its "rwm variant LABEL #N" line), 0: none */
 thread_local unsigned last_variant;
 struct generic_record *generics[64];
@@ -212,9 +217,12 @@ generic_keep(struct rwa_device *device, const char *label, const struct rwm_rend
 	 * CoreAnimation's ring of uniforms had there -- run 93 built a variant again for each new value in them */
 	g->fragment_config = 49;
 	g->vertex_config = r->vertex_name != nullptr && strncmp(r->vertex_name, "fixed_vert", 10) == 0 ? 4 : 0;
+	struct generic_record *kept = nullptr;
+
 	pthread_mutex_lock(&generic_lock);
 	if (ngenerics < sizeof(generics) / sizeof(generics[0])) {
 		generics[ngenerics++] = g;
+		kept = g;
 		g = nullptr;
 	}
 	pthread_mutex_unlock(&generic_lock);
@@ -222,6 +230,9 @@ generic_keep(struct rwa_device *device, const char *label, const struct rwm_rend
 		free(g->vertex);
 		free(g->fragment);
 		free(g);
+	}
+	if (kept != nullptr) {
+		prebuild_start(kept);
 	}
 }
 
@@ -244,6 +255,150 @@ variant_main(void *context)
 	air->render_config(g->vertex_config ? v->vertex : nullptr, g->vertex_config, v->fragment, g->fragment_config);
 	v->render = air->render_create(g->device, g->vertex, g->vertex_size, nullptr, g->fragment, g->fragment_size,
 				       nullptr, &g->shape, &v->info, v->why, sizeof(v->why));
+}
+
+/*
+ * Variants built AHEAD. A variant built at the draw stops the frame for 1 to 4 s on the phone (83 of them, 125 s, in
+ * run 202 alone: the home screen's frames came 5 to 15 s apart). Each one's configuration is in the log ("rwm variant
+ * LABEL #N built in T ms: vHEX fHEX"), so tools/rwm-variants.py folds them into userland/share/rwm-variants27.txt,
+ * the image has it as /hakios/share/rwm-variants.txt, and once a generic pipeline is made a thread of its own builds
+ * every configuration listed for its label, one at a time under the compile lock, while the frames go on. A draw that
+ * wants one still being built waits for it (generic_cond) instead of building it again. Boot-arg rwm_prebuild=0: none.
+ */
+struct prebuilt_config {
+	char label[96];
+	uint8_t vertex[8], fragment[64];
+};
+struct prebuilt_config *prebuilt;
+unsigned nprebuilt;
+pthread_once_t prebuilt_once = PTHREAD_ONCE_INIT;
+
+int
+hex_bytes(const char *hex, uint8_t *out, unsigned room)
+{
+	unsigned n = 0;
+
+	while (hex[0] != 0 && hex[1] != 0 && hex[0] != ' ' && hex[0] != '\n' && n < room) {
+		unsigned byte;
+
+		if (sscanf(hex, "%2x", &byte) != 1) {
+			return -1;
+		}
+		out[n++] = (uint8_t)byte;
+		hex += 2;
+	}
+	return (int)n;
+}
+
+void
+prebuilt_load(void)
+{
+	FILE *f = fopen("/hakios/share/rwm-variants.txt", "r");
+	char line[512];
+
+	if (f == nullptr) {
+		return;
+	}
+	while (fgets(line, sizeof(line), f) != nullptr) {
+		char label[96], v[64], fr[200];
+		struct prebuilt_config c = {};
+
+		if (line[0] == '#' || sscanf(line, "%95s v%63s f%199s", label, v, fr) != 3 ||
+		    hex_bytes(v, c.vertex, sizeof(c.vertex)) < 0 || hex_bytes(fr, c.fragment, sizeof(c.fragment)) < 0) {
+			continue;
+		}
+		strlcpy(c.label, label, sizeof(c.label));
+		struct prebuilt_config *grown =
+			(struct prebuilt_config *)realloc(prebuilt, (nprebuilt + 1) * sizeof(*prebuilt));
+
+		if (grown == nullptr) {
+			break;
+		}
+		prebuilt = grown;
+		prebuilt[nprebuilt++] = c;
+	}
+	fclose(f);
+}
+
+void *
+prebuild_main(void *context)
+{
+	struct generic_record *g = (struct generic_record *)context;
+	const char *label = g->label + (strncmp(g->label, "com.apple.coreanimation.", 24) == 0 ? 24 : 0);
+	unsigned built = 0;
+	const uint64_t began = rwm_ns();
+
+	for (unsigned k = 0; k < nprebuilt; k++) {
+		const struct prebuilt_config *c = &prebuilt[k];
+		struct generic_variant *v = nullptr;
+		bool known = false;
+
+		if (strcmp(c->label, label) != 0) {
+			continue;
+		}
+		pthread_mutex_lock(&generic_lock);
+		for (unsigned i = 0; i < g->nvariants && !known; i++) {
+			known = memcmp(g->variants[i].vertex, c->vertex, sizeof(c->vertex)) == 0 &&
+				memcmp(g->variants[i].fragment, c->fragment, sizeof(c->fragment)) == 0;
+		}
+		if (!known && g->nvariants < sizeof(g->variants) / sizeof(g->variants[0])) {
+			v = &g->variants[g->nvariants++];
+			memcpy(v->vertex, c->vertex, sizeof(v->vertex));
+			memcpy(v->fragment, c->fragment, sizeof(v->fragment));
+			v->render = nullptr;
+			v->building = true;
+		}
+		pthread_mutex_unlock(&generic_lock);
+		if (v == nullptr) {
+			continue;
+		}
+
+		variant_call call = {};
+
+		call.g = g;
+		call.vertex = v->vertex;
+		call.fragment = v->fragment;
+		rwm_compile_lock();
+		rwm_on_big_stack(variant_main, &call);
+		rwm_compile_unlock();
+		pthread_mutex_lock(&generic_lock);
+		v->render = call.render;
+		v->building = false;
+		pthread_cond_broadcast(&generic_cond);
+		pthread_mutex_unlock(&generic_lock);
+		built += call.render != nullptr;
+	}
+	if (built != 0) {
+		char line[200];
+
+		snprintf(line, sizeof(line), "!!rwm prebuilt %u variants of %s in %llu ms", built, label,
+			 (unsigned long long)((rwm_ns() - began) / 1000000));
+		sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+	}
+	return nullptr;
+}
+
+void
+prebuild_start(struct generic_record *g)
+{
+	pthread_t thread;
+	pthread_attr_t attr;
+
+	if (boot_arg("rwm_prebuild=0")) {
+		return;
+	}
+	pthread_once(&prebuilt_once, prebuilt_load);
+	if (nprebuilt == 0) {
+		return;
+	}
+	/* a big stack: the build runs the compiler (rwm_on_big_stack wants to be called from one that can hold it) */
+	pthread_attr_init(&attr);
+	pthread_attr_setstacksize(&attr, 1u << 20);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	if (pthread_create(&thread, &attr, prebuild_main, g) != 0) {
+		rwm_print("no thread to build %s's variants ahead\n", g->label);
+	}
+	pthread_attr_destroy(&attr);
 }
 
 /* `size` bytes of `buffer` at `offset` into `out`; false when they are not all there */
@@ -303,7 +458,85 @@ rwm_render_compile(struct rwa_device *device, const char *label, const struct rw
 		base.vertex_constants = vc0;
 		base.fragment_constants = fc0;
 	}
-	compile_call call = { device, generic ? &base : r, shape, info, why, why_size, nullptr };
+	/* boot-arg rwm_nonoise=1: CoreAnimation's dither off -- fc_has_noise_scale (8) and fc_has_noise_tex (21) made 0, so
+	 * no draw reads the 32 x 32 noise texture at slot 9 through the shader's own sampler (15 November: the icons' and
+	 * labels' pipelines are the same functions as the glass that shows, and differ from it in the noise) */
+	bool nonoise = false;
+
+	if (boot_arg("rwm_nonoise=1")) {
+		if (base.fragment_constants != fc0) {
+			base.fragment_constant_count = r->fragment_constant_count < 128 ? r->fragment_constant_count : 128;
+			memcpy(fc0, r->fragment_constants, base.fragment_constant_count * sizeof(fc0[0]));
+			base.fragment_constants = fc0;
+		}
+		for (unsigned i = 0; i < base.fragment_constant_count; i++) {
+			if ((fc0[i].index == 8 || fc0[i].index == 21) && fc0[i].bits != 0) {
+				fc0[i].bits = 0;
+				nonoise = true;
+			}
+		}
+	}
+	/* boot-arg rwm_fcset=I:V,I:V...: those fragment constants given those values in every pipeline whose label has
+	 * "Timg" in it (15 November: the icons' pipelines and the glass that shows are the same functions and differ in
+	 * fc_texture_function 28, fc_blend_function 29 and fc_dest_count 35) */
+	{
+		const char *at = strstr(rwm_boot_args(), "rwm_fcset=");
+
+		if (at != nullptr && label != nullptr && strstr(label, "Timg") != nullptr) {
+			if (base.fragment_constants != fc0) {
+				base.fragment_constant_count = r->fragment_constant_count < 128 ? r->fragment_constant_count : 128;
+				memcpy(fc0, r->fragment_constants, base.fragment_constant_count * sizeof(fc0[0]));
+				base.fragment_constants = fc0;
+			}
+			at += 10;
+			while (*at >= '0' && *at <= '9') {
+				char *end;
+				unsigned long index = strtoul(at, &end, 10), value;
+
+				if (*end != ':') {
+					break;
+				}
+				value = strtoul(end + 1, &end, 0);
+				for (unsigned i = 0; i < base.fragment_constant_count; i++) {
+					if (fc0[i].index == index) {
+						fc0[i].bits = value;
+					}
+				}
+				nonoise = true;
+				at = *end == ',' ? end + 1 : end;
+			}
+		}
+	}
+	/* boot-arg rwm_vcset=I:V,...: the same for the vertex constants of "Timg" pipelines (fc_texcoord_count1 is 54) */
+	{
+		const char *at = strstr(rwm_boot_args(), "rwm_vcset=");
+
+		if (at != nullptr && label != nullptr && strstr(label, "Timg") != nullptr) {
+			if (base.vertex_constants != vc0) {
+				base.vertex_constant_count = r->vertex_constant_count < 128 ? r->vertex_constant_count : 128;
+				memcpy(vc0, r->vertex_constants, base.vertex_constant_count * sizeof(vc0[0]));
+				base.vertex_constants = vc0;
+			}
+			at += 10;
+			while (*at >= '0' && *at <= '9') {
+				char *end;
+				unsigned long index = strtoul(at, &end, 10), value;
+
+				if (*end != ':') {
+					break;
+				}
+				value = strtoul(end + 1, &end, 0);
+				for (unsigned i = 0; i < base.vertex_constant_count; i++) {
+					if (vc0[i].index == index) {
+						vc0[i].bits = value;
+					}
+				}
+				nonoise = true;
+				at = *end == ',' ? end + 1 : end;
+			}
+		}
+	}
+	compile_call call = { device, generic || nonoise ? &base : r, shape, info, why, why_size, nullptr };
 
 	if (coreanimation_draw(label)) {
 		rwm_recipe_record(label, shape, r->vertex_name, r->fragment_name, r->vertex_constants,
@@ -373,6 +606,10 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 	for (unsigned i = 0; i < g->nvariants; i++) {
 		if (memcmp(g->variants[i].vertex, vcfg, sizeof(vcfg)) == 0 &&
 		    memcmp(g->variants[i].fragment, fcfg, sizeof(fcfg)) == 0) {
+			/* built ahead and not done yet: waited for rather than built twice */
+			while (g->variants[i].building) {
+				pthread_cond_wait(&generic_cond, &generic_lock);
+			}
 			found = g->variants[i].render;
 			last_variant = i + 1;
 			pthread_mutex_unlock(&generic_lock);
@@ -391,6 +628,15 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 
 	variant_call call = {};
 	const uint64_t began = rwm_ns();
+	/* its place taken first, marked as being built, and the lock let go for the build: the thread that builds ahead
+	 * (prebuild_main) and the other draws go on meanwhile; entries never move, so the pointer stays good */
+	struct generic_variant *v = &g->variants[g->nvariants++];
+
+	memcpy(v->vertex, vcfg, sizeof(vcfg));
+	memcpy(v->fragment, fcfg, sizeof(fcfg));
+	v->render = nullptr;
+	v->building = true;
+	pthread_mutex_unlock(&generic_lock);
 
 	call.g = g;
 	call.vertex = vcfg;
@@ -399,11 +645,10 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 	rwm_on_big_stack(variant_main, &call);
 	rwm_compile_unlock();
 
-	struct generic_variant *v = &g->variants[g->nvariants++];
-
-	memcpy(v->vertex, vcfg, sizeof(vcfg));
-	memcpy(v->fragment, fcfg, sizeof(fcfg));
+	pthread_mutex_lock(&generic_lock);
 	v->render = call.render;
+	v->building = false;
+	pthread_cond_broadcast(&generic_cond);
 	if (call.render != nullptr) {
 		rwm_area_label(call.render, g->label);
 	}
@@ -414,7 +659,7 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 
 		if (said++ < 120) {
 			n = snprintf(line, sizeof(line), "!!rwm variant %s #%u %s in %llu ms: v", g->label + (strncmp(g->label,
-				     "com.apple.coreanimation.", 24) == 0 ? 24 : 0), g->nvariants,
+				     "com.apple.coreanimation.", 24) == 0 ? 24 : 0), (unsigned)(v - g->variants) + 1,
 				     call.render != nullptr ? "built" : "REFUSED", (unsigned long long)((rwm_ns() - began) / 1000000));
 			for (unsigned i = 0; i < g->vertex_config && n > 0 && n < (int)sizeof(line) - 4; i++) {
 				n += snprintf(line + n, sizeof(line) - n, "%02x", vcfg[i]);
@@ -430,7 +675,7 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 		}
 	}
 	found = call.render;
-	last_variant = g->nvariants;
+	last_variant = (unsigned)(v - g->variants) + 1;
 	pthread_mutex_unlock(&generic_lock);
 	return found;
 }

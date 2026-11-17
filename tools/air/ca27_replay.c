@@ -16,6 +16,7 @@
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/sysctl.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -168,9 +169,46 @@ parse(const char *path)
 	fclose(f);
 }
 
+#if defined(__arm64e__)
+/* on the phone, every line printed goes to the kernel as a kept line ("!!", into the host's log): what etc/rc's programs
+ * print at boot is not in a run's log otherwise */
+static char say_line[400];
+static size_t say_used;
+
+static int
+say_write(void *cookie, const char *data, int n)
+{
+	(void)cookie;
+	for (int i = 0; i < n; i++) {
+		if (data[i] == '\n' || say_used >= sizeof(say_line) - 4) {
+			char out[420];
+
+			say_line[say_used] = 0;
+			snprintf(out, sizeof(out), "!!replay %s", say_line);
+			sysctlbyname("kern.hakios.say", NULL, NULL, out, strlen(out));
+			say_used = 0;
+		} else {
+			say_line[say_used++] = data[i];
+		}
+	}
+	return n;
+}
+#endif
+
 int
 main(int argc, char **argv)
 {
+#if defined(__arm64e__)
+	{
+		FILE *f = funopen(NULL, NULL, say_write, NULL, NULL);
+
+		if (f != NULL) {
+			setvbuf(f, NULL, _IONBF, 0);
+			stdout = f;
+			stderr = f;
+		}
+	}
+#endif
 	char why[1024] = "";
 	size_t vsz, fsz;
 	uint8_t *vbc, *fbc;
@@ -181,6 +219,23 @@ main(int argc, char **argv)
 		fprintf(stderr, "usage: ca27_replay CAPTURE VERTEX.bc FRAGMENT.bc [OUT.ppm]\n");
 		return 2;
 	}
+#if defined(__arm64e__)
+	/* on the phone (etc/rc runs it before launchd): only with boot-arg rwa_replay=1, and always over a green clear,
+	 * so that the Mali's own result of a captured draw is in the run's log (16 November) */
+	{
+		char args[1024] = "";
+		size_t size = sizeof(args) - 1;
+
+		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) != 0 || strstr(args, "rwa_replay=1") == NULL)
+			return 0;
+		setenv("RWA_REPLAY_CLEAR", "1", 1);
+		if (strstr(args, "rwa_noblend=1"))
+			setenv("RWA_NOBLEND", "1", 1);
+		fprintf(stderr, "ca27_replay: %s on the phone, tint %s noblend %s probe %s out32 %s\n", argv[1],
+			getenv("RWA_TINT") ? getenv("RWA_TINT") : "-", getenv("RWA_NOBLEND") ? "1" : "-",
+			getenv("RWA_PROBE") ? getenv("RWA_PROBE") : "-", getenv("RWA_OUT32") ? "1" : "-");
+	}
+#endif
 	parse(argv[1]);
 	vbc = slurp(argv[2], &vsz);
 	fbc = slurp(argv[3], &fsz);
@@ -197,6 +252,30 @@ main(int argc, char **argv)
 	struct rwa_device *dev = rwa_device_open(why, sizeof(why));
 	if (!dev) { fprintf(stderr, "device: %s\n", why); return 1; }
 	printf("device %s\n", rwa_device_name(dev));
+	/* RWA_FCSET=I:V,I:V...: those fragment constants given those values (added when the capture has none) -- which of
+	 * a pipeline's constants makes the Mali fail it */
+	if (getenv("RWA_FCSET")) {
+		const char *at = getenv("RWA_FCSET");
+		unsigned idx;
+		unsigned long long val;
+		int used;
+
+		while (sscanf(at, "%u:%llx%n", &idx, &val, &used) == 2) {
+			unsigned k;
+
+			for (k = 0; k < nfconst && fconst[k].index != idx; k++)
+				;
+			if (k == nfconst && nfconst < 64)
+				fconst[nfconst++].index = idx;
+			if (k < nfconst)
+				fconst[k].bits = val;
+			printf("fragment constant %u = %llx\n", idx, val);
+			at += used;
+			if (*at != ',')
+				break;
+			at++;
+		}
+	}
 	rwa_render_constants(vconst, nvconst, fconst, nfconst);
 	/* no entry names, as userland/src/metal/pipeline.cpp makes it */
 	struct rwa_render *render = rwa_render_create(dev, vbc, vsz, NULL, fbc, fsz, NULL, &shape, &info, why, sizeof(why));
@@ -258,6 +337,10 @@ main(int argc, char **argv)
 		size_t row = slot[i].w * 16;
 		uint8_t *white = malloc(row * slot[i].h);
 		memset(white, 255, row * slot[i].h);
+		/* half-float RGBA (115): bytes of 255 are NaN, so white is 1.0 in every half (0x3c00) */
+		if (slot[i].f == 115)
+			for (size_t k = 0; k < row * slot[i].h / 2; k++)
+				((uint16_t *)white)[k] = 0x3c00;
 		unsigned o[3] = { 0, 0, 0 }, z[3] = { slot[i].w, slot[i].h, 1 };
 		if (rwa_texture_write(tex[i], 0, 0, o, z, white, 0, why, sizeof(why)) != 0)
 			fprintf(stderr, "texture %u write: %s\n", i, why);
@@ -269,6 +352,7 @@ main(int argc, char **argv)
 		samp[i] = rwa_sampler_create(dev, &ss, why, sizeof(why));
 
 	float clear[4] = { 0, 0, 0, 0 };
+	if (getenv("RWA_REPLAY_CLEAR")) { clear[1] = 1; clear[3] = 1; }   /* a check that the target is read */
 	struct rwa_draw d = { 0 };
 	d.color = targets;
 	d.color_count = ntargets;
@@ -293,8 +377,15 @@ main(int argc, char **argv)
 	d.fragment_buffer_table_count = nf;
 	d.viewport = have_viewport ? viewport : NULL;
 	d.scissor = have_scissor ? scissor : NULL;
+	unsigned failed_before = 0, failed_after = 0;
+	size_t fcsz = sizeof(failed_before);
+	/* on the phone: whether the Mali failed the draw's job chains (kern.hakios.mali_failed) */
+	sysctlbyname("kern.hakios.mali_failed", &failed_before, &fcsz, NULL, 0);
 	if (rwa_render_draw(render, &d, why, sizeof(why)) != 0) { fprintf(stderr, "draw: %s\n", why); return 1; }
 	if (rwa_finish(dev, why, sizeof(why)) != 0) { fprintf(stderr, "finish: %s\n", why); return 1; }
+	fcsz = sizeof(failed_after);
+	if (sysctlbyname("kern.hakios.mali_failed", &failed_after, &fcsz, NULL, 0) == 0)
+		printf("the GPU failed %u job chain(s) of this draw\n", failed_after - failed_before);
 
 	uint32_t *px = malloc(750 * 1624 * 4);
 	unsigned o[3] = { 0, 0, 0 }, z[3] = { 750, 1624, 1 };

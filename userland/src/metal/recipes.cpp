@@ -88,7 +88,9 @@ struct warm {
 	/* not in the pipeline library: its two functions out of QuartzCore-default.metallib, and their constants */
 	char vertex[96], fragment[96];
 	unsigned nv, nf;
-	struct rwa_constant vc[32], fc[32];
+	/* 128: the 27 release's uber shader has 60 fragment constants, and a recipe cut at 32 built another shader --
+	 * the home screen came out black when they were taken (runs 206, 207; 16 November) */
+	struct rwa_constant vc[128], fc[128];
 };
 
 warm *warms;
@@ -168,7 +170,7 @@ recipe_parse(const char *text, warm *out)
 			unsigned *n = side == 0 ? &out->nv : &out->nf;
 			const char *at = c1 + 1;
 
-			while (*at != '\0' && *at != '|' && *at != '\n' && *n < 32) {
+			while (*at != '\0' && *at != '|' && *at != '\n' && *n < 128) {
 				char *end;
 
 				c[*n].index = (unsigned)strtoul(at, &end, 16);
@@ -263,12 +265,12 @@ rwm_recipe_record(const char *label, const struct rwa_render_shape *shape, const
 		if (whole && fragment != nullptr) {
 			whole = recipe.add(" |") && recipe.add(vertex != nullptr ? vertex : "") && recipe.add("|", 1) &&
 				recipe.add(fragment) && recipe.add("|", 1);
-			for (unsigned i = 0; whole && i < nv && i < 32; i++) {
+			for (unsigned i = 0; whole && i < nv && i < 128; i++) {
 				snprintf(part, sizeof(part), "%x:%llx;", vc[i].index, (unsigned long long)vc[i].bits);
 				whole = recipe.add(part);
 			}
 			whole = whole && recipe.add("|", 1);
-			for (unsigned i = 0; whole && i < nf && i < 32; i++) {
+			for (unsigned i = 0; whole && i < nf && i < 128; i++) {
 				snprintf(part, sizeof(part), "%x:%llx;", fc[i].index, (unsigned long long)fc[i].bits);
 				whole = recipe.add(part);
 			}
@@ -288,7 +290,11 @@ rwm_recipe_record(const char *label, const struct rwa_render_shape *shape, const
 			/* and at once to the kernel's buffer for the host, which comes back whole however long the
 			 * run (kern.hakios.host_keep): the log's middle is lost, and with it a long run's recipes
 			 * (run 352) */
-			say_recipe(recipes[nrecipes - 1], nrecipes - 1, true);
+			/* (only with boot-arg rwm_recipes=1 now that the 27 release's are in userland/share: a hundred of
+			 * them filled the 64 KB the kernel keeps for the host, and the run's last picture was cut, run 231) */
+			if (strstr(rwm_boot_args(), "rwm_recipes=1") != nullptr) {
+				say_recipe(recipes[nrecipes - 1], nrecipes - 1, true);
+			}
 		}
 	}
 	pthread_mutex_unlock(&compile_lock);

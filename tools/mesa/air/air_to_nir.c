@@ -99,6 +99,8 @@ val_is_pointerish(const struct air_val *v)
  * scratch, or -1: a local at a place known now, and nothing else. */
 /* A byte offset known exactly while translating, and only through operations whose
  * result this works out (offset_known below answers true for others without a value). */
+static int tint_mode(void);
+
 static bool
 exact_offset(nir_def *d, uint64_t *out, unsigned depth)
 {
@@ -184,10 +186,42 @@ scalar_known(nir_def *d, nir_const_value *out, unsigned depth)
       *out = nir_instr_as_load_const(d->parent_instr)->value[0];
       return true;
    }
+   /* a phi whose every source is known and the same: the branch that decided between them was itself known, so only
+    * the side taken was translated (QuartzCore 27's static initializer computes vry_has_point_size_per and the other
+    * varyings' predicates through one; unknown, the vertex stage wrote both its [[point_size]] outputs as 0, and the
+    * Mali drew nothing at all of any draw through it: the icons, their names, the glass, 16 November) */
+   if (d->parent_instr->type == nir_instr_type_phi) {
+      nir_phi_instr *phi = nir_instr_as_phi(d->parent_instr);
+      bool have = false;
+      nir_const_value first = { 0 };
+      nir_foreach_phi_src(src, phi) {
+         nir_const_value v;
+         if (!scalar_known(src->src.ssa, &v, depth + 1))
+            return false;
+         if (have && memcmp(&v, &first, sizeof(v)) != 0)
+            return false;
+         first = v;
+         have = true;
+      }
+      if (!have)
+         return false;
+      *out = first;
+      return true;
+   }
    if (d->parent_instr->type != nir_instr_type_alu)
       return false;
    nir_alu_instr *alu = nir_instr_as_alu(d->parent_instr);
    const nir_op_info *info = &nir_op_infos[alu->op];
+   /* a choice whose condition is known is the side it chooses, known or not the other (QuartzCore 27's vertex stage:
+    * vry_has_point_size_per = select(vry_has_point_size, per, false), per known only at run time, the select false) */
+   if ((alu->op == nir_op_bcsel || alu->op == nir_op_b32csel) && alu->src[0].src.ssa->num_components >= 1) {
+      nir_const_value cond;
+      if (!scalar_known_component(alu->src[0].src.ssa, alu->src[0].swizzle[0], &cond, depth + 1))
+         return false;
+      bool taken = alu->src[0].src.ssa->bit_size == 1 ? cond.b : cond.u32 != 0;
+      unsigned k = taken ? 1 : 2;
+      return scalar_known_component(alu->src[k].src.ssa, alu->src[k].swizzle[0], out, depth + 1);
+   }
    if (info->output_size != 0 || info->num_inputs > 4)
       return false;
    nir_const_value values[4][NIR_MAX_VEC_COMPONENTS];
@@ -703,6 +737,23 @@ air_load_ptr(struct air_ctx *c, struct air_ptr ptr, const struct air_type *type,
             break;
          }
       }
+      /* rwa_tint=13: a vertex stage's float4x4 at buffer 2 (CoreAnimation's projection) read as the screen's own,
+       * 750 x 1624 in pixels to clip space -- whether the icons' draws come out once their matrix is not read from
+       * the buffer (15 November: drawn, and not in the screen's surface, run 131) */
+      if (tint_mode() == 13 && c->nir->info.stage == MESA_SHADER_VERTEX && ptr.binding == 2 && comps == 4 &&
+          bits == 32) {
+         uint64_t at = 0;
+
+         if (ptr.offset == NULL || exact_offset(ptr.offset, &at, 0)) {
+            static const float m[4][4] = { { 2.0f / 750, 0, 0, 0 }, { 0, -2.0f / 1624, 0, 0 }, { 0, 0, 0, 0 },
+                                           { -1, 1, 0, 1 } };
+
+            if (at % 16 == 0 && at < 64) {
+               res = nir_imm_vec4(&c->b, m[at / 16][0], m[at / 16][1], m[at / 16][2], m[at / 16][3]);
+               break;
+            }
+         }
+      }
       res = nir_load_ubo(&c->b, comps, bits, nir_imm_int(&c->b, ptr.binding), off,
                          .align_mul = align, .align_offset = 0, .range_base = 0, .range = ~0);
       break;
@@ -719,6 +770,9 @@ air_load_ptr(struct air_ctx *c, struct air_ptr ptr, const struct air_type *type,
 
       if (k && k->num_components == comps && k->bit_size == bits) {
          res = nir_build_imm(&c->b, comps, bits, nir_instr_as_load_const(k->parent_instr)->value);
+         if (getenv("RWA_PRINT_FOLD"))
+            fprintf(stderr, "fold stage %d scratch 0x%x = 0x%llx\n", (int)c->nir->info.stage, c->global_plan[g].offset,
+                    (unsigned long long)nir_instr_as_load_const(k->parent_instr)->value[0].u64);
          break;
       }
       /* a field of such a global, stored once with a constant (init_stores) */
@@ -730,11 +784,16 @@ air_load_ptr(struct air_ctx *c, struct air_ptr ptr, const struct air_type *type,
             if (c->init_stores[i].offset == at && !c->init_stores[i].bad && v &&
                 v->num_components == comps && v->bit_size == bits) {
                res = nir_build_imm(&c->b, comps, bits, nir_instr_as_load_const(v->parent_instr)->value);
+               if (getenv("RWA_PRINT_FOLD"))
+                  fprintf(stderr, "fold-field stage %d scratch 0x%llx = 0x%llx\n", (int)c->nir->info.stage,
+                          (unsigned long long)at, (unsigned long long)nir_instr_as_load_const(v->parent_instr)->value[0].u64);
                break;
             }
          }
          if (res)
             break;
+         if (getenv("RWA_PRINT_FOLD"))
+            fprintf(stderr, "nofold stage %d scratch 0x%llx\n", (int)c->nir->info.stage, (unsigned long long)at);
       }
       res = nir_load_scratch(&c->b, comps, bits, off, .align_mul = align);
       break;
@@ -1214,8 +1273,27 @@ make_io_var(struct air_ctx *c, nir_variable_mode mode, const struct air_type *t,
    const struct glsl_type *gt;
    unsigned comps = air_nir_components(t);
    unsigned bits = air_nir_bit_size(c, t);
+   /* A colour output of a fragment stage in 32 bits whatever the shader's type (RWA_OUT32 / boot-arg rwa_out32=1 for
+    * now): a half4 [[color(n)]] written as 16 bits reached the blender as zeros when the attachment blends -- every
+    * source-over layer of CoreAnimation 27 (the icons, their labels, the glass) left its target as it was, and the
+    * same draw without blending was drawn (16 November, ca27_replay of run 127) */
+   bool out32 = false;
+   if (mode == nir_var_shader_out && c->nir->info.stage == MESA_SHADER_FRAGMENT && location >= FRAG_RESULT_DATA0 &&
+       air_type_is_float(air_type_scalar(t)) && bits == 16) {
+      static int on = -1;
+      if (on < 0) {
+         on = getenv("RWA_OUT32") != NULL;
+#ifdef __APPLE__
+         char args[1024] = "";
+         size_t size = sizeof(args) - 1;
+         if (!on && sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0)
+            on = strstr(args, "rwa_out32=1") != NULL;
+#endif
+      }
+      out32 = on;
+   }
    if (air_type_is_float(air_type_scalar(t)))
-      gt = bits == 16 ? glsl_f16vec_type(comps) : glsl_vec_type(comps);
+      gt = bits == 16 && !out32 ? glsl_f16vec_type(comps) : glsl_vec_type(comps);
    else
       gt = glsl_vector_type(bits == 16 ? GLSL_TYPE_INT16 : GLSL_TYPE_INT, comps);
 
@@ -1266,19 +1344,65 @@ tint_mode(void)
 static void
 store_output(struct air_ctx *c, nir_variable *var, nir_def *v)
 {
+   /* rwa_tint=27: a vertex stage writes no [[point_size]] -- whether the two point sizes of QuartzCore 27's vertex
+    * shader, written as 0 because their predicates do not fold, are what keeps the Mali from drawing (16 Nov) */
+   if (tint_mode() == 27 && c->nir->info.stage == MESA_SHADER_VERTEX && var->data.location == VARYING_SLOT_PSIZ)
+      return;
+   /* a probed stage writes no depth: what kept the store dead before need not any more */
+   if (c->probe_count && c->nir->info.stage == MESA_SHADER_FRAGMENT && var->data.location == FRAG_RESULT_DEPTH)
+      return;
    /* rwa_tint=12: a vertex stage's position replaced by (x / 1000, y / 1000, 0, 1) of what it computed -- whether a
     * draw that writes no pixel has a position that puts it off the screen (15 November) */
+   /* rwa_tint=20: a vertex stage's position from nothing but the vertex's number, a square in the middle of the screen
+    * -- whether what a draw computes for its position is what keeps it off the screen (16 November) */
+   if ((tint_mode() == 20 || tint_mode() == 26) && c->nir->info.stage == MESA_SHADER_VERTEX && var->data.location == VARYING_SLOT_POS &&
+       v->num_components == 4 && v->bit_size == 32) {
+      nir_def *vid = nir_load_vertex_id(&c->b);
+      nir_def *x = nir_bcsel(&c->b, nir_ine_imm(&c->b, nir_iand_imm(&c->b, vid, 1), 0), nir_imm_float(&c->b, 0.5f),
+                             nir_imm_float(&c->b, -0.5f));
+      nir_def *y = nir_bcsel(&c->b, nir_ine_imm(&c->b, nir_iand_imm(&c->b, vid, 2), 0), nir_imm_float(&c->b, 0.5f),
+                             nir_imm_float(&c->b, -0.5f));
+      v = nir_vec4(&c->b, x, y, nir_imm_float(&c->b, 0.0f), nir_imm_float(&c->b, 1.0f));
+   }
    if (tint_mode() == 12 && c->nir->info.stage == MESA_SHADER_VERTEX && var->data.location == VARYING_SLOT_POS &&
        v->num_components == 4 && v->bit_size == 32) {
       v = nir_vec4(&c->b, nir_fmul_imm(&c->b, nir_channel(&c->b, v, 0), 0.001),
                    nir_fmul_imm(&c->b, nir_channel(&c->b, v, 1), 0.001), nir_imm_float(&c->b, 0.0f),
                    nir_imm_float(&c->b, 1.0f));
    }
-   if ((tint_mode() == 2 || tint_mode() == 12 || (tint_mode() == 6 && c->samples_image3 && var->data.location == FRAG_RESULT_DATA0)) &&
+   if ((tint_mode() == 2 || tint_mode() == 12 || tint_mode() == 20 || tint_mode() == 21 || tint_mode() == 26 ||
+        ((tint_mode() == 6 || tint_mode() == 15 || tint_mode() == 16 || tint_mode() == 17) && c->samples_image3 && var->data.location == FRAG_RESULT_DATA0)) &&
        c->nir->info.stage == MESA_SHADER_FRAGMENT && var->data.location >= FRAG_RESULT_DATA0 &&
        v->num_components == 4) {
       v = nir_vec4(&c->b, nir_imm_floatN_t(&c->b, 1.0, v->bit_size), nir_imm_floatN_t(&c->b, 0.0, v->bit_size),
                    nir_imm_floatN_t(&c->b, 1.0, v->bit_size), nir_imm_floatN_t(&c->b, 1.0, v->bit_size));
+   }
+   if (c->probe_var && c->nir->info.stage == MESA_SHADER_FRAGMENT && var->data.location == FRAG_RESULT_DATA0 &&
+       v->num_components == 4)
+      v = nir_vector_insert_imm(&c->b, nir_f2fN(&c->b, nir_load_var(&c->b, c->probe_var), v->bit_size),
+                                nir_imm_floatN_t(&c->b, 1.0, v->bit_size), 3);   /* alpha 1: the value is seen */
+   /* rwa_tint=24 / 25: a vertex stage's colour varyings are (1, 0, 1, 1) / the colour attribute (generic 3) as
+    * fetched -- which half of the vertex colour's way loses it (16 November) */
+   if ((tint_mode() == 24 || tint_mode() == 25) && c->nir->info.stage == MESA_SHADER_VERTEX &&
+       (var->data.location == VARYING_SLOT_VAR4 || var->data.location == VARYING_SLOT_VAR9) && v->num_components == 4) {
+      nir_variable *in = tint_mode() == 25 ? nir_find_variable_with_location(c->nir, nir_var_shader_in, VERT_ATTRIB_GENERIC3)
+                                           : NULL;
+      if (in && glsl_get_vector_elements(in->type) == 4)
+         v = nir_f2fN(&c->b, nir_load_var(&c->b, in), v->bit_size);
+      else if (tint_mode() == 24)
+         v = nir_vec4(&c->b, nir_imm_floatN_t(&c->b, 1.0, v->bit_size), nir_imm_floatN_t(&c->b, 0.0, v->bit_size),
+                      nir_imm_floatN_t(&c->b, 1.0, v->bit_size), nir_imm_floatN_t(&c->b, 1.0, v->bit_size));
+   }
+   /* rwa_tint=22 / 23: colour 0 is the interpolated colour_per / colour_lin input as the stage received it -- whether
+    * the vertex colour reaches the fragment stage (16 November) */
+   if ((tint_mode() == 22 || tint_mode() == 23) && c->nir->info.stage == MESA_SHADER_FRAGMENT &&
+       var->data.location == FRAG_RESULT_DATA0 && v->num_components == 4) {
+      nir_variable *in = nir_find_variable_with_location(c->nir, nir_var_shader_in,
+                                                         tint_mode() == 22 ? VARYING_SLOT_VAR4 : VARYING_SLOT_VAR9);
+      if (in && glsl_get_vector_elements(in->type) == 4) {
+         nir_def *col = nir_load_var(&c->b, in);
+         v = nir_f2fN(&c->b, col, v->bit_size);
+      }
    }
    /* rwa_tint=3: the colour as the shader made it, its alpha 1 -- a layer whose colour came out multiplied by an
     * opacity of 0 is then a black rectangle where it should be, and one that is not drawn at all stays away */
@@ -1523,6 +1647,10 @@ translate_vertex_attribute(struct air_ctx *c, const struct air_md *node, unsigne
    c->nir->info.inputs_read |= BITFIELD64_BIT(location);
 
    nir_def *v = nir_load_var(&c->b, var);
+   /* rwa_tint=26: every vertex attribute reads as zeros (the fetch is still declared) -- with tint 20's position from
+    * the vertex's number, whether a draw that writes nothing on the Mali loses itself in the attribute fetch (16 Nov) */
+   if (tint_mode() == 26)
+      v = nir_imm_zero(&c->b, v->num_components, v->bit_size);
    if (bits != 32) {
       /* The fetch delivered a full register; the shader asked for a narrower
        * type. For an integer this is a truncation and the same instruction for
@@ -2226,9 +2354,16 @@ translate_input(struct air_ctx *c, const struct air_md *node, unsigned *next_var
           */
          .fb_fetch_output_coherent = true,
       };
-      nir_def *fetched = nir_load_output(&c->b, 4, 32, nir_imm_int(&c->b, 0),
-                                         .dest_type = nir_type_float32,
-                                         .io_semantics = sem);
+      /* rwa_tint=14: attachments 1 and 2 (the 27 release's RGBA16Float and R32Float) are not read from the tile
+       * buffer at all, their [[color(n)]] read as zeros; attachment 0 is read as before -- the pipelines that read all
+       * three draw nothing in a pass that loads, those that read none or only 0 draw (15 November, runs 90, 125, 156) */
+      const bool skip_fetch = ((tint_mode() == 14 || tint_mode() == 15) && n >= 1) || (tint_mode() == 16 && n == 2) || tint_mode() == 21 ||
+                              ((tint_mode() == 17 || tint_mode() == 18) && n == 1) ||
+                              tint_mode() == 28;   /* rwa_tint=28: no attachment read at all, the colour as computed */
+      nir_def *fetched = skip_fetch ? nir_imm_vec4(&c->b, 0.0, 0.0, 0.0, 0.0)
+                                    : nir_load_output(&c->b, 4, 32, nir_imm_int(&c->b, 0),
+                                                      .dest_type = nir_type_float32,
+                                                      .io_semantics = sem);
       /* rwa_tint=8: what is read of colour attachment 1 is magenta -- where the 27 release's window server carries a
        * group drawn into attachment 1 over onto the screen, the screen shows it (15 November) */
       if (tint_mode() == 8 && n == 1)
@@ -2244,10 +2379,12 @@ translate_input(struct air_ctx *c, const struct air_md *node, unsigned *next_var
        * (nir_gather_info.c) is set here. Without uses_fbfetch_output the draw gets no
        * flush at all and the read returns whatever the tile buffer happened to hold.
        */
-      c->nir->info.outputs_read |= BITFIELD64_BIT(sem.location);
-      c->nir->info.fs.uses_fbfetch_output = true;
-      c->nir->info.fs.fbfetch_coherent = true;
-      c->info->fbfetch_targets |= 1u << n;
+      if (!skip_fetch) {
+         c->nir->info.outputs_read |= BITFIELD64_BIT(sem.location);
+         c->nir->info.fs.uses_fbfetch_output = true;
+         c->nir->info.fs.fbfetch_coherent = true;
+         c->info->fbfetch_targets |= 1u << n;
+      }
 
       /* The layer the fetch reads is not this frontend's to choose, and it is
        * not safe by default, so it goes in the log rather than only in a
@@ -3772,6 +3909,66 @@ translate_callee(struct air_ctx *c, const struct air_function *f,
  * and five of them are compute kernels, which is how the claim went unnoticed
  * -- nothing dispatched a kernel until there was something to dispatch it with.
  */
+/* RWA_PROBE=NAME:K:A (the Mac's replays): the fragment stage's colour 0 is what the K-th call (from 0, in the
+ * order translated) of a function whose name contains NAME was given as argument A, or returned with A = r --
+ * a value in the middle of the uber shader seen on the screen (16 November) */
+static bool
+probe_wanted(struct air_ctx *c, const char *name, char *which)
+{
+   const char *p = getenv("RWA_PROBE");
+#ifdef __APPLE__
+   /* or boot-arg rwa_probe=NAME:K:A on the phone */
+   static char from_args[300];
+   if (!p) {
+      char args[1024] = "";
+      size_t size = sizeof(args) - 1;
+      const char *at;
+      if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && (at = strstr(args, "rwa_probe=")) != NULL) {
+         snprintf(from_args, sizeof(from_args), "%.*s", (int)strcspn(at + 10, " "), at + 10);
+         p = from_args;
+      }
+   }
+#endif
+   if (!p || c->nir->info.stage != MESA_SHADER_FRAGMENT)
+      return false;
+   char sub[256];
+   unsigned k = 0;
+   char a[16] = "";
+   if (sscanf(p, "%255[^:]:%u:%15s", sub, &k, a) != 3 || !strstr(name, sub))
+      return false;
+   if (c->probe_count++ != k)
+      return false;
+   strcpy(which, a);
+   return true;
+}
+
+static void
+probe_store(struct air_ctx *c, nir_def *v)
+{
+   if (!v || v->bit_size == 1 || v->num_components > 4)
+      return;
+   nir_function_impl *entry = nir_shader_get_entrypoint(c->nir);
+   if (!entry || c->b.impl != entry) {
+      fprintf(stderr, "rwa probe: a call outside the entry point, not probed\n");
+      return;
+   }
+   if (!c->probe_var) {
+      c->probe_var = nir_local_variable_create(entry, glsl_vec4_type(), "rwa_probe");
+      /* blue until the probed call runs: a pixel of (0, 0, 1, 1) never reached it */
+      {
+         nir_builder eb = nir_builder_at(nir_before_impl(entry));
+         nir_store_var(&eb, c->probe_var, nir_imm_vec4(&eb, 0.0f, 0.0f, 1.0f, 1.0f), 0xf);
+      }
+   }
+   nir_def *f = nir_f2f32(&c->b, v);
+   nir_def *comps[4];
+   for (unsigned i = 0; i < 4; i++)
+      comps[i] = i < f->num_components ? nir_channel(&c->b, f, i) : nir_imm_float(&c->b, i == 3 ? 1.0f : 0.0f);
+   nir_store_var(&c->b, c->probe_var, nir_vec(&c->b, comps, 4), 0xf);
+   if (getenv("RWA_PROBE"))
+      fprintf(stderr, "rwa probe: a value of %u x %u bits\n", v->num_components, v->bit_size);
+}
+
 bool
 air_call_in_module(struct air_ctx *c, const struct air_inst *in, const char *name)
 {
@@ -3799,6 +3996,14 @@ air_call_in_module(struct air_ctx *c, const struct air_inst *in, const char *nam
       argv[i] = air_get(c, in->operands[i + 1]);
       if (!argv[i])
          return false;
+   }
+
+   char probe[16] = "";
+   bool probing = probe_wanted(c, name, probe);
+   if (probing && probe[0] != 'r') {
+      unsigned ai = atoi(probe);
+      if (ai < f->num_args)
+         probe_store(c, air_get_ssa(c, in->operands[ai + 1]));
    }
 
    nir_function *fn = translate_callee(c, f, argv, is_param);
@@ -3858,7 +4063,10 @@ air_call_in_module(struct air_ctx *c, const struct air_inst *in, const char *nam
             agg->elems[i] = air_val_ssa(c, nir_load_var(&c->b, fields[i]));
       air_set(c, &in->base, agg);
    } else if (has_ret) {
-      air_set(c, &in->base, air_val_ssa(c, nir_load_var(&c->b, tmp)));
+      nir_def *r = nir_load_var(&c->b, tmp);
+      air_set(c, &in->base, air_val_ssa(c, r));
+      if (probing && probe[0] == 'r')
+         probe_store(c, r);
    }
    return true;
 }
@@ -4527,6 +4735,8 @@ plan_globals(struct air_ctx *c)
          pl->class = AIR_PTR_SCRATCH;
          pl->offset = c->scratch_size;
          pl->has_offset = true;
+         if (getenv("RWA_PRINT_SCRATCH"))
+            fprintf(stderr, "scratch 0x%x %s\n", (unsigned)c->scratch_size, name);
          c->scratch_size += air_type_alloc_size(c->m, g->value_type);
       }
    }

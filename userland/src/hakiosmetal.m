@@ -1895,6 +1895,25 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 
 	struct rwa_depth_stencil *made = mesa.depth_stencil_create(_mesa, &state, why,
 								   sizeof(why));
+	/* the first sixteen depth/stencil states into the host's kept lines (15 November: the icons' draws make no
+	 * fragment, and CoreAnimation clips with the stencil) */
+	{
+		static unsigned said;
+
+		if (said < 16) {
+			char line[200];
+
+			said++;
+			snprintf(line, sizeof(line), "!!rwm %s: depthstencil %04x depth %u write %u front %u %u/%u/%u r%x w%x back %u %u/%u/%u r%x w%x",
+				 getprogname(), (unsigned)(((uintptr_t)made >> 4) & 0xffff), state.depth_compare_function,
+				 state.depth_write_enabled, state.front.compare_function, state.front.stencil_fail_operation,
+				 state.front.depth_fail_operation, state.front.depth_stencil_pass_operation, state.front.read_mask,
+				 state.front.write_mask, state.back.compare_function, state.back.stencil_fail_operation,
+				 state.back.depth_fail_operation, state.back.depth_stencil_pass_operation, state.back.read_mask,
+				 state.back.write_mask);
+			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+		}
+	}
 
 	if (made == NULL) {
 		rw_print("%s\n", why);
@@ -5796,6 +5815,19 @@ controlPointIndexBufferOffset:(NSUInteger)controlPointOffset
 		.size = { (unsigned)sourceSize.width, (unsigned)sourceSize.height, (unsigned)sourceSize.depth },
 	};
 
+	if (strstr(rwm_boot_args(), "rwm_uplog=1") != NULL && ([destination pixelFormat] == 115 || [destination pixelFormat] == 1)) {
+		static unsigned said;
+
+		if (said++ < 24) {
+			char line[200];
+
+			snprintf(line, sizeof(line), "!!rwm tex-copy %lux%lu from %lux%lu format %u into %lux%lu format %u",
+				 (unsigned long)sourceSize.width, (unsigned long)sourceSize.height, (unsigned long)[source width],
+				 (unsigned long)[source height], (unsigned)[source pixelFormat], (unsigned long)[destination width],
+				 (unsigned long)[destination height], (unsigned)[destination pixelFormat]);
+			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+		}
+	}
 	[self hakiosRecord:&blit from:source to:destination];
 }
 
@@ -5857,6 +5889,31 @@ controlPointIndexBufferOffset:(NSUInteger)controlPointOffset
 	};
 
 	(void)bytesPerImage;
+	/* boot-arg rwm_uplog=1: copies into RGBA16Float / A8 textures (the 27 release's icons and names), with how many
+	 * texels of the buffer's rows have alpha when the copy is encoded (16 November) */
+	if (strstr(rwm_boot_args(), "rwm_uplog=1") != NULL && ([destination pixelFormat] == 115 || [destination pixelFormat] == 1)) {
+		static unsigned said;
+
+		if (said < 24 && blit.from_contents != NULL) {
+			const unsigned f = (unsigned)[destination pixelFormat];
+			unsigned long lit = 0;
+
+			said++;
+			for (NSUInteger y = 0; y < size.height; y++) {
+				const uint8_t *r = blit.from_contents + sourceOffset + y * bytesPerRow;
+
+				for (NSUInteger x = 0; x < size.width; x++) {
+					lit += f == 115 ? (r[x * 8 + 6] | r[x * 8 + 7]) != 0 : r[x] != 0;
+				}
+			}
+			char line[200];
+
+			snprintf(line, sizeof(line), "!!rwm blit-upload %lux%lu into %lux%lu format %u: %lu texels with alpha in the buffer",
+				 (unsigned long)size.width, (unsigned long)size.height, (unsigned long)[destination width],
+				 (unsigned long)[destination height], f, lit);
+			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+		}
+	}
 	[self hakiosRecord:&blit from:source to:destination];
 }
 

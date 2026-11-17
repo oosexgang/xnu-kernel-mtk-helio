@@ -2090,7 +2090,11 @@ texture_op(struct air_ctx *c, const struct air_inst *in, const struct air_name *
          size_t size = sizeof(args) - 1;
 
          if (!tint && sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0)
-            tint = strstr(args, "rwa_tint=1") != NULL;
+         {
+            const char *at = strstr(args, "rwa_tint=1");
+
+            tint = at != NULL && (at[10] < '0' || at[10] > '9');   /* not rwa_tint=12, 13 */
+         }
 #endif
       }
       if (tint && (op == nir_texop_tex || op == nir_texop_txb || op == nir_texop_txl || op == nir_texop_txd) &&

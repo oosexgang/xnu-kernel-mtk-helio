@@ -118,7 +118,9 @@ struct air_argbuf {
 };
 
 struct air_ctx {
-   bool samples_image3;   /* rwa_tint=6: a sample from texture slot 3 was translated */
+   bool samples_image3;
+   unsigned probe_count;        /* RWA_PROBE: matching calls seen */
+   nir_variable *probe_var;     /* RWA_PROBE: the value the output shows */   /* rwa_tint=6: a sample from texture slot 3 was translated */
    void *mem_ctx;
    const struct air_module *m;
    const struct air_function *fn;

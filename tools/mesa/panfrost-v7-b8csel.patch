@@ -1,0 +1,41 @@
+--- a/src/panfrost/compiler/bifrost_compile.c
++++ b/src/panfrost/compiler/bifrost_compile.c
+@@ -4946,7 +4946,30 @@
+ 
+    if (bit_size > 32)
+       return false;
++
++   return true;
++}
+ 
++/*
++ * A b8csel whose values are wider than 8 bits -- an 8-bit condition (a byte compared, here the 27 release's
++ * CoreAnimation reading its one-byte flags) choosing between 16-bit values -- is emitted as MUX.v4i8 with a SWZ.v4i8
++ * of the high half, which the Mali-G52 r1 takes for a reserved instruction: the job chain ends with slot status 0x51
++ * (INSTR_INVALID_ENC), and the whole pass it was in is lost (20 to 40 % of the window server's chains, runs 199 to
++ * 227). Made a csel of the values' own width with the condition widened to it, which needs no byte swizzle.
++ */
++static bool
++hakios_widen_b8csel(nir_builder *b, nir_alu_instr *alu, UNUSED void *data)
++{
++   if (alu->op != nir_op_b8csel || alu->def.bit_size == 8)
++      return false;
++   b->cursor = nir_before_instr(&alu->instr);
++   unsigned size = alu->def.bit_size;
++   nir_def *cond = nir_i2iN(b, nir_ssa_for_alu_src(b, alu, 0), size);
++   nir_def *x = nir_ssa_for_alu_src(b, alu, 1), *y = nir_ssa_for_alu_src(b, alu, 2);
++   nir_def *r = size == 16 ? nir_b16csel(b, cond, x, y) : size == 32 ? nir_b32csel(b, cond, x, y) : NULL;
++   if (r == NULL)
++      return false;
++   nir_def_replace(&alu->def, r);
+    return true;
+ }
+ 
+@@ -5015,6 +5038,7 @@
+    NIR_PASS(progress, nir, nir_lower_alu_to_scalar, bi_scalarize_filter, NULL);
+    NIR_PASS(progress, nir, nir_opt_vectorize, bi_vectorize_filter, NULL);
+    NIR_PASS(progress, nir, nir_lower_bool_to_bitsize);
++   NIR_PASS(progress, nir, nir_shader_alu_pass, hakios_widen_b8csel, nir_metadata_control_flow, NULL);
+ 
+    /* Prepass to simplify instruction selection */
+    late_algebraic = false;

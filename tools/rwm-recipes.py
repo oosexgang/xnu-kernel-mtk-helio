@@ -8,7 +8,8 @@ boot partition has kilobytes, not tens of them, to spare). Recipes already in th
 """
 import os, re, sys
 
-OUT = os.path.join(os.path.dirname(__file__), '..', 'userland', 'share', 'rwm-recipes.txt')
+# RWM_RECIPES_OUT=FILE: another file (the 27 release's: userland/share/rwm-recipes27.txt)
+OUT = os.environ.get('RWM_RECIPES_OUT') or os.path.join(os.path.dirname(__file__), '..', 'userland', 'share', 'rwm-recipes.txt')
 line_re = re.compile(r'rwr (\S+) (\d+) (\d+)/(\d+) (.*)$')
 
 known = {}          # process -> [recipe, ...]
@@ -43,7 +44,12 @@ for log in sys.argv[1:]:
             print(f'{log}: {proc} recipe {n}: {len(parts)} of {total} pieces, left out', file=sys.stderr)
             continue
         recipe = ''.join(parts[k][1] for k in range(1, total + 1))
-        if ' ' not in recipe or not recipe.startswith('com.apple.coreanimation.draw.'):
+        if ' ' not in recipe or not recipe.startswith('com.apple.coreanimation.'):
+            continue
+        # the 27 release's GENERIC pipelines ("...Xghfc", fc_generic set) are not recipes: built as asked they are the
+        # whole uber shader (31588 Mali instructions, 138 s, run 64); the driver builds them with fc_generic 0 and their
+        # variants at the draws (src/metal/pipeline.cpp, generic_record)
+        if 'Xghf' in recipe.split(' ', 1)[0]:
             continue
         if recipe not in known.setdefault(proc, []):
             known[proc].append(recipe)

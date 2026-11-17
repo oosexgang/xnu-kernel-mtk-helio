@@ -6,6 +6,8 @@
 #include <sys/sysctl.h>
 
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 namespace {
 
@@ -60,6 +62,16 @@ rwm_copy_in(struct rwm_texture *texture)
 
 	if (rwm_texture_copy_in(texture, &bytes, why, sizeof(why)) != 0) {
 		say_again(times, "copy-in: the surface could not be written into its texture", why);
+		/* and into the host's kept lines, where a run's log has it (it went to stdout only, and nobody saw that the
+		 * 27 release's icons were refused here) */
+		static unsigned told;
+
+		if (told++ < 6) {
+			char line[300];
+
+			snprintf(line, sizeof(line), "!!rwm copy-in refused: %s", why);
+			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+		}
 	}
 	if (bytes != 0) {
 		rwm_perf.copyins++;
@@ -77,6 +89,32 @@ rwm_works_copy_in(struct rwm_work *const *works, unsigned count)
 			rwm_copy_in(works[n]->copy_in[i]);
 		}
 	}
+}
+
+/* rwm_drawshot: the draw's own first colour attachment, read back through the library (sized as TARGET) */
+static uint8_t *
+draw_target_bytes(const struct rwm_work *w, struct rwm_texture *target, size_t *bytes)
+{
+	const struct rwa_texture_shape *sh = rwm_texture_shape(target);
+	const struct rwm_air *air = rwm_air();
+	char why[128];
+
+	if (w->draw.color_count == 0 || w->draw.color[0] == nullptr || sh == nullptr || air->texture_read == nullptr) {
+		return nullptr;
+	}
+	const size_t bpp = sh->pixel_format == 115 ? 8 : 4;
+	unsigned o[3] = { 0, 0, 0 }, z[3] = { sh->width, sh->height, 1 };
+	uint8_t *p = (uint8_t *)malloc((size_t)sh->width * sh->height * bpp);
+
+	if (p == nullptr) {
+		return nullptr;
+	}
+	if (air->texture_read(w->draw.color[0], 0, 0, o, z, p, (size_t)sh->width * bpp, why, sizeof(why)) != 0) {
+		free(p);
+		return nullptr;
+	}
+	*bytes = (size_t)sh->width * sh->height * bpp;
+	return p;
 }
 
 extern "C" int
@@ -108,7 +146,104 @@ rwm_run_works(struct rwa_device *device, struct rwm_work *const *works, unsigned
 			int failed;
 
 			rwm_perf.draws++;
+			/* boot-arg rwm_drawshot=TEXT: the first four draws past 100 s whose pipeline's label has TEXT in it, each
+			 * with the GPU finished before and after it, and how many bytes of its first target it changed -- whether
+			 * a draw writes anything at all (15 November: the icons' draws, and nothing of them in the surface) */
+			static int dshot = -1;
+			static char dtext[48];
+			static unsigned dshots;
+			static uint64_t dfirst;
+			uint8_t *before = nullptr;
+			size_t bbytes = 0;
+			struct rwm_texture *dtarget = w->target_count != 0 ? w->targets[0] : nullptr;
+			const char *dlabel = rwm_area_label_of(w->draw.render);
+
+			if (dshot < 0) {
+				const char *at = strstr(rwm_boot_args(), "rwm_drawshot=");
+
+				dshot = at != nullptr && sscanf(at + 13, "%47s", dtext) == 1;
+				/* TEXT,TEXT2: two of the first, then two of the second */
+				dfirst = rwm_ns();
+			}
+			char dwant[48];
+			const char *comma = strchr(dtext, ',');
+
+			strlcpy(dwant, comma != nullptr && dshots >= 2 ? comma + 1 : dtext, sizeof(dwant));
+			if (comma != nullptr && dshots < 2 && strchr(dwant, ',') != nullptr) {
+				*strchr(dwant, ',') = 0;
+			}
+			const bool dthis = dshot == 1 && dshots < 4 && dtarget != nullptr && dlabel != nullptr &&
+					   strstr(dlabel, dwant) != nullptr && rwm_ns() - dfirst > 100000000000ull;
+
+			if (dthis) {
+				uint64_t s0 = 0;
+				char r0[128];
+
+				rwm_submit(device, true, &s0, r0, sizeof(r0));
+				before = draw_target_bytes(w, dtarget, &bbytes);
+			}
 			failed = rwm_run_draw(&w->draw, why, why_size);
+			/* boot-arg rwm_drawfail=1: the GPU finished after every draw, and a draw whose job chain the Mali failed
+			 * (kern.hakios.mali_failed went up) named -- 20 to 40 % of the chains fail with slot status 0x51 since
+			 * the 27 release's home screen draws (runs 199 to 222), and which pipeline's shader it is is the question
+			 * (16 November). Slow: every draw becomes a pass of its own. */
+			{
+				static int dfail = -1;
+				static unsigned dfails;
+
+				if (dfail < 0) {
+					dfail = strstr(rwm_boot_args(), "rwm_drawfail=1") != nullptr;
+				}
+				if (dfail == 1 && dfails < 40) {
+					uint32_t before_failed = 0, after_failed = 0;
+					size_t sz = sizeof(before_failed);
+					uint64_t s1 = 0;
+					char r1[128];
+
+					sysctlbyname("kern.hakios.mali_failed", &before_failed, &sz, NULL, 0);
+					rwm_submit(device, true, &s1, r1, sizeof(r1));
+					sz = sizeof(after_failed);
+					sysctlbyname("kern.hakios.mali_failed", &after_failed, &sz, NULL, 0);
+					if (after_failed != before_failed) {
+						char line[240];
+						const char *lab = rwm_area_label_of(w->draw.render);
+
+						dfails++;
+						snprintf(line, sizeof(line), "!!rwm drawfail %u: %s (render %p, %u vertices, %u instances): "
+							 "the Mali failed %u chain(s)", dfails, lab != nullptr ? lab : "?",
+							 (void *)w->draw.render, w->draw.vertex_count, w->draw.instance_count,
+							 after_failed - before_failed);
+						sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+					}
+				}
+			}
+			if (dthis) {
+				uint64_t s0 = 0;
+				char r0[128], line[220];
+				size_t abytes = 0;
+				uint8_t *after;
+
+				rwm_submit(device, true, &s0, r0, sizeof(r0));
+				after = draw_target_bytes(w, dtarget, &abytes);
+				unsigned long changed = 0, first = ~0ul;
+
+				for (size_t i = 0; before != nullptr && after != nullptr && i < bbytes && i < abytes; i++) {
+					if (before[i] != after[i]) {
+						changed++;
+						first = first == ~0ul ? i : first;
+					}
+				}
+				const struct rwa_texture_shape *sh = rwm_texture_shape(dtarget);
+
+				dshots++;
+				snprintf(line, sizeof(line), "!!rwm drawshot %u %s: %lu bytes of %zu changed in %ux%u/%u (first at %ld)%s%s",
+					 dshots, dlabel, changed, abytes, sh ? sh->width : 0, sh ? sh->height : 0,
+					 sh ? sh->pixel_format : 0, first == ~0ul ? -1L : (long)first,
+					 before == nullptr ? ", not read before" : "", after == nullptr ? ", not read after" : "");
+				sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+				free(before);
+				free(after);
+			}
 			if (failed == -2) {
 				rwm_print("the draw failed: %s\n", why);
 			}
@@ -177,6 +312,7 @@ rwm_run_works(struct rwa_device *device, struct rwm_work *const *works, unsigned
 			rwm_texshot_after(works[n]->targets[i]);
 		}
 	}
+	rwm_texshot_marked = false;
 	for (unsigned k = 0; k < ndrawn; k++) {
 		static unsigned long times;
 		char reason[256] = { 0 };

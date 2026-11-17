@@ -238,7 +238,7 @@ struct xnu_syms {
 	    msgbufp, cpu_ttep, live, uart_tx_ready, uart_tx_data, uart_rx_ready, uart_putc, uart_putc_options, log_putc,
 	    nprocs, tasks_count, initproc, gic_cpu_init,
 	    gic_unhandled_count, gic_last_unhandled, gic_active_iar, host_keep, host_keep_len, host_keep_dropped,
-	    hk_keep, hk_keep_len, hk_keep_dropped;
+	    hk_keep, hk_keep_len, hk_keep_dropped, host_frames, host_frames_len;
 };
 
 static struct xnu_syms xsyms; /* of the kernel that was started; kept for when it comes back */
@@ -585,6 +585,8 @@ static void find_syms(const uint8_t *kernel, struct xnu_syms *s)
 		"_hakios_host_keep", "_hakios_host_keep_len", "_hakios_host_keep_dropped",
 		/* (the same in a kernel of the common tree, hakios-xnu-kernel's mtk/mt6768/drivers/gpu/hakios.mali.c) */
 		"_hakios_host_keep", "_hakios_host_keep_len", "_hakios_host_keep_dropped",
+		/* the pictures of boot-arg fbframes= (bsd/dev/mtk_mali.c) */
+		"_hakios_host_frames", "_hakios_host_frames_len",
 	};
 	_Static_assert(sizeof(struct xnu_syms) == sizeof(names), "every field needs its name, in order");
 	uint64_t *slots = (uint64_t *)s;
@@ -1195,6 +1197,66 @@ static void save_host_keep(const struct xnu_syms *s)
 	out(" lines dropped\n");
 }
 
+/*
+ * The kernel's pictures for the host (boot-arg fbframes=, hakios_host_frames) over ramoops' dump zone, one 4 KB record
+ * after another: each a ramoops header, then "HKFR" and the record's number (4 bytes, little-endian), then 4076 bytes of
+ * the buffer. Android shows the records as /sys/fs/pstore/dmesg-ramoops-N; tools/xnu-cycle.sh takes them and
+ * tools/fbframes.py puts them back in order by that number. Nothing is written when the kernel kept no picture, so a
+ * dump of Android's own stays where it is.
+ */
+static void save_host_frames(const struct xnu_syms *s)
+{
+#ifdef HAKIOS_RAMOOPS_DUMP
+	/* Android's ramoops (4.19) zaps a dump record whose data does not begin with its own header, "====SEC.USEC-C\n"
+	 * (ramoops_read_kmsg_hdr), so each record begins with one: 10 bytes, then the mark */
+	static const char kmsg[] = "====0.0-N\n";
+	const uint32_t hl = sizeof(kmsg) - 1, record = 0x1000, data = record - sizeof(struct ramoops_hdr) - hl - 8;
+	uint32_t len, records = HAKIOS_RAMOOPS_DUMP_SIZE / record, written = 0;
+
+	if (!s->host_frames || !s->host_frames_len) {
+		return;
+	}
+	len = rd32(kva_to_pa(s->host_frames_len));
+	if (len == 0) {
+		return;
+	}
+	const volatile uint8_t *from = (const volatile uint8_t *)kva_to_pa(s->host_frames);
+
+	for (uint32_t r = 0; r < records && written < len; r++) {
+		uint64_t at = HAKIOS_RAMOOPS_DUMP + (uint64_t)r * record;
+		volatile struct ramoops_hdr *h = (volatile struct ramoops_hdr *)at;
+		volatile uint8_t *d = (volatile uint8_t *)(at + sizeof(struct ramoops_hdr));
+		uint32_t n = len - written < data ? len - written : data;
+
+		for (uint32_t i = 0; i < hl; i++) {
+			d[i] = (uint8_t)kmsg[i];
+		}
+		d += hl;
+		d[0] = 'H';
+		d[1] = 'K';
+		d[2] = 'F';
+		d[3] = 'R';
+		d[4] = (uint8_t)r;
+		d[5] = (uint8_t)(r >> 8);
+		d[6] = 0;
+		d[7] = 0;
+		for (uint32_t i = 0; i < n; i++) {
+			d[8 + i] = from[written + i];
+		}
+		h->sig = RAMOOPS_SIG;
+		h->start = hl + 8 + n;
+		h->size = hl + 8 + n;
+		written += n;
+	}
+	dcache_clean_range(HAKIOS_RAMOOPS_DUMP, HAKIOS_RAMOOPS_DUMP_SIZE);
+	out("host_frames: ");
+	out_dec(written);
+	out(" bytes into the dump zone\n");
+#else
+	(void)s;
+#endif
+}
+
 /* The last lines of what is in ramoops, on the lower part of the screen. */
 static void show_log_tail(uint32_t lines)
 {
@@ -1583,6 +1645,7 @@ void xnu_returned(uint64_t log_pa, uint64_t len, uint64_t reason, uint64_t code,
 	save_log(&sp, 1);
 	dbg_puts("=== end of XNU log ===\n");
 	save_host_keep(&xsyms);
+	save_host_frames(&xsyms);
 	show_log_tail(40);
 	dbg_delay_ms(20000);
 	reset_board();
@@ -1691,6 +1754,7 @@ static void rescue_log(void)
 	save_log(sp, n);
 	dbg_puts("=== end of XNU log ===\n");
 	save_host_keep(&s);
+	save_host_frames(&s);
 	show_log_tail(40);
 }
 
@@ -2010,6 +2074,7 @@ void watcher_main(void)
 		save_log(&sp, 1);
 	}
 	save_host_keep(&xsyms);
+	save_host_frames(&xsyms);
 	dbg_puts("=== end of watcher snapshot ===\n");
 	plog_flush();
 	psci_system_reset();

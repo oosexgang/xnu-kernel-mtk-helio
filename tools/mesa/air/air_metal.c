@@ -604,6 +604,30 @@ rwa_device_open(char *why, size_t why_size)
    bool software = debug_get_bool_option("RWA_SOFTWARE", false);
    device->software = software;
 
+#ifdef __APPLE__
+   /* boot-args pan_debug=FLAGS and bi_debug=FLAGS: PAN_MESA_DEBUG and BIFROST_MESA_DEBUG for a process nobody gives an
+    * environment (the window server), read once before the screen is made -- pan_debug=sync stops it at the first job
+    * the Mali fails, after the passes before it were said (16 November: 20 to 40 % of job chains fail with slot status
+    * 0x51 since the home screen draws) */
+   {
+      char args[1024] = "";
+      size_t size = sizeof(args) - 1;
+      const char *at;
+      char value[128];
+
+      if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0) {
+         if ((at = strstr(args, "pan_debug=")) != NULL && !getenv("PAN_MESA_DEBUG")) {
+            snprintf(value, sizeof(value), "%.*s", (int)strcspn(at + 10, " "), at + 10);
+            setenv("PAN_MESA_DEBUG", value, 1);
+         }
+         if ((at = strstr(args, "bi_debug=")) != NULL && !getenv("BIFROST_MESA_DEBUG")) {
+            snprintf(value, sizeof(value), "%.*s", (int)strcspn(at + 9, " "), at + 9);
+            setenv("BIFROST_MESA_DEBUG", value, 1);
+         }
+      }
+   }
+#endif
+
 #ifdef GALLIUM_FREEDRENO
    if (!software) {
       int fd = drmOpenWithType("msm", NULL, DRM_NODE_RENDER);
@@ -5817,6 +5841,20 @@ build_vertex_state(const struct air_shader_info *vinfo,
     * Metal's highest, so it can never collide with a stream or an argument, and the draw
     * binds this library's quad there.
     */
+   /* A slot below the highest one that no used attribute filled -- an input the shader declares and never reads,
+    * like fixed_vert_lph_spc's point_size (1) and texcoord1 (3) between its position and its colour -- was left a
+    * zeroed element: PIPE_FORMAT_NONE from buffer 0. The icons' and labels' draws of CoreAnimation 27 have exactly
+    * that, and none of them ever made a pixel (15 November). Such a slot gets the placeholder too.
+    */
+   for (unsigned i = 0; i < out->count; i++) {
+      if (out->element[i].src_format == PIPE_FORMAT_NONE) {
+         out->element[i] = (struct pipe_vertex_element){
+            .src_format = PIPE_FORMAT_R32G32B32A32_FLOAT,
+            .src_offset = 0, .src_stride = 0,
+            .vertex_buffer_index = RWA_MAX_VERTEX_BUFFERS,
+         };
+      }
+   }
    if (out->count) {
       bool placeholder = false;
       for (unsigned i = 0; i < out->count; i++)
@@ -6020,9 +6058,72 @@ note_constant_reads(nir_shader *nir, struct air_shader_info *info)
    }
 }
 
+/*
+ * A vertex stage's inputs numbered without holes, the ones it reads 0, 1, 2... in the order of their old numbers;
+ * remap[old] is the new number, or -1 for an input nothing reads. Returns how many are read.
+ *
+ * Why: the driver_locations are AIR's argument order with the module's unused arguments skipped, but an argument a
+ * function constant turns off (fixed_vert_lph_spc's point_size, 1, and texcoord1, 3, when fc_texcoord_count1 is 0)
+ * is only dead once the constants have folded, and keeps its number. Panfrost writes one attribute descriptor for
+ * each input the stage reads -- util_bitcount(inputs_read) of them, elements 0 to N-1 -- while Bifrost's LD_ATTR
+ * takes the input's base as the descriptor's index: reading bases 0, 2 and 4 with descriptors 0, 1 and 2, the colour
+ * came from past the table and the vertex job drew nothing. Every draw of CoreAnimation 27 through
+ * fixed_vert_lph_spc -- the icons, their labels, the dock's own glass -- changed no byte of its target
+ * (rwm_drawshot, runs 140 and 141, 15 November).
+ */
+static unsigned
+compact_vertex_inputs(nir_shader *nir, int remap[16])
+{
+   bool read[16] = { false };
+   unsigned n = 0;
+
+   for (unsigned i = 0; i < 16; i++)
+      remap[i] = -1;
+   nir_foreach_function_impl(impl, nir) {
+      nir_foreach_block(block, impl) {
+         nir_foreach_instr(instr, block) {
+            if (instr->type != nir_instr_type_intrinsic)
+               continue;
+            nir_intrinsic_instr *in = nir_instr_as_intrinsic(instr);
+            if (in->intrinsic == nir_intrinsic_load_input && nir_intrinsic_base(in) < 16)
+               read[nir_intrinsic_base(in)] = true;
+            /* not lowered yet (Panfrost lowers its own I/O): the variable's driver_location */
+            if (in->intrinsic == nir_intrinsic_load_deref) {
+               nir_variable *var = nir_intrinsic_get_var(in, 0);
+               if (var && var->data.mode == nir_var_shader_in && var->data.driver_location < 16)
+                  read[var->data.driver_location] = true;
+            }
+         }
+      }
+   }
+   for (unsigned i = 0; i < 16; i++)
+      if (read[i])
+         remap[i] = (int)n++;
+   nir_foreach_function_impl(impl, nir) {
+      nir_foreach_block(block, impl) {
+         nir_foreach_instr(instr, block) {
+            if (instr->type != nir_instr_type_intrinsic)
+               continue;
+            nir_intrinsic_instr *in = nir_instr_as_intrinsic(instr);
+            if (in->intrinsic == nir_intrinsic_load_input && nir_intrinsic_base(in) < 16)
+               nir_intrinsic_set_base(in, (unsigned)remap[nir_intrinsic_base(in)]);
+         }
+      }
+      nir_metadata_preserve(impl, nir_metadata_all);
+   }
+   nir_foreach_shader_in_variable(var, nir) {
+      if (var->data.driver_location < 16) {
+         int to = remap[var->data.driver_location];
+         var->data.driver_location = to >= 0 ? (unsigned)to : n + var->data.driver_location;
+      }
+   }
+   nir->num_inputs = n;
+   return n;
+}
+
 static void *
-make_stage_cso(struct rwa_device *device, nir_shader *nir, struct air_shader_info *info,
-               char *why, size_t why_size)
+make_stage_cso_remap(struct rwa_device *device, nir_shader *nir, struct air_shader_info *info,
+                     int *remap, char *why, size_t why_size)
 {
    nir_shader *clone = nir_shader_clone(NULL, nir);
    if (!clone) {
@@ -6030,6 +6131,16 @@ make_stage_cso(struct rwa_device *device, nir_shader *nir, struct air_shader_inf
       return NULL;
    }
    finalize_for_gallium(clone, device->screen);
+   if (remap && clone->info.stage == MESA_SHADER_VERTEX) {
+      bool progress;
+      do {
+         progress = false;
+         NIR_PASS(progress, clone, nir_copy_prop);
+         NIR_PASS(progress, clone, nir_opt_dce);
+      } while (progress);
+      compact_vertex_inputs(clone, remap);
+      nir_shader_gather_info(clone, nir_shader_get_entrypoint(clone));
+   }
    if (info)
       note_constant_reads(clone, info);
 
@@ -6043,6 +6154,13 @@ make_stage_cso(struct rwa_device *device, nir_shader *nir, struct air_shader_inf
           device->screen->get_name(device->screen),
           nir->info.stage == MESA_SHADER_VERTEX ? "vertex" : "fragment");
    return cso;
+}
+
+static void *
+make_stage_cso(struct rwa_device *device, nir_shader *nir, struct air_shader_info *info,
+               char *why, size_t why_size)
+{
+   return make_stage_cso_remap(device, nir, info, NULL, why, why_size);
 }
 
 /* Whether a vertex shader reads vertex attributes, which used to be the one thing the
@@ -7208,8 +7326,75 @@ rwa_render_create(struct rwa_device *device,
    render->fs_cso = make_stage_cso(device, fs, &render->finfo, why, why_size);
    if (!render->fs_cso)
       goto fail;
-   render->vs_cso = make_stage_cso(device, vs, render->generated_vertex ? NULL : &render->vinfo,
-                                   why, why_size);
+   int vremap[16];
+   static int nocompact = -1;
+   if (nocompact < 0) {
+      nocompact = getenv("RWA_NOCOMPACT") != NULL;
+#ifdef __APPLE__
+      char args[1024] = "";
+      size_t size = sizeof(args) - 1;
+
+      if (!nocompact && sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0)
+         nocompact = strstr(args, "rwa_nocompact=1") != NULL;
+#endif
+   }
+   render->vs_cso = make_stage_cso_remap(device, vs, render->generated_vertex ? NULL : &render->vinfo,
+                                         render->generated_vertex || nocompact ? NULL : vremap, why, why_size);
+   if (nocompact)
+      for (unsigned i = 0; i < 16; i++)
+         vremap[i] = (int)i;
+   /* the elements follow the inputs' new numbers (compact_vertex_inputs) */
+   if (render->vs_cso && !render->generated_vertex && render->vstate.count) {
+      struct rwa_vertex_state old_state = render->vstate;
+      unsigned count = 0;
+
+      for (unsigned i = 0; i < old_state.count && i < 16; i++) {
+         if (vremap[i] < 0)
+            continue;
+         render->vstate.element[vremap[i]] = old_state.element[i];
+         render->vstate.attribute[vremap[i]] = old_state.attribute[i];
+         count = MAX2(count, (unsigned)vremap[i] + 1);
+      }
+      render->vstate.count = count;
+   }
+   /* the vertex elements of the first thirty pipelines that fetch, into the host's kept lines (15 November: the
+    * icons' and labels' draws land on the screen's top row, as a position whose y is 0) */
+#ifdef __APPLE__
+   {
+      static unsigned told;
+
+      if (told < 40 && !render->generated_vertex) {
+         char line[200];
+         unsigned fetched = 0;
+
+         told++;
+         for (unsigned i = 0; i < render->vinfo.num_vertex_attributes; i++)
+            fetched += render->vinfo.vertex_attributes[i].used ? 1 : 0;
+         snprintf(line, sizeof(line), "!!rwa vstate %s: %u elements, %u fetched of %u, cso %s, remap %d %d %d %d %d",
+                  render->vinfo.entry_point ? render->vinfo.entry_point : "?", render->vstate.count, fetched,
+                  render->vinfo.num_vertex_attributes, render->vs_cso ? "yes" : "no", vremap[0], vremap[1], vremap[2],
+                  vremap[3], vremap[4]);
+         sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+      }
+   }
+   if (render->vs_cso && !render->generated_vertex && render->vstate.count) {
+      static unsigned said;
+
+      if (said < 30) {
+         char line[400];
+         int n = snprintf(line, sizeof(line), "!!rwa elems %s:", render->vinfo.entry_point ? render->vinfo.entry_point : "?");
+
+         said++;
+         for (unsigned i = 0; i < render->vstate.count && n > 0 && n < (int)sizeof(line) - 40; i++) {
+            const struct pipe_vertex_element *e = &render->vstate.element[i];
+            n += snprintf(line + n, sizeof(line) - n, " %u=a%u/%s/o%u/b%u/s%u", i, render->vstate.attribute[i],
+                          util_format_short_name(e->src_format), e->src_offset, e->vertex_buffer_index,
+                          e->src_stride);
+         }
+         sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+      }
+   }
+#endif
    /* the generated stage is standalone (not under mem_ctx); the driver has a clone, so
     * the source is this library's to free either way
     */
@@ -7268,11 +7453,27 @@ rwa_render_create(struct rwa_device *device,
             noblend = strstr(args, "rwa_noblendfetch=1") != NULL;
 #endif
       }
-      if (noblend && render->finfo.fbfetch_targets) {
+      static int noblend_all = -1;
+      if (noblend_all < 0) {
+         noblend_all = getenv("RWA_NOBLEND") != NULL;
+#ifdef __APPLE__
+         char args2[1024] = "";
+         size_t size2 = sizeof(args2) - 1;
+         if (!noblend_all && sysctlbyname("kern.bootargs", args2, &size2, NULL, 0) == 0)
+            noblend_all = strstr(args2, "rwa_noblend=1") != NULL;
+#endif
+      }
+      if ((noblend && render->finfo.fbfetch_targets) || noblend_all) {
          for (unsigned i = 0; i < PIPE_MAX_COLOR_BUFS; i++)
             blend.rt[i].blend_enable = 0;
       }
    }
+   if (getenv("RWA_PRINT_BLEND"))
+      for (unsigned i = 0; i < 3; i++)
+         fprintf(stderr, "blend rt%u: enable %u rgb %u src %u dst %u alpha %u src %u dst %u mask 0x%x independent %u\n", i,
+                 blend.rt[i].blend_enable, blend.rt[i].rgb_func, blend.rt[i].rgb_src_factor, blend.rt[i].rgb_dst_factor,
+                 blend.rt[i].alpha_func, blend.rt[i].alpha_src_factor, blend.rt[i].alpha_dst_factor,
+                 blend.rt[i].colormask, blend.independent_blend_enable);
    render->blend = device->pipe->create_blend_state(device->pipe, &blend);
    /* The pipeline's own depth/stencil state, and it is the ZEROED one on purpose: it is
     * what a draw gets when the caller passes no rwa_depth_stencil, which is Metal's
@@ -7886,7 +8087,29 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
    if (flush_on_switch) {
       static struct pipe_surface *last_cbuf, *last_zs;
       if ((fb.nr_cbufs ? fb.cbufs[0] : NULL) != last_cbuf || fb.zsbuf != last_zs) {
-         if (last_cbuf || last_zs)
+         /* boot-arg rwa_syncpass=1: and the GPU waited for at each switch -- whether a pass that samples what the
+          * passes before it drew reads them unfinished (15 November: the draws of the passes that load draw nothing) */
+         static int syncpass = -1;
+
+         if (syncpass < 0) {
+            syncpass = getenv("RWA_SYNCPASS") != NULL;
+#ifdef __APPLE__
+            char args[1024] = "";
+            size_t size = sizeof(args) - 1;
+
+            if (!syncpass && sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0)
+               syncpass = strstr(args, "rwa_syncpass=1") != NULL;
+#endif
+         }
+         if ((last_cbuf || last_zs) && syncpass) {
+            struct pipe_fence_handle *fence = NULL;
+
+            pipe->flush(pipe, &fence, 0);
+            if (fence) {
+               device->screen->fence_finish(device->screen, NULL, fence, RWA_FENCE_TIMEOUT_NS);
+               device->screen->fence_reference(device->screen, &fence, NULL);
+            }
+         } else if (last_cbuf || last_zs)
             pipe->flush(pipe, NULL, 0);
          last_cbuf = fb.nr_cbufs ? fb.cbufs[0] : NULL;
          last_zs = fb.zsbuf;
@@ -8094,6 +8317,27 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
       };
       if (index_size)
          info.index.resource = draw->index_buffer->res;
+      /* boot-arg rwa_nobounds=1: the driver finds the indices' range itself, from the buffer as the GPU sees it, in
+       * place of the range read here through the processor's mapping (15 November: the icons' draws make no pixel) */
+      {
+         static int nobounds = -1;
+
+         if (nobounds < 0) {
+            nobounds = getenv("RWA_NOBOUNDS") != NULL;
+#ifdef __APPLE__
+            char args[1024] = "";
+            size_t size = sizeof(args) - 1;
+
+            if (!nobounds && sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0)
+               nobounds = strstr(args, "rwa_nobounds=1") != NULL;
+#endif
+         }
+         if (nobounds && index_size) {
+            info.index_bounds_valid = false;
+            info.min_index = 0;
+            info.max_index = ~0u;
+         }
+      }
       struct pipe_draw_start_count_bias sc = {
          .start = index_size ? index_start : draw->vertex_start,
          .count = draw->vertex_count,

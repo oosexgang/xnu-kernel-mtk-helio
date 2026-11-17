@@ -145,6 +145,20 @@ texel_bytes(unsigned format)
 		return 2;
 	case 10:
 		return 1;
+	/* the 27 release's icons come in RGBA16Float (115) and their names in A8 (1): a surface of either was refused
+	 * here, so its texture stayed empty and the draws that sample it drew nothing to see (16 November). The rows are
+	 * copied as they are, so only formats whose texels the library stores as the surface holds them: A8, R16Float,
+	 * R32Float, RG16Float, RGB10A2, BGR10A2, RGBA16Unorm / Float, RGBA32Float */
+	case 1:
+		return 1;
+	case 25:
+		return 2;
+	case 55: case 65: case 90: case 94:
+		return 4;
+	case 110: case 115:
+		return 8;
+	case 125:
+		return 16;
 	}
 	return 0;
 }
@@ -378,8 +392,7 @@ rwm_texture_copy_in(struct rwm_texture *texture, size_t *bytes, char *why, size_
 		const size_t texel = texel_bytes(texture->shape.pixel_format);
 
 		if (texel == 0) {
-			snprintf(why, why_size, "a surface is copied into formats 80, 81, 70, 30 and 10, not %u",
-				 texture->shape.pixel_format);
+			snprintf(why, why_size, "a surface is not copied into format %u", texture->shape.pixel_format);
 			return -1;
 		}
 		if (width == 0 || height == 0 || width > first.width ||
@@ -395,6 +408,30 @@ rwm_texture_copy_in(struct rwm_texture *texture, size_t *bytes, char *why, size_
 		return -1;
 	}
 	texture->source_seed = seed;
+	/* boot-arg rwm_uplog=1: the first surfaces of RGBA16Float / A8 copied in, with how many texels have alpha */
+	if (strstr(rwm_boot_args(), "rwm_uplog=1") != nullptr &&
+	    (texture->shape.pixel_format == 115 || texture->shape.pixel_format == 1)) {
+		static unsigned said;
+
+		if (said < 24) {
+			said++;
+			const bool half = texture->shape.pixel_format == 115;
+			unsigned long lit = 0;
+
+			for (unsigned y = 0; y < height; y++) {
+				const uint8_t *r = (const uint8_t *)texels + (size_t)y * row;
+
+				for (unsigned x = 0; x < width; x++) {
+					lit += half ? (r[x * 8 + 6] | r[x * 8 + 7]) != 0 : r[x] != 0;
+				}
+			}
+			char line[200];
+
+			snprintf(line, sizeof(line), "!!rwm surface copied in: %ux%u format %u, %lu texels with alpha",
+				 width, height, texture->shape.pixel_format, lit);
+			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+		}
+	}
 	return 0;
 }
 
@@ -437,6 +474,40 @@ rwm_texture_write(struct rwm_texture *texture, unsigned level, unsigned slice, c
 	}
 	texture->filled = true;
 	texture->fill_kind |= 2;
+	/* boot-arg rwm_uplog=1: the first uploads of RGBA16Float (115) and A8 (1) textures -- the 27 release's icons and
+	 * names -- said with how many texels have alpha in the caller's bytes and in what reads back (16 November) */
+	if (strstr(rwm_boot_args(), "rwm_uplog=1") != nullptr && level == 0 && slice == 0 &&
+	    (texture->shape.pixel_format == 115 || texture->shape.pixel_format == 1) && size[0] != 0 && size[1] != 0) {
+		static unsigned said;
+
+		if (said < 24) {
+			said++;
+			const unsigned f = texture->shape.pixel_format;
+			const size_t texel = f == 115 ? 8 : 1, row = (size_t)size[0] * texel;
+			unsigned long in_lit = 0, back_lit = 0;
+			uint8_t *back = (uint8_t *)calloc((size_t)size[1], row);
+
+			for (unsigned y = 0; y < size[1]; y++) {
+				const uint8_t *r = (const uint8_t *)bytes + (size_t)y * stride;
+
+				for (unsigned x = 0; x < size[0]; x++) {
+					in_lit += f == 115 ? (r[x * 8 + 6] | r[x * 8 + 7]) != 0 : r[x] != 0;
+				}
+			}
+			const bool read = back != nullptr && rwm_texture_read(texture, 0, 0, origin, size, back, row);
+
+			for (size_t i = 0; read && i < (size_t)size[0] * size[1]; i++) {
+				back_lit += f == 115 ? (back[i * 8 + 6] | back[i * 8 + 7]) != 0 : back[i] != 0;
+			}
+			free(back);
+			char line[200];
+
+			snprintf(line, sizeof(line), "!!rwm upload %ux%u at %u,%u into %ux%u format %u: %lu texels with alpha given, "
+				 "%lu read back%s", size[0], size[1], origin[0], origin[1], texture->shape.width,
+				 texture->shape.height, f, in_lit, back_lit, read ? "" : " (no read)");
+			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+		}
+	}
 	/*
 	 * A texture over another process's surface (the copy-in road) shares that surface's memory in Metal, so
 	 * -replaceRegion: is a write into the surface. Here the texture is a copy, refreshed from the surface before
@@ -591,6 +662,28 @@ namespace {
  * screen's and not the boot logo's (the 129 x 158 of run 71 was the Apple logo, whole) -- 32 pixels wide each, as
  * "texshot#k" so that tools/texshot.py can tell them apart. Each one's header says what filled it (fill_kind).
  */
+/* boot-arg rwm_texshot_at=SECONDS: how long after this process's first draw a texshot may be taken (100 s by default;
+ * the home screen's icons come at about 295 s, 15 November) */
+} /* namespace */
+bool rwm_texshot_marked;
+namespace {
+uint64_t
+texshot_after_ns(void)
+{
+	static uint64_t ns;
+
+	if (ns == 0) {
+		const char *at = strstr(rwm_boot_args(), "rwm_texshot_at=");
+		unsigned s = 100;
+
+		if (at != nullptr) {
+			sscanf(at + 15, "%u", &s);
+		}
+		ns = (uint64_t)s * 1000000000ull;
+	}
+	return ns;
+}
+
 void
 texshot(struct rwm_texture *texture, unsigned samples, bool by_fill, bool after)
 {
@@ -634,19 +727,22 @@ texshot(struct rwm_texture *texture, unsigned samples, bool by_fill, bool after)
 	}
 	if (want_w != 0) {
 		/* one of BGRA8 (by its samples) and one of RGBA16Float (by the passes drawing into it) */
-		static bool took[4][2];
+		static unsigned took[4][2];   /* (up to six of each: the surfaces of one frame and the next, 15 November) */
 		unsigned k = 0;
 
 		while (k < nsizes && (texture->shape.width != sizes[k][0] || texture->shape.height != sizes[k][1])) {
 			k++;
 		}
-		if (k == nsizes || (f != 80 && f != 115) || took[k][f == 115] || rwm_ns() - first_ns < 100000000000ull) {
+		const bool by_draw = strstr(rwm_boot_args(), "rwm_texshot_draw=") != nullptr;
+
+		if (k == nsizes || (f != 80 && f != 115) || took[k][f == 115] >= 6 ||
+		    (by_draw ? !rwm_texshot_marked : rwm_ns() - first_ns < texshot_after_ns())) {
 			return;
 		}
-		took[k][f == 115] = true;
+		took[k][f == 115]++;
 	} else if (shots >= want_n || texture->shape.width < 32 || texture->shape.height < 32 ||
 		   (f != 70 && f != 71 && f != 80 && f != 81 && f != 115 && f != 55) ||
-		   rwm_ns() - first_ns < 100000000000ull) {
+		   rwm_ns() - first_ns < texshot_after_ns()) {
 		return;
 	}
 	const unsigned shot = shots++;
@@ -655,7 +751,7 @@ texshot(struct rwm_texture *texture, unsigned samples, bool by_fill, bool after)
 	 * are read whole and made RGBA8 here: half clamped to 0..1, the float as grey with alpha 255 where it is not 0 */
 	const unsigned bpp = f == 115 ? 8 : 4;
 
-	const unsigned w = texture->shape.width, h = texture->shape.height, cap = want_w != 0 ? 48 : 32;
+	const unsigned w = texture->shape.width, h = texture->shape.height, cap = want_w != 0 ? 30 : 32;   /* (30: six of them fit the host's kept lines) */
 	const unsigned ow = w < cap ? w : cap, oh = (h * ow + w - 1) / w;
 	uint8_t *pixels = (uint8_t *)calloc((size_t)w * h, bpp);
 	unsigned origin[3] = { 0, 0, 0 }, size[3] = { w, h, 1 };
@@ -782,6 +878,73 @@ rwm_texshot_sizes(void)
 		on = at != nullptr && sscanf(at + 12, "%ux%u", &w, &h) == 2;
 	}
 	return on == 1;
+}
+
+/* rwm_drawshot (src/metal/run.cpp): a copy of what a target holds now, from its surface when it lies over one, else read
+ * back from the GPU; NULL when it cannot be read. The caller frees it. */
+extern "C" uint8_t *
+rwm_texture_snapshot(struct rwm_texture *texture, size_t *bytes)
+{
+	const unsigned w = texture->shape.width, h = texture->shape.height;
+	const size_t bpp = texel_bytes(texture->shape.pixel_format);
+	uint8_t *pixels;
+
+	if (w == 0 || h == 0 || bpp == 0 || (pixels = (uint8_t *)malloc((size_t)w * h * bpp)) == nullptr) {
+		return nullptr;
+	}
+	*bytes = (size_t)w * h * bpp;
+	/* the GPU's resource first: a surface's own memory may be written back only at the command buffer's end */
+	{
+		unsigned o[3] = { 0, 0, 0 }, z[3] = { w, h, 1 };
+
+		if (rwm_texture_read(texture, 0, 0, o, z, pixels, (size_t)w * bpp)) {
+			return pixels;
+		}
+	}
+	if (texture->in_place != 0) {
+		IOSurfaceRef sf = IOSurfaceLookup(texture->in_place);
+		bool ok = false;
+
+		if (sf != nullptr) {
+			if (IOSurfaceLock(sf, kIOSurfaceLockReadOnly, nullptr) == 0) {
+				const uint8_t *base = (const uint8_t *)IOSurfaceGetBaseAddress(sf);
+				const size_t row = IOSurfaceGetBytesPerRow(sf);
+
+				if (base != nullptr && row >= (size_t)w * bpp && IOSurfaceGetHeight(sf) >= h) {
+					for (uintptr_t line = (uintptr_t)base & ~(uintptr_t)63; line < (uintptr_t)base + (size_t)h * row;
+					     line += 64) {
+						__asm__ volatile("dc civac, %0" : : "r"(line) : "memory");
+					}
+					__asm__ volatile("dsb sy" ::: "memory");
+					for (unsigned y = 0; y < h; y++) {
+						memcpy(pixels + (size_t)y * w * bpp, base + (size_t)y * row, (size_t)w * bpp);
+					}
+					ok = true;
+				}
+				IOSurfaceUnlock(sf, kIOSurfaceLockReadOnly, nullptr);
+			}
+			CFRelease(sf);
+		}
+		if (!ok) {
+			free(pixels);
+			return nullptr;
+		}
+		return pixels;
+	}
+	unsigned origin[3] = { 0, 0, 0 }, size[3] = { w, h, 1 };
+
+	if (!rwm_texture_read(texture, 0, 0, origin, size, pixels, (size_t)w * bpp)) {
+		free(pixels);
+		return nullptr;
+	}
+	return pixels;
+}
+
+/* what filled a texture (rwm_noimg, src/metal/render.cpp): 1 drawn into, 2 written, 4 copied in, 8 a view */
+extern "C" unsigned
+rwm_texture_fill_kind(const struct rwm_texture *texture)
+{
+	return texture != nullptr ? texture->fill_kind : 0;
 }
 
 /* a target of a command buffer the GPU has finished */

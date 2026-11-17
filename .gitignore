@@ -66,6 +66,8 @@ fw-*/
 !/userland/share/
 /userland/share/*
 !/userland/share/rwm-recipes.txt
+!/userland/share/rwm-recipes27.txt
+!/userland/share/rwm-variants27.txt
 /userland/src/camera_trace_local.h
 /tools/android/f2fs-resize
 

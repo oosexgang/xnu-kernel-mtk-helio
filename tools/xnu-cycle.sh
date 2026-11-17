@@ -65,4 +65,14 @@ if head -c 64 "$OUT.keep" | grep -q 'kept for the host by the kernel'; then
 	echo "kept for the host: $(head -1 "$OUT.keep" | sed 's/^=== kept for the host by the kernel: //; s/ ===$//')"
 fi
 rm -f "$OUT.keep"
+# the pictures of boot-arg fbframes=, which mtkloader laid over ramoops' dump zone (dmesg-ramoops-N, records that begin
+# "HKFR"): each record as it is, into $OUT.frames/, for tools/fbframes.py
+if [ -n "$(adb -s $S shell 'su -c "ls /sys/fs/pstore/"' 2>/dev/null | tr -d '\r' | grep '^dmesg-ramoops-')" ]; then
+	mkdir -p "$OUT.frames"
+	for f in $(adb -s $S shell 'su -c "ls /sys/fs/pstore/"' 2>/dev/null | tr -d '\r' | grep '^dmesg-ramoops-'); do
+		# (as base64: su's terminal turns a 0x0a byte into 0x0d 0x0a in a binary file)
+		adb -s $S shell "su -c 'base64 /sys/fs/pstore/$f'" 2>/dev/null | tr -d '\r' | base64 -D > "$OUT.frames/$f" 2>/dev/null || true
+	done
+	echo "frames: $(ls "$OUT.frames" | wc -l | tr -d ' ') dump records in $OUT.frames (tools/fbframes.py)"
+fi
 echo "log: $OUT ($(wc -c < "$OUT") bytes)"

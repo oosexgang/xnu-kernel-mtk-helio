@@ -213,8 +213,9 @@ rwm_render_color(struct rwm_render_state *s, unsigned index, void *object, struc
 	if (core != nullptr && passlog_on()) {
 		const struct rwa_texture_shape *sh = rwm_texture_shape(core);
 
-		passlog("c %u %04x %ux%u %u %d %lu", index, tex_id(core), sh->width, sh->height, sh->pixel_format, clears ? 1 : 0,
-			store);
+		/* and the IOSurface it lies over (0: none), to be matched with the swaps' surfaces (15 November) */
+		passlog("c %u %04x %ux%u %u %d %lu s%u", index, tex_id(core), sh->width, sh->height, sh->pixel_format, clears ? 1 : 0,
+			store, rwm_texture_in_place(core));
 	}
 	s->color_count = index + 1;
 	if (store == 2 || store == 3 || resolve_texture) {
@@ -222,6 +223,15 @@ rwm_render_color(struct rwm_render_state *s, unsigned index, void *object, struc
 			  "resolve (storeAction %lu%s) and this driver resolves nothing: "
 			  "the attachment itself is stored and the resolve texture is "
 			  "left as it was\n", index, store, resolve_texture ? ", with a resolveTexture" : "");
+	}
+	/* boot-arg rwm_loadclear=1: an attachment 0 that would be loaded is cleared to transparent black instead -- whether
+	 * the draws of a pass that loads are lost with what it loads (15 November: icons and labels are drawn in such
+	 * passes and never seen, the background of the clearing pass before them is) */
+	if (index == 0 && !clears && strstr(rwm_boot_args(), "rwm_loadclear=1") != nullptr) {
+		static const double transparent[4] = { 0, 0, 0, 0 };
+
+		clears = true;
+		color = transparent;
 	}
 	if (index == 0 && clears) {
 		for (unsigned i = 0; i < 4; i++) {
@@ -417,6 +427,44 @@ rwm_render_draw(struct rwm_render_state *s, const struct rwm_draw_call *call, st
 		return false;
 	}
 	passlog_draws++;
+	/* boot-arg rwm_drawonly=TEXT: only the draws whose pipeline's label has TEXT in it are drawn, the others dropped --
+	 * with rwm_loadclear=1 and rwa_tint=2, what one kind of draw puts on the screen alone (15 November) */
+	{
+		static int only = -1;
+		static char text[48];
+
+		if (only < 0) {
+			const char *at = strstr(rwm_boot_args(), "rwm_drawonly=");
+
+			only = at != nullptr && sscanf(at + 13, "%47s", text) == 1;
+		}
+		if (only == 1) {
+			const char *l = rwm_area_label_of(s->render);
+
+			if (l == nullptr || strstr(l, text) == nullptr) {
+				return false;
+			}
+		}
+	}
+	/* boot-arg rwm_texshot_draw=TEXT: a draw of a pipeline with TEXT in its label marks its command buffer, whose targets
+	 * are then taken by rwm_texshot after the GPU has drawn them (src/metal/texture.cpp, 15 November) */
+	{
+		static int on = -1;
+		static char text[48];
+
+		if (on < 0) {
+			const char *at = strstr(rwm_boot_args(), "rwm_texshot_draw=");
+
+			on = at != nullptr && sscanf(at + 17, "%47s", text) == 1;
+		}
+		if (on == 1) {
+			const char *l = rwm_area_label_of(s->render);
+
+			if (l != nullptr && strstr(l, text) != nullptr) {
+				rwm_texshot_marked = true;
+			}
+		}
+	}
 	/* a generic pipeline drawn with its variant for the configuration bound in buffer 0 (src/metal/pipeline.cpp) */
 	struct rwa_render *special = rwm_generic_variant(s->render, s->vertex_count > 0 ? s->vertex[0].buffer : nullptr,
 							  s->vertex_count > 0 ? s->vertex[0].offset : 0,
@@ -461,7 +509,7 @@ rwm_render_draw(struct rwm_render_state *s, const struct rwm_draw_call *call, st
 			}
 		}
 		/* and the scissor and viewport, so a draw that lands outside what is kept shows (15 November) */
-		char clip[64] = "";
+		char clip[96] = "";
 
 		if (s->has_scissor) {
 			snprintf(clip, sizeof(clip), " sc:%u,%u,%ux%u", s->scissor[0], s->scissor[1], s->scissor[2], s->scissor[3]);
@@ -471,6 +519,13 @@ rwm_render_draw(struct rwm_render_state *s, const struct rwm_draw_call *call, st
 
 			snprintf(clip + at, sizeof(clip) - at, " vp:%d,%d,%dx%d", (int)s->viewport[0], (int)s->viewport[1],
 				 (int)s->viewport[2], (int)s->viewport[3]);
+		}
+		/* and the depth/stencil state with the stencil reference, and whether the pass has such an attachment */
+		{
+			size_t at = strlen(clip);
+
+			snprintf(clip + at, sizeof(clip) - at, " ds:%04x/%u/%c", (unsigned)(((uintptr_t)s->depth_stencil >> 4) & 0xffff),
+				 s->stencil_reference[0], s->depth.core != nullptr ? 'Z' : '-');
 		}
 		passlog("d %s%s n%llu t:%s s:%s%s", label != nullptr ? label : "?", vtag, (unsigned long long)call->count, tex,
 			smp, clip);
@@ -550,6 +605,18 @@ rwm_render_draw(struct rwm_render_state *s, const struct rwm_draw_call *call, st
 		struct rwm_texture *core = s->textures[i].core;
 
 		d->textures[i] = mesa_of(core);
+		/* boot-arg rwm_noimg=1: a texture written by the processor (-replaceRegion:) is not bound, the slot reads
+		 * zeros -- whether binding the icons' own images is what keeps their draws off the screen (15 November) */
+		{
+			static int noimg = -1;
+
+			if (noimg < 0) {
+				noimg = strstr(rwm_boot_args(), "rwm_noimg=1") != nullptr;
+			}
+			if (noimg && core != nullptr && (rwm_texture_fill_kind(core) & 2) != 0 && !(rwm_texture_fill_kind(core) & 1)) {
+				d->textures[i] = nullptr;
+			}
+		}
 		rwm_texture_note_sampled(core);
 		if (core != nullptr) {
 			w->copy_in[w->copy_in_count++] = core;
