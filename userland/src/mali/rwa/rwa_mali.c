@@ -112,7 +112,7 @@ now_ns(void)
 
 static struct {
 	uint64_t since, draws, refused, batches, preloads, clears, cpu_syncs, draw_ns, flush_ns, pipelines, pipeline_ns;
-	uint64_t refused_pipelines, imports;
+	uint64_t refused_pipelines, imports, multiload_cleared;
 } stats;
 
 static void report(void);
@@ -1679,16 +1679,30 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 		}
 		if (clear_color)
 			stats.clears++;
-		/* a frame of several targets loads by a draw (emit_preload_draw) */
+		/* A frame of several targets that loads one is refused by the GPU however it is loaded -- a frame shader for
+		 * all of them or some, or a first draw (runs 526 to 530, every such pass; a frame of one target loads and
+		 * finishes). Until that is understood such targets are cleared to transparent black: the window server's
+		 * frames of three targets draw the whole screen over again, the wallpaper first. Boot-arg rwn_multiload=1
+		 * loads them by a first draw (emit_preload_draw), to go on looking. */
 		unsigned load = 0;
 		for (unsigned i = 0; i < color_count; i++)
 			if (color[i] && !b->clear[i])
 				load |= 1u << i;
-		if (color_count > 1 && load && !boot_arg("rwn_drawload=0")) {
-			if (emit_preload_draw(b, load, why, why_size) != 0) {
-				batch_free(b, 0);
-				open_batch = NULL;
-				return NULL;
+		if (color_count > 1 && load) {
+			if (boot_arg("rwn_multiload=1")) {
+				if (emit_preload_draw(b, load, why, why_size) != 0) {
+					batch_free(b, 0);
+					open_batch = NULL;
+					return NULL;
+				}
+			} else {
+				static const float zero[4] = { 0, 0, 0, 0 };
+				for (unsigned i = 0; i < color_count; i++)
+					if (load & (1u << i)) {
+						b->clear[i] = true;
+						rwa_pack_clear(color[i]->format, zero, b->clear_words[i]);
+					}
+				stats.multiload_cleared++;
 			}
 		}
 	}
@@ -2708,6 +2722,7 @@ report(void)
 		keep("%s", line);
 	}
 	frag_checked = frag_failed = 0;
+	keep("30s: %llu frames of several targets cleared instead of loaded", (unsigned long long)stats.multiload_cleared);
 	keep("30s: %llu draws (%llu refused), %llu passes, %llu loaded, %llu cleared, %llu waits by the processor; "
 	     "draws %llu us, submits %llu us; %llu pipelines in %llu ms (%llu refused), %llu surfaces; buffers %llu made, "
 	     "%llu reused, %llu KB kept",
