@@ -917,6 +917,54 @@ struct batch {
 static struct batch *open_batch;
 static uint32_t batch_marks;
 
+/* every fragment job in a ring of its own, so its status can be read once it is done and a pass the GPU refused can
+ * be named: what its targets were, which were loaded, its size */
+#define RING 128
+static struct km_bo *ring;
+static struct {
+	uint64_t seq;
+	char what[300];
+} ring_slot[RING];
+static unsigned ring_next;
+static uint64_t frag_failed, frag_checked;
+
+static const char *
+job_status_name(uint32_t s)
+{
+	switch (s & 0xff) {
+	case 0x01: return "DONE";
+	case 0x40: return "JOB_CONFIG_FAULT";
+	case 0x42: return "JOB_READ_FAULT";
+	case 0x43: return "JOB_WRITE_FAULT";
+	case 0x58: return "DATA_INVALID_FAULT";
+	case 0x59: return "TILE_RANGE_FAULT";
+	case 0x5a: return "ADDR_RANGE_FAULT";
+	case 0x60: return "OOM";
+	case 0x00: return "NOT_STARTED";
+	default: return "fault";
+	}
+}
+
+/* the status of slot I's job, once done; its slot free for the next */
+static void
+ring_check(unsigned i, bool wait)
+{
+	if (ring_slot[i].seq == 0)
+		return;
+	if (km_wait(ring_slot[i].seq, wait ? 1000000000 : 0) != 0)
+		return;
+	uint32_t status = 0;
+	memcpy(&status, ring->cpu + i * 256, 4);
+	frag_checked++;
+	if ((status & 0xff) != 1) {
+		frag_failed++;
+		static unsigned said;
+		if (said++ < 12)
+			keep("fragment job %s (%#x): %.280s", job_status_name(status), status, ring_slot[i].what);
+	}
+	ring_slot[i].seq = 0;
+}
+
 static struct ptr
 pool_alloc(struct batch *b, size_t size, size_t align, char *why, size_t why_size)
 {
@@ -1381,9 +1429,26 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	uint64_t fbd = emit_framebuffer(b, why, why_size);
 	if (fbd == 0)
 		return -1;
-	struct ptr frag = pool_alloc(b, pan_size(FRAGMENT_JOB), 64, why, why_size);
-	if (frag.cpu == NULL)
-		return -1;
+	if (ring == NULL) {
+		ring = km_bo_new(RING * 256, why, why_size);
+		if (ring == NULL)
+			return -1;
+	}
+	unsigned slot = ring_next++ % RING;
+	ring_check(slot, true);
+	struct ptr frag = { ring->cpu + slot * 256, ring->gpu + slot * 256 };
+	memset(frag.cpu, 0, 256);
+	{
+		int n = snprintf(ring_slot[slot].what, sizeof(ring_slot[slot].what), "%ux%u, %u draws, z %s:", b->width,
+				 b->height, b->draws, b->depth ? util_format_short_name(b->depth->format) : "-");
+		for (unsigned i = 0; i < b->color_count && n < (int)sizeof(ring_slot[slot].what) - 24; i++)
+			n += snprintf(ring_slot[slot].what + n, sizeof(ring_slot[slot].what) - n, " %s%s",
+				      b->color[i] ? util_format_short_name(b->color[i]->format) : "none",
+				      b->color[i] && !b->clear[i] ? "(load)" : "");
+		for (unsigned i = 0; i < b->nrenders && i < 4 && n < (int)sizeof(ring_slot[slot].what) - 40; i++)
+			n += snprintf(ring_slot[slot].what + n, sizeof(ring_slot[slot].what) - n, "%s %.34s", i ? "," : ";",
+				      b->renders[i]->fs.name);
+	}
 	pan_section_pack(frag.cpu, FRAGMENT_JOB, PAYLOAD, payload) {
 		payload.bound_min_x = 0;
 		payload.bound_min_y = 0;
@@ -1397,6 +1462,7 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	}
 	for (unsigned i = 0; i < b->nchunks; i++)
 		use_bo(b, b->chunks[i]);
+	use_bo(b, ring);
 	uint64_t seq = 0;
 	int e = 0;
 	if (b->first_job) {
@@ -1412,6 +1478,11 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		return -1;
 	}
 	*seq_out = seq;
+	ring_slot[slot].seq = seq;
+	use_bo(b, ring);
+	for (unsigned i = 0; i < RING; i++)
+		if (i != slot)
+			ring_check(i, false);
 	stats.batches++;
 	stats.flush_ns += now_ns() - began;
 	if (boot_arg("mali_native_sync=1"))
@@ -2435,6 +2506,9 @@ report(void)
 		return;
 	uint64_t k[4];
 	km_counts(k);
+	keep("30s: fragment jobs %llu checked, %llu failed", (unsigned long long)frag_checked,
+	     (unsigned long long)frag_failed);
+	frag_checked = frag_failed = 0;
 	keep("30s: %llu draws (%llu refused), %llu passes, %llu loaded, %llu cleared, %llu waits by the processor; "
 	     "draws %llu us, submits %llu us; %llu pipelines in %llu ms (%llu refused), %llu surfaces; buffers %llu made, "
 	     "%llu reused, %llu KB kept",

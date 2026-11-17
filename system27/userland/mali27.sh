@@ -82,7 +82,7 @@ PY
 			-I"$MESA_SRC/src/panfrost" -I"$B/util/format" -I"$MESA_SRC/src/compiler/air" -I"$ROOT/tools/mesa/air" \
 			-I$S/rwa -c $S/rwa/$f.c -o $O/$f.o
 	done
-	$CXX -dynamiclib -install_name /hakios/lib/libhakiosmali.dylib -Wl,-exported_symbol,_rwa_* -o $O/libhakiosmali.dylib \
+	$CXX -dynamiclib -install_name /hakios/lib/libhakiosmali.dylib -compatibility_version 9.0.0 -current_version 9.0.0 -Wl,-exported_symbol,_rwa_* -o $O/libhakiosmali.dylib \
 		$O/rwa_mali.o $O/rwa_shader.o $O/kmali.o "${COMPILER_LIBS[@]}" -framework IOKit -framework CoreFoundation -lc++
 	$PACSTRIP macho $O/libhakiosmali.dylib $O/libhakiosmali.dylib.strip > /dev/null && mv $O/libhakiosmali.dylib.strip $O/libhakiosmali.dylib
 	"$LDID" -S $O/libhakiosmali.dylib
