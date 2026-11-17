@@ -912,7 +912,8 @@ struct batch {
 	struct ptr tiler_ctx, tls;
 	unsigned tls_size;
 	unsigned minx, miny, maxx, maxy;   /* what the draws touched, inclusive pixels */
-	char sampled[160];                 /* the textures the draws sample, for a refused pass's line */
+	char sampled[200];                 /* the textures the draws sample, for a refused pass's line */
+	char samplers[120];
 	unsigned nsampled;
 };
 
@@ -958,7 +959,7 @@ ring_check(unsigned i, bool wait)
 	uint32_t status = 0;
 	memcpy(&status, ring->cpu + i * 256, 4);
 	frag_checked++;
-	if ((status & 0xff) == 1 && strstr(ring_slot[i].what, "r16g16b16a16_float") != NULL) {
+	if ((status & 0xff) == 1 && strstr(ring_slot[i].what, " r16g16") != NULL) {
 		static unsigned good;
 		if (good++ < 6)
 			keep("fragment job DONE: %.330s", ring_slot[i].what);
@@ -1446,6 +1447,18 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	struct ptr frag = { ring->cpu + slot * 256, ring->gpu + slot * 256 };
 	memset(frag.cpu, 0, 256);
 	{
+		char *w = ring_slot[slot].what;
+		size_t room = sizeof(ring_slot[slot].what);
+		int n = snprintf(w, room, "tex%s; smp%s; %ux%u %ud z%s:", b->sampled, b->samplers, b->width, b->height,
+				 b->draws, b->depth ? util_format_short_name(b->depth->format) : "-");
+		for (unsigned i = 0; i < b->color_count && n < (int)room - 24; i++)
+			n += snprintf(w + n, room - n, " %.6s%s", b->color[i] ? util_format_short_name(b->color[i]->format) : "none",
+				      b->color[i] && !b->clear[i] ? "(L)" : "");
+		for (unsigned i = 0; i < b->nrenders && i < 3 && n < (int)room - 40; i++)
+			n += snprintf(w + n, room - n, "%s %.24s%s", i ? "," : ";", b->renders[i]->fs.name,
+				      b->renders[i]->blend_shader_mask ? "[bs]" : "");
+	}
+	{
 		int n = snprintf(ring_slot[slot].what, sizeof(ring_slot[slot].what), "%ux%u, %u draws, z %s:", b->width,
 				 b->height, b->draws, b->depth ? util_format_short_name(b->depth->format) : "-");
 		for (unsigned i = 0; i < b->color_count && n < (int)sizeof(ring_slot[slot].what) - 24; i++)
@@ -1701,6 +1714,12 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 				samp[r->index] = st->inline_sampler[r->index];
 			} else if (r->index < bind->sampler_count && bind->samplers[r->index]) {
 				samp[r->index] = bind->samplers[r->index]->desc;
+				const struct rwa_sampler_state *ss = &bind->samplers[r->index]->state;
+				size_t l = strlen(b->samplers);
+				if (l < sizeof(b->samplers) - 16)
+					snprintf(b->samplers + l, sizeof(b->samplers) - l, " a%u%u%u f%u%u%u n%u x%u", ss->address[0],
+						 ss->address[1], ss->address[2], ss->min_filter, ss->mag_filter, ss->mip_filter,
+						 ss->normalized_coordinates, ss->max_anisotropy);
 			}
 			nsamp = MAX2(nsamp, r->index + 1);
 			break;
@@ -1743,9 +1762,11 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 			use_store(b, t->store);
 			if (b->nsampled < 8) {
 				size_t l = strlen(b->sampled);
-				snprintf(b->sampled + l, sizeof(b->sampled) - l, " %s %ux%u/%u%s", util_format_short_name(t->format),
-					 t->shape.width, t->shape.height, MAX2(t->shape.mip_levels, 1),
-					 t->store == (b->color[0] ? b->color[0]->store : NULL) ? "(target!)" : "");
+				snprintf(b->sampled + l, sizeof(b->sampled) - l, " %.10s %ux%u/%u r%u%s%s%s",
+					 util_format_short_name(t->format) + (strncmp(util_format_short_name(t->format), "r16g16b16a16", 12) == 0 ? 9 : 0),
+					 t->shape.width, t->shape.height, MAX2(t->shape.mip_levels, 1), t->row_bytes[0],
+					 t->store->surface_id ? "S" : "", t->is_view ? "V" : "",
+					 t->store == (b->color[0] ? b->color[0]->store : NULL) ? "!T" : "");
 				b->nsampled++;
 			}
 			unsigned levels = MAX2(t->shape.mip_levels, 1);
