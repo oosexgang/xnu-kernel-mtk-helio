@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include "air_metal.h"
@@ -93,6 +94,14 @@ parse(const char *text, struct recipe *out)
 			return false;
 	}
 	return true;
+}
+
+/* a child that stops in the host's compiler leaves at once, with no crash report: a hundred of them at once kept
+ * this Mac from starting any program for twenty minutes (ReportCrash) */
+static void
+quiet_exit(int sig)
+{
+	_exit(128 + sig);
 }
 
 static const struct air_metallib_function *
@@ -186,9 +195,9 @@ main(int argc, char **argv)
 		if (child > 0) {
 			int st = 0;
 			waitpid(child, &st, 0);
-			if (WIFSIGNALED(st)) {
-				printf("! %s (%s, %s): the host's compiler stopped (signal %d)\n", shortl, r.vertex, r.fragment,
-				       WTERMSIG(st));
+			if (WIFSIGNALED(st) || WEXITSTATUS(st) >= 128) {
+				printf("! %s (%s, %s): stopped (signal %d)\n", shortl, r.vertex, r.fragment,
+				       WIFSIGNALED(st) ? WTERMSIG(st) : WEXITSTATUS(st) - 128);
 				crashed++;
 			} else if (WEXITSTATUS(st) == 0) {
 				built++;
@@ -201,6 +210,11 @@ main(int argc, char **argv)
 			}
 			continue;
 		}
+		signal(SIGABRT, quiet_exit);
+		signal(SIGSEGV, quiet_exit);
+		signal(SIGBUS, quiet_exit);
+		signal(SIGTRAP, quiet_exit);
+		signal(SIGILL, quiet_exit);
 		struct rwa_render_info info;
 		rwa_render_constants(r.vc, r.nv, r.fc, r.nf);
 		struct rwa_render *p = rwa_render_create(dev, vf->bitcode, vf->bitcode_size, NULL, ff->bitcode,

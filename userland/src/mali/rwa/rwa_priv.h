@@ -92,7 +92,7 @@ struct rwa_device {
 	struct km_bo *sample_positions;   /* the 768-byte table (pan_samples.c) */
 	struct km_bo *tiler_heap;
 	struct km_bo *dummy;          /* a zeroed page: unbound buffers and textures point here */
-	struct rwa_stage preload[2];  /* the frame shader that loads a target (float, and RGBA8 by integer: unused) */
+	struct rwa_stage preload[256]; /* the frame shaders that load the targets of a mask (preload[mask], made on demand) */
 	bool preload_ready;
 	uint32_t null_texture[8];
 };
@@ -132,6 +132,7 @@ struct rwa_compute {
 
 /* rwa_shader.c */
 int rwa_shader_init(struct rwa_device *device, char *why, size_t why_size);
+int rwa_preload_shader(struct rwa_device *device, struct rwa_stage *st, unsigned mask, char *why, size_t why_size);
 /* AIR's stage to a compiled stage: CONSTANTS and CONFIG as rwa_render_constants and rwa_render_config gave them */
 int rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *bitcode, size_t size, const char *entry,
 		      gl_shader_stage want, const struct rwa_constant *constants, unsigned nconst, const void *config,

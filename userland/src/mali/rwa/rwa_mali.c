@@ -1058,13 +1058,13 @@ batch_new(struct rwa_texture *const *color, unsigned color_count, struct rwa_tex
 		return NULL;
 	}
 	uint64_t heap_desc = b->tiler_ctx.gpu + pan_size(TILER_CONTEXT);
-	pan_cast_and_pack(b->tiler_ctx.cpu + pan_size(TILER_CONTEXT), TILER_HEAP, heap) {
+	pan_cast_and_pack((b->tiler_ctx.cpu + pan_size(TILER_CONTEXT)), TILER_HEAP, heap) {
 		heap.size = d->tiler_heap->size;
 		heap.base = d->tiler_heap->gpu;
 		heap.bottom = d->tiler_heap->gpu;
 		heap.top = d->tiler_heap->gpu + d->tiler_heap->size;
 	}
-	pan_cast_and_pack(b->tiler_ctx.cpu, TILER_CONTEXT, tiler) {
+	pan_cast_and_pack((b->tiler_ctx.cpu), TILER_CONTEXT, tiler) {
 		tiler.hierarchy_mask = hierarchy_mask(b->width, b->height);
 		tiler.fb_width = b->width;
 		tiler.fb_height = b->height;
@@ -1123,68 +1123,77 @@ static int
 emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t why_size)
 {
 	struct rwa_device *d = the_device;
-	const struct rwa_stage *ps = &d->preload[0];
-	unsigned rt = __builtin_ctz(rt_mask);
-	struct rwa_texture *t = b->color[rt];
+	struct rwa_stage *ps = &d->preload[rt_mask & 0xff];
 
-	/* one target loaded (the shader writes target 0's output; its blend descriptor names target RT) */
-	if (util_bitcount(rt_mask) != 1)
+	/* the frame shader of these targets, made the first time a pass loads them */
+	if (ps->code == NULL && rwa_preload_shader(d, ps, rt_mask & 0xff, why, why_size) != 0)
 		return -1;
+	unsigned n = util_bitcount(rt_mask);
 	unsigned nblend = MAX2(b->color_count, 1);
 	struct ptr rsd = pool_alloc(b, pan_size(RENDERER_STATE) + nblend * pan_size(BLEND), 64, why, why_size);
-	struct ptr tex = pool_alloc(b, pan_size(TEXTURE) + pan_size(SURFACE_WITH_STRIDE), 64, why, why_size);
+	struct ptr tex = pool_alloc(b, n * (pan_size(TEXTURE) + pan_size(SURFACE_WITH_STRIDE)), 64, why, why_size);
 	struct ptr smp = pool_alloc(b, pan_size(SAMPLER), 64, why, why_size);
-	struct ptr var = pool_alloc(b, pan_size(ATTRIBUTE) + 2 * pan_size(ATTRIBUTE_BUFFER) + 64, 64, why, why_size);
+	struct ptr var = pool_alloc(b, pan_size(ATTRIBUTE) + 2 * pan_size(ATTRIBUTE_BUFFER), 64, why, why_size);
+	struct ptr crd = pool_alloc(b, 64, 64, why, why_size);   /* an attribute buffer's pointer is 64-byte aligned */
 	struct ptr vp = pool_alloc(b, pan_size(VIEWPORT), 64, why, why_size);
-	if (!rsd.cpu || !tex.cpu || !smp.cpu || !var.cpu || !vp.cpu)
+	if (!rsd.cpu || !tex.cpu || !smp.cpu || !var.cpu || !vp.cpu || !crd.cpu)
 		return -1;
 	memcpy(rsd.cpu, ps->rsd, 64);
 	for (unsigned i = 0; i < nblend; i++) {
 		void *bd = rsd.cpu + pan_size(RENDERER_STATE) + i * pan_size(BLEND);
-		if (i == rt)
-			rwa_preload_blend(d, t->format, i, bd);
+		if (rt_mask & (1u << i))
+			rwa_preload_blend(d, b->color[i]->format, i, bd);
 		else
-			pan_cast_and_pack(bd, BLEND, cfg) {
+			pan_cast_and_pack((bd), BLEND, cfg) {
 				cfg.enable = false;
 				cfg.internal.mode = MALI_BLEND_MODE_OFF;
 			}
 	}
-	/* the target as a texture of its level: the coordinates are pixels (an unnormalized sampler) */
-	uint64_t base = t->store->bo->gpu + t->offset;
-	rwa_surface_desc(tex.cpu + pan_size(TEXTURE), base, (int32_t)t->row_bytes[0], 0);
+	/* the targets as textures of their level, in target order: the coordinates are pixels (an unnormalized sampler) */
 	const unsigned char id[4] = { PIPE_SWIZZLE_X, PIPE_SWIZZLE_Y, PIPE_SWIZZLE_Z, PIPE_SWIZZLE_W };
-	rwa_texture_desc(tex.cpu, t->format, id, MALI_TEXTURE_DIMENSION_2D, t->shape.width, t->shape.height, 1, 1, 1, 1,
-			 tex.gpu + pan_size(TEXTURE));
-	pan_cast_and_pack(smp.cpu, SAMPLER, cfg) {
+	unsigned k = 0;
+	for (unsigned rt = 0; rt < 8; rt++) {
+		if (!(rt_mask & (1u << rt)))
+			continue;
+		struct rwa_texture *t = b->color[rt];
+		uint8_t *desc = tex.cpu + k * pan_size(TEXTURE);
+		uint8_t *surf = tex.cpu + n * pan_size(TEXTURE) + k * pan_size(SURFACE_WITH_STRIDE);
+		uint64_t surf_gpu = tex.gpu + n * pan_size(TEXTURE) + k * pan_size(SURFACE_WITH_STRIDE);
+		rwa_surface_desc(surf, t->store->bo->gpu + t->offset, (int32_t)t->row_bytes[0], 0);
+		rwa_texture_desc(desc, t->format, id, MALI_TEXTURE_DIMENSION_2D, t->shape.width, t->shape.height, 1, 1, 1, 1,
+				 surf_gpu);
+		k++;
+	}
+	pan_cast_and_pack((smp.cpu), SAMPLER, cfg) {
 		cfg.seamless_cube_map = false;
 		cfg.normalized_coordinates = false;
 		cfg.minify_nearest = true;
 		cfg.magnify_nearest = true;
 	}
-	/* the rectangle: the frame's extent on 32-pixel tiles (pan_preload_emit_dcd), as positions and as the varying */
+	/* the rectangle, the frame's extent, as positions and as the varying (pan_preload_fb_part) */
 	unsigned minx = 0, miny = 0, maxx = b->width - 1, maxy = b->height - 1;
-	float *coords = (float *)(var.cpu + pan_size(ATTRIBUTE) + 2 * pan_size(ATTRIBUTE_BUFFER));
-	uint64_t coords_gpu = var.gpu + pan_size(ATTRIBUTE) + 2 * pan_size(ATTRIBUTE_BUFFER);
+	float *coords = (float *)crd.cpu;
+	uint64_t coords_gpu = crd.gpu;
 	const float rect[16] = { minx, miny, 0, 1, maxx + 1, miny, 0, 1, minx, maxy + 1, 0, 1, maxx + 1, maxy + 1, 0, 1 };
 	memcpy(coords, rect, sizeof(rect));
-	pan_cast_and_pack(var.cpu, ATTRIBUTE, cfg) {
+	pan_cast_and_pack((var.cpu), ATTRIBUTE, cfg) {
 		cfg.buffer_index = 0;
 		cfg.offset_enable = false;
 		cfg.format = GENX(panfrost_format_from_pipe_format)(PIPE_FORMAT_R32G32B32_FLOAT)->hw;
 	}
-	pan_cast_and_pack(var.cpu + pan_size(ATTRIBUTE), ATTRIBUTE_BUFFER, cfg) {
+	pan_cast_and_pack((var.cpu + pan_size(ATTRIBUTE)), ATTRIBUTE_BUFFER, cfg) {
 		cfg.pointer = coords_gpu;
 		cfg.stride = 4 * sizeof(float);
 		cfg.size = cfg.stride * 4;
 	}
-	pan_cast_and_pack(var.cpu + pan_size(ATTRIBUTE) + pan_size(ATTRIBUTE_BUFFER), ATTRIBUTE_BUFFER, cfg);
-	pan_cast_and_pack(vp.cpu, VIEWPORT, cfg) {
+	pan_cast_and_pack((var.cpu + pan_size(ATTRIBUTE) + pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg);
+	pan_cast_and_pack((vp.cpu), VIEWPORT, cfg) {
 		cfg.scissor_minimum_x = minx;
 		cfg.scissor_minimum_y = miny;
 		cfg.scissor_maximum_x = maxx;
 		cfg.scissor_maximum_y = maxy;
 	}
-	pan_cast_and_pack(dcd, DRAW, cfg) {
+	pan_cast_and_pack((dcd), DRAW, cfg) {
 		cfg.thread_storage = b->tls.gpu;
 		cfg.state = rsd.gpu;
 		cfg.position = coords_gpu;
@@ -1239,11 +1248,6 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 		if (dcds.cpu == NULL)
 			return 0;
 		memset(dcds.cpu, 0, 3 * pan_size(DRAW));
-		if (util_bitcount(load_mask) > 1) {
-			say(why, why_size, "%u targets to load at once (the frame shader loads one here)",
-			    util_bitcount(load_mask));
-			return 0;
-		}
 		if (emit_preload_dcd(b, dcds.cpu, load_mask, why, why_size) != 0)
 			return 0;
 	}
@@ -1291,7 +1295,7 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 	uint8_t *rts = fb.cpu + pan_size(FRAMEBUFFER);
 	if (zs) {
 		struct rwa_texture *t = b->depth;
-		pan_cast_and_pack(rts, ZS_CRC_EXTENSION, cfg) {
+		pan_cast_and_pack((rts), ZS_CRC_EXTENSION, cfg) {
 			cfg.zs_clean_pixel_write_enable = b->clear_z;
 			cfg.zs_block_format = MALI_BLOCK_FORMAT_LINEAR;
 			cfg.zs_writeback_base = t->store->bo->gpu + t->offset;
@@ -1314,7 +1318,7 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 	unsigned cbuf_offset = 0;
 	for (unsigned i = 0; i < rt_count; i++) {
 		struct rwa_texture *t = i < b->color_count ? b->color[i] : NULL;
-		pan_cast_and_pack(rts + i * pan_size(RENDER_TARGET), RENDER_TARGET, cfg) {
+		pan_cast_and_pack((rts + i * pan_size(RENDER_TARGET)), RENDER_TARGET, cfg) {
 			cfg.internal_buffer_offset = cbuf_offset;
 			if (t == NULL) {
 				cfg.internal_format = MALI_COLOR_BUFFER_INTERNAL_FORMAT_R8G8B8A8;
@@ -1367,7 +1371,7 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		if (scratch.cpu == NULL)
 			return -1;
 	}
-	pan_cast_and_pack(b->tls.cpu, LOCAL_STORAGE, cfg) {
+	pan_cast_and_pack((b->tls.cpu), LOCAL_STORAGE, cfg) {
 		if (b->tls_size) {
 			cfg.tls_size = panfrost_get_stack_shift(b->tls_size);
 			cfg.tls_base_pointer = scratch.gpu;
@@ -1391,8 +1395,6 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		header.type = MALI_JOB_TYPE_FRAGMENT;
 		header.index = 1;
 	}
-	if (d->preload_ready)
-		use_bo(b, d->preload[0].code);
 	for (unsigned i = 0; i < b->nchunks; i++)
 		use_bo(b, b->chunks[i]);
 	uint64_t seq = 0;
@@ -1537,7 +1539,7 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 			return -1;
 		/* an entry the shader declares and nothing is bound to: 256 bytes of zeros */
 		for (unsigned i = 0; i < st->ubo_count; i++) {
-			pan_cast_and_pack(ubos.cpu + i * pan_size(UNIFORM_BUFFER), UNIFORM_BUFFER, cfg) {
+			pan_cast_and_pack((ubos.cpu + i * pan_size(UNIFORM_BUFFER)), UNIFORM_BUFFER, cfg) {
 				cfg.pointer = d->dummy->gpu;
 				cfg.entries = 16;
 			}
@@ -1600,7 +1602,7 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 				gpu = c.gpu;
 				cpu = c.cpu;
 			}
-			pan_cast_and_pack(ubos.cpu + r->index * pan_size(UNIFORM_BUFFER), UNIFORM_BUFFER, cfg) {
+			pan_cast_and_pack((ubos.cpu + r->index * pan_size(UNIFORM_BUFFER)), UNIFORM_BUFFER, cfg) {
 				cfg.pointer = gpu;
 				cfg.entries = DIV_ROUND_UP(want, 16);
 			}
@@ -1681,7 +1683,7 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 				continue;
 			}
 			/* nothing bound: nearest, clamped (air_metal.c default_sampler) */
-			pan_cast_and_pack(sp.cpu + i * pan_size(SAMPLER), SAMPLER, cfg) {
+			pan_cast_and_pack((sp.cpu + i * pan_size(SAMPLER)), SAMPLER, cfg) {
 				cfg.magnify_nearest = true;
 				cfg.minify_nearest = true;
 				cfg.normalized_coordinates = true;
@@ -1751,7 +1753,7 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 			}
 		}
 		if (st->sysval_ubo < st->ubo_count) {
-			pan_cast_and_pack(ubos.cpu + st->sysval_ubo * pan_size(UNIFORM_BUFFER), UNIFORM_BUFFER, cfg) {
+			pan_cast_and_pack((ubos.cpu + st->sysval_ubo * pan_size(UNIFORM_BUFFER)), UNIFORM_BUFFER, cfg) {
 				cfg.pointer = sv.gpu;
 				cfg.entries = st->sysval_count;
 			}
@@ -1799,7 +1801,7 @@ pack_invocation(void *out, unsigned vertex_count, unsigned instance_count)
 		panfrost_pack_work_groups_compute(out, 1, vertex_count, instance_count, 1, 1, 1, true, false);
 		return;
 	}
-	pan_cast_and_pack(out, INVOCATION, cfg) {
+	pan_cast_and_pack((out), INVOCATION, cfg) {
 		cfg.invocations = vertex_count - 1;
 		cfg.size_y_shift = 0;
 		cfg.size_z_shift = 0;
@@ -1946,12 +1948,12 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 		for (unsigned i = 0; i < r->attr_count; i++) {
 			const struct rwa_attr_rec *a = &r->attr[i];
 			if (a->buffer == RWA_ATTR_ZERO) {
-				pan_cast_and_pack(abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER), ATTRIBUTE_BUFFER, cfg) {
+				pan_cast_and_pack((abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg) {
 					cfg.pointer = d->dummy->gpu;
 					cfg.stride = 0;
 					cfg.size = 64;
 				}
-				pan_cast_and_pack(attrs.cpu + i * pan_size(ATTRIBUTE), ATTRIBUTE, cfg) {
+				pan_cast_and_pack((attrs.cpu + i * pan_size(ATTRIBUTE)), ATTRIBUTE, cfg) {
 					cfg.buffer_index = k;
 					cfg.format = a->format;
 					cfg.offset = 0;
@@ -1981,14 +1983,14 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 			if (per_instance && instances > 1) {
 				unsigned divisor = a->step_rate * padded;
 				if (util_is_power_of_two_or_zero(divisor)) {
-					pan_cast_and_pack(abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER), ATTRIBUTE_BUFFER, cfg) {
+					pan_cast_and_pack((abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg) {
 						cfg.type = MALI_ATTRIBUTE_TYPE_1D_POT_DIVISOR;
 						cfg.pointer = base;
 						cfg.stride = stride;
 						cfg.size = size;
 						cfg.divisor_r = __builtin_ctz(divisor);
 					}
-					pan_cast_and_pack(attrs.cpu + i * pan_size(ATTRIBUTE), ATTRIBUTE, cfg) {
+					pan_cast_and_pack((attrs.cpu + i * pan_size(ATTRIBUTE)), ATTRIBUTE, cfg) {
 						cfg.buffer_index = k;
 						cfg.format = a->format;
 						cfg.offset = off;
@@ -1998,7 +2000,7 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 					k = (k + 1) & ~1u;    /* the NPOT pair at an even record */
 					unsigned shift = 0, extra = 0;
 					unsigned magic = panfrost_compute_magic_divisor(divisor, &shift, &extra);
-					pan_cast_and_pack(abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER), ATTRIBUTE_BUFFER, cfg) {
+					pan_cast_and_pack((abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg) {
 						cfg.type = MALI_ATTRIBUTE_TYPE_1D_NPOT_DIVISOR;
 						cfg.pointer = base;
 						cfg.stride = stride;
@@ -2006,12 +2008,12 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 						cfg.divisor_r = shift;
 						cfg.divisor_e = extra;
 					}
-					pan_cast_and_pack(abufs.cpu + (k + 1) * pan_size(ATTRIBUTE_BUFFER),
+					pan_cast_and_pack((abufs.cpu + (k + 1) * pan_size(ATTRIBUTE_BUFFER)),
 							  ATTRIBUTE_BUFFER_CONTINUATION_NPOT, cfg) {
 						cfg.divisor_numerator = magic;
 						cfg.divisor = a->step_rate;
 					}
-					pan_cast_and_pack(attrs.cpu + i * pan_size(ATTRIBUTE), ATTRIBUTE, cfg) {
+					pan_cast_and_pack((attrs.cpu + i * pan_size(ATTRIBUTE)), ATTRIBUTE, cfg) {
 						cfg.buffer_index = k;
 						cfg.format = a->format;
 						cfg.offset = off;
@@ -2020,7 +2022,7 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 				}
 				continue;
 			}
-			pan_cast_and_pack(abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER), ATTRIBUTE_BUFFER, cfg) {
+			pan_cast_and_pack((abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg) {
 				cfg.type = instances > 1 && !per_instance ? MALI_ATTRIBUTE_TYPE_1D_MODULUS : MALI_ATTRIBUTE_TYPE_1D;
 				cfg.pointer = base;
 				cfg.stride = stride;
@@ -2028,7 +2030,7 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 				if (instances > 1 && !per_instance)
 					cfg.divisor = padded;
 			}
-			pan_cast_and_pack(attrs.cpu + i * pan_size(ATTRIBUTE), ATTRIBUTE, cfg) {
+			pan_cast_and_pack((attrs.cpu + i * pan_size(ATTRIBUTE)), ATTRIBUTE, cfg) {
 				cfg.buffer_index = k;
 				cfg.format = a->format;
 				cfg.offset = off;
@@ -2036,7 +2038,7 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 			k++;
 		}
 		/* "Bifrost needs an empty desc to mark end of prefetching" */
-		pan_cast_and_pack(abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER), ATTRIBUTE_BUFFER, cfg);
+		pan_cast_and_pack((abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg);
 	}
 
 	/* the varyings: records of both stages and their buffers -- general, position, point size, the end */
@@ -2051,29 +2053,29 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 		return -1;
 	for (unsigned i = 0; i < r->vs_out_count + r->fs_in_count; i++) {
 		const struct rwa_varying_rec *v = i < r->vs_out_count ? &r->vs_out[i] : &r->fs_in[i - r->vs_out_count];
-		pan_cast_and_pack(vrec.cpu + i * pan_size(ATTRIBUTE), ATTRIBUTE, cfg) {
+		pan_cast_and_pack((vrec.cpu + i * pan_size(ATTRIBUTE)), ATTRIBUTE, cfg) {
 			cfg.buffer_index = v->buffer;
 			cfg.offset_enable = false;
 			cfg.format = v->format;
 			cfg.offset = v->offset;
 		}
 	}
-	pan_cast_and_pack(vbuf.cpu, ATTRIBUTE_BUFFER, cfg) {
+	pan_cast_and_pack((vbuf.cpu), ATTRIBUTE_BUFFER, cfg) {
 		cfg.pointer = general.gpu;
 		cfg.stride = r->general_stride;
 		cfg.size = r->general_stride * alloc;
 	}
-	pan_cast_and_pack(vbuf.cpu + pan_size(ATTRIBUTE_BUFFER), ATTRIBUTE_BUFFER, cfg) {
+	pan_cast_and_pack((vbuf.cpu + pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg) {
 		cfg.pointer = pos.gpu;
 		cfg.stride = 16;
 		cfg.size = 16 * alloc;
 	}
-	pan_cast_and_pack(vbuf.cpu + 2 * pan_size(ATTRIBUTE_BUFFER), ATTRIBUTE_BUFFER, cfg) {
+	pan_cast_and_pack((vbuf.cpu + 2 * pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg) {
 		cfg.pointer = psiz.gpu;
 		cfg.stride = r->writes_psiz ? 2 : 0;
 		cfg.size = r->writes_psiz ? 2 * alloc : 0;
 	}
-	pan_cast_and_pack(vbuf.cpu + 3 * pan_size(ATTRIBUTE_BUFFER), ATTRIBUTE_BUFFER, cfg);
+	pan_cast_and_pack((vbuf.cpu + 3 * pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg);
 
 	/* the fixed state: renderer states (the fragment one followed by the targets' blend descriptors), viewport */
 	unsigned nblend = MAX2(r->rt_count, 1);
@@ -2086,7 +2088,7 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	memcpy(vsr.cpu, r->vs.rsd, 64);
 	rwa_render_fs_rsd(r, dr->depth_stencil ? &dr->depth_stencil->state : NULL, dr->depth != NULL, 1, fsr.cpu);
 	memcpy(fsr.cpu + pan_size(RENDERER_STATE), r->blend, nblend * pan_size(BLEND));
-	pan_cast_and_pack(vpd.cpu, VIEWPORT, cfg) {
+	pan_cast_and_pack((vpd.cpu), VIEWPORT, cfg) {
 		cfg.scissor_minimum_x = (unsigned)sx0;
 		cfg.scissor_minimum_y = (unsigned)sy0;
 		cfg.scissor_maximum_x = (unsigned)sx1;
@@ -2320,7 +2322,7 @@ rwa_dispatch_buffers(struct rwa_compute *c, const struct rwa_bindings *bindings,
 			return -1;
 		}
 	}
-	pan_cast_and_pack(b->tls.cpu, LOCAL_STORAGE, cfg) {
+	pan_cast_and_pack((b->tls.cpu), LOCAL_STORAGE, cfg) {
 		if (scratch_size) {
 			cfg.tls_size = panfrost_get_stack_shift(scratch_size);
 			cfg.tls_base_pointer = scratch.gpu;

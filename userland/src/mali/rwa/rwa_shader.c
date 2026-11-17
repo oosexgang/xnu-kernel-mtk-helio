@@ -253,7 +253,7 @@ rwa_rt_conversion(enum pipe_format f, unsigned rt, unsigned size)
 void
 rwa_surface_desc(void *out, uint64_t pointer, int32_t row_stride, int32_t surface_stride)
 {
-	pan_cast_and_pack(out, SURFACE_WITH_STRIDE, cfg) {
+	pan_cast_and_pack((out), SURFACE_WITH_STRIDE, cfg) {
 		cfg.pointer = pointer;
 		cfg.row_stride = row_stride;
 		cfg.surface_stride = surface_stride;
@@ -281,7 +281,7 @@ rwa_texture_desc(void *out, enum pipe_format format, const unsigned char user_sw
 		util_format_compose_swizzles(d.post, swizzle, swizzle);
 	}
 	uint32_t hw = GENX(panfrost_format_from_pipe_format)(format)->hw;
-	pan_cast_and_pack(out, TEXTURE, cfg) {
+	pan_cast_and_pack((out), TEXTURE, cfg) {
 		cfg.dimension = dim;
 		cfg.format = hw;
 		cfg.width = width;
@@ -324,7 +324,7 @@ rwa_sampler_desc(void *out, const struct rwa_sampler_state *s, bool compare, cha
 		    s->mag_filter, s->mip_filter);
 		return -1;
 	}
-	pan_cast_and_pack(out, SAMPLER, cfg) {
+	pan_cast_and_pack((out), SAMPLER, cfg) {
 		cfg.magnify_nearest = s->mag_filter == 0;
 		cfg.minify_nearest = s->min_filter == 0;
 		cfg.normalized_coordinates = s->normalized_coordinates != 0;
@@ -1161,38 +1161,46 @@ rwa_render_fs_rsd(const struct rwa_render *r, const struct rwa_depth_stencil_sta
 
 /* --- the frame shader that loads a target: pan_fb_preload.c's pan_preload_get_shader, one float 2D surface ----------- */
 
-static int
-preload_shader(struct rwa_device *device, struct rwa_stage *st, char *why, size_t why_size)
+/* the frame shader for the targets in MASK, one texture each in target order (pan_preload_get_shader's loop) */
+int
+rwa_preload_shader(struct rwa_device *device, struct rwa_stage *st, unsigned mask, char *why, size_t why_size)
 {
 	nir_builder b = nir_builder_init_simple_shader(MESA_SHADER_FRAGMENT, GENX(pan_shader_get_compiler_options)(),
-						       "rwa_preload");
+						       "rwa_preload_%x", mask);
 	nir_def *bary = nir_load_barycentric(&b, nir_intrinsic_load_barycentric_pixel, INTERP_MODE_SMOOTH);
 	nir_def *coord = nir_load_interpolated_input(&b, 2, 32, bary, nir_imm_int(&b, 0), .base = 0,
 						     .dest_type = nir_type_float32, .io_semantics.location = VARYING_SLOT_VAR0,
 						     .io_semantics.num_slots = 1);
-	nir_tex_instr *tex = nir_tex_instr_create(b.shader, 1);
-	tex->dest_type = nir_type_float32;
-	tex->texture_index = 0;
-	tex->sampler_index = 0;
-	tex->is_array = false;
-	tex->sampler_dim = GLSL_SAMPLER_DIM_2D;
-	tex->op = nir_texop_txl;
-	tex->src[0] = nir_tex_src_for_ssa(nir_tex_src_coord, coord);
-	tex->coord_components = 2;
-	nir_def_init(&tex->instr, &tex->def, 4, 32);
-	nir_builder_instr_insert(&b, &tex->instr);
-	nir_store_output(&b, &tex->def, nir_imm_int(&b, 0), .base = 0, .src_type = nir_type_float32,
-			 .io_semantics.location = FRAG_RESULT_DATA0, .io_semantics.num_slots = 1,
-			 .write_mask = nir_component_mask(4));
+	unsigned active = 0;
+	for (unsigned rt = 0; rt < 8; rt++) {
+		if (!(mask & (1u << rt)))
+			continue;
+		nir_tex_instr *tex = nir_tex_instr_create(b.shader, 1);
+		tex->dest_type = nir_type_float32;
+		tex->texture_index = active;
+		tex->sampler_index = 0;
+		tex->is_array = false;
+		tex->sampler_dim = GLSL_SAMPLER_DIM_2D;
+		tex->op = nir_texop_txl;
+		tex->src[0] = nir_tex_src_for_ssa(nir_tex_src_coord, coord);
+		tex->coord_components = 2;
+		nir_def_init(&tex->instr, &tex->def, 4, 32);
+		nir_builder_instr_insert(&b, &tex->instr);
+		nir_store_output(&b, &tex->def, nir_imm_int(&b, 0), .base = active, .src_type = nir_type_float32,
+				 .io_semantics.location = FRAG_RESULT_DATA0 + rt, .io_semantics.num_slots = 1,
+				 .write_mask = nir_component_mask(4));
+		active++;
+	}
 	struct panfrost_compile_inputs inputs = { .gpu_id = device->gpu_id, .is_blit = true, .no_idvs = true };
 	struct util_dynarray bin;
 	util_dynarray_init(&bin, NULL);
 	nir_shader_gather_info(b.shader, nir_shader_get_entrypoint(b.shader));
-	BITSET_SET(b.shader->info.textures_used, 0);
+	for (unsigned i = 0; i < active; i++)
+		BITSET_SET(b.shader->info.textures_used, i);
 	bifrost_preprocess_nir(b.shader, inputs.gpu_id);
 	memset(st, 0, sizeof(*st));
 	GENX(pan_shader_compile)(b.shader, &inputs, &bin, &st->info);
-	snprintf(st->name, sizeof(st->name), "preload");
+	snprintf(st->name, sizeof(st->name), "preload %x", mask);
 	int e = upload_code(st, &bin, why, why_size);
 	util_dynarray_fini(&bin);
 	ralloc_free(b.shader);
@@ -1224,7 +1232,7 @@ int
 rwa_shader_init(struct rwa_device *device, char *why, size_t why_size)
 {
 	glsl_type_singleton_init_or_ref();   /* the translator builds types (air_metal.c rwa_device_open) */
-	if (preload_shader(device, &device->preload[0], why, why_size) != 0)
+	if (rwa_preload_shader(device, &device->preload[1], 1, why, why_size) != 0)
 		return -1;
 	device->preload_ready = true;
 	return 0;
