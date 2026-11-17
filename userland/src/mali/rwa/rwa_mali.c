@@ -918,6 +918,7 @@ struct batch {
 	char samplers[120];
 	unsigned tex_flags;
 	unsigned raw_variant;        /* a pass loading several targets: 0 one frame shader, 1 two (8-bit, raw), 2 raw cleared */
+	unsigned drawn_load;         /* targets loaded by the batch's first draw instead of a frame shader */
 	unsigned nsampled;
 };
 
@@ -937,7 +938,7 @@ static struct {
 enum { F_LOAD_RAW = 1, F_LOAD_BLEND = 2, F_TEX_MIP = 4, F_TEX_F16 = 8, F_CLEAR_ONLY = 16, F_RAW_TARGET = 32,
        F_TEX_SURFACE = 64, F_RAW_A = 128, F_RAW_B = 256, F_RAW_C = 512, NFLAGS = 10 };
 static const char *const flag_names[NFLAGS] = { "load-raw", "load-8bit", "tex-mip", "tex-f16", "clear-only",
-						"raw-target", "tex-surface", "multi-one", "multi-two", "multi-rawclear" };
+						"raw-target", "tex-surface", "multi-frame-shader", "load-by-draw", "unused" };
 static uint64_t flag_total[NFLAGS], flag_failed[NFLAGS];
 static unsigned ring_next;
 static uint64_t frag_failed, frag_checked;
@@ -1276,6 +1277,8 @@ emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t
 		cfg.scissor_minimum_y = miny;
 		cfg.scissor_maximum_x = maxx;
 		cfg.scissor_maximum_y = maxy;
+		cfg.minimum_z = 0.0f;
+		cfg.maximum_z = 1.0f;
 	}
 	pan_cast_and_pack((dcd), DRAW, cfg) {
 		cfg.thread_storage = b->tls.gpu;
@@ -1332,8 +1335,8 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 		if ((load_mask & (1u << i)) && !rwa_rt_blendable(b->color[i]->format))
 			raw_mask |= 1u << i;
 	b->raw_variant = 0;
-	if (raw_mask && util_bitcount(load_mask) > 1)
-		b->raw_variant = raw_variant_next++ % 3;
+	(void)raw_variant_next;
+	load_mask &= ~b->drawn_load;   /* those the first draw loaded */
 	if (b->raw_variant == 2) {
 		/* C: the raw targets cleared to zero instead of loaded */
 		for (unsigned i = 0; i < b->color_count; i++)
@@ -1520,8 +1523,10 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		if (any_clear && !(fl & (F_LOAD_RAW | F_LOAD_BLEND)) && b->draws == 0)
 			fl |= F_CLEAR_ONLY;
 		fl |= b->tex_flags;
-		if (b->raw_variant || (fl & F_LOAD_RAW))
-			fl |= b->raw_variant == 1 ? F_RAW_B : b->raw_variant == 2 ? F_RAW_C : F_RAW_A;
+		if (b->drawn_load)
+			fl |= F_RAW_B;
+		else if (util_bitcount(fl & (F_LOAD_RAW | F_LOAD_BLEND)) && b->color_count > 1)
+			fl |= F_RAW_A;
 		ring_slot[slot].flags = fl;
 	}
 	{
@@ -1603,6 +1608,51 @@ flush_batch(const char *reason)
 	report();
 }
 
+static void pack_invocation(void *out, unsigned vertex_count, unsigned instance_count);
+static void link_job(struct batch *b, uint8_t *header_cpu, uint64_t gpu);
+
+/* the targets in MASK loaded by a draw of their own, the batch's first: a tiler job whose draw descriptor is the frame
+ * shader's (its positions are already the pass's pixels, so no vertex job), drawn as a strip over the whole pass.
+ * Run 529: a pre-frame DCD in a frame of several targets was refused whatever it loaded; draws into such frames
+ * finish. Sampling the targets here reads their memory as it was: the tiles are written back at the pass's end. */
+static int
+emit_preload_draw(struct batch *b, unsigned mask, char *why, size_t why_size)
+{
+	struct ptr job = pool_alloc(b, pan_size(TILER_JOB), 64, why, why_size);
+	if (job.cpu == NULL)
+		return -1;
+	memset(job.cpu, 0, pan_size(TILER_JOB));
+	if (emit_preload_dcd(b, pan_section_ptr(job.cpu, TILER_JOB, DRAW), mask, why, why_size) != 0)
+		return -1;
+	pack_invocation(pan_section_ptr(job.cpu, TILER_JOB, INVOCATION), 4, 1);
+	pan_section_pack(job.cpu, TILER_JOB, PRIMITIVE, cfg) {
+		cfg.draw_mode = MALI_DRAW_MODE_TRIANGLE_STRIP;
+		cfg.first_provoking_vertex = true;
+		cfg.job_task_split = 6;
+		cfg.index_count = 4;
+		cfg.index_type = MALI_INDEX_TYPE_NONE;
+	}
+	pan_section_pack(job.cpu, TILER_JOB, PRIMITIVE_SIZE, cfg) {
+		cfg.constant = 1.0f;
+	}
+	pan_section_pack(job.cpu, TILER_JOB, TILER, cfg) {
+		cfg.address = b->tiler_ctx.gpu;
+	}
+	pan_section_pack(job.cpu, TILER_JOB, PADDING, cfg) {
+		(void)cfg;
+	}
+	unsigned index = ++b->job_index;
+	pan_section_pack(job.cpu, TILER_JOB, HEADER, cfg) {
+		cfg.type = MALI_JOB_TYPE_TILER;
+		cfg.index = index;
+		cfg.dependency_2 = b->last_tiler;
+	}
+	link_job(b, job.cpu, job.gpu);
+	b->last_tiler = index;
+	b->drawn_load |= mask;
+	return 0;
+}
+
 static struct batch *
 batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned color_count, struct rwa_texture *depth,
 	  const float *clear_color,
@@ -1629,6 +1679,18 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 		}
 		if (clear_color)
 			stats.clears++;
+		/* a frame of several targets loads by a draw (emit_preload_draw) */
+		unsigned load = 0;
+		for (unsigned i = 0; i < color_count; i++)
+			if (color[i] && !b->clear[i])
+				load |= 1u << i;
+		if (color_count > 1 && load && !boot_arg("rwn_drawload=0")) {
+			if (emit_preload_draw(b, load, why, why_size) != 0) {
+				batch_free(b, 0);
+				open_batch = NULL;
+				return NULL;
+			}
+		}
 	}
 	return open_batch;
 }
