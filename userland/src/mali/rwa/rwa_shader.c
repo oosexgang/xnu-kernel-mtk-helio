@@ -234,6 +234,13 @@ rwa_rt_blendable(enum pipe_format f)
 	return GENX(panfrost_blendable_format_from_pipe_format)(f)->internal != 0;
 }
 
+bool
+rwa_samplable(enum pipe_format f)
+{
+	const struct panfrost_format *pf = GENX(panfrost_format_from_pipe_format)(f);
+	return pf->hw != 0 && (pf->bind & PAN_BIND_SAMPLER_VIEW);
+}
+
 void
 rwa_pack_clear(enum pipe_format f, const float rgba[4], uint32_t out[4])
 {

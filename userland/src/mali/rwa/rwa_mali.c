@@ -912,6 +912,8 @@ struct batch {
 	struct ptr tiler_ctx, tls;
 	unsigned tls_size;
 	unsigned minx, miny, maxx, maxy;   /* what the draws touched, inclusive pixels */
+	char sampled[160];                 /* the textures the draws sample, for a refused pass's line */
+	unsigned nsampled;
 };
 
 static struct batch *open_batch;
@@ -923,7 +925,7 @@ static uint32_t batch_marks;
 static struct km_bo *ring;
 static struct {
 	uint64_t seq;
-	char what[300];
+	char what[400];
 } ring_slot[RING];
 static unsigned ring_next;
 static uint64_t frag_failed, frag_checked;
@@ -959,13 +961,13 @@ ring_check(unsigned i, bool wait)
 	if ((status & 0xff) == 1 && strstr(ring_slot[i].what, "r16g16b16a16_float") != NULL) {
 		static unsigned good;
 		if (good++ < 6)
-			keep("fragment job DONE: %.280s", ring_slot[i].what);
+			keep("fragment job DONE: %.330s", ring_slot[i].what);
 	}
 	if ((status & 0xff) != 1) {
 		frag_failed++;
 		static unsigned said;
 		if (said++ < 12)
-			keep("fragment job %s (%#x): %.280s", job_status_name(status), status, ring_slot[i].what);
+			keep("fragment job %s (%#x): %.330s", job_status_name(status), status, ring_slot[i].what);
 	}
 	ring_slot[i].seq = 0;
 }
@@ -1453,6 +1455,8 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		for (unsigned i = 0; i < b->nrenders && i < 4 && n < (int)sizeof(ring_slot[slot].what) - 40; i++)
 			n += snprintf(ring_slot[slot].what + n, sizeof(ring_slot[slot].what) - n, "%s %.30s%s", i ? "," : ";",
 				      b->renders[i]->fs.name, b->renders[i]->blend_shader_mask ? "[bs]" : "");
+		if (n < (int)sizeof(ring_slot[slot].what) - 8)
+			snprintf(ring_slot[slot].what + n, sizeof(ring_slot[slot].what) - n, "; tex%s", b->sampled);
 	}
 	pan_section_pack(frag.cpu, FRAGMENT_JOB, PAYLOAD, payload) {
 		payload.bound_min_x = 0;
@@ -1731,7 +1735,19 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 				sg += pan_size(SURFACE_WITH_STRIDE);
 				continue;
 			}
+			if (!rwa_samplable(t->format)) {
+				say(why, why_size, "%s samples texture %u of %s, which this GPU does not sample", st->name, i,
+				    util_format_short_name(t->format));
+				return -1;
+			}
 			use_store(b, t->store);
+			if (b->nsampled < 8) {
+				size_t l = strlen(b->sampled);
+				snprintf(b->sampled + l, sizeof(b->sampled) - l, " %s %ux%u/%u%s", util_format_short_name(t->format),
+					 t->shape.width, t->shape.height, MAX2(t->shape.mip_levels, 1),
+					 t->store == (b->color[0] ? b->color[0]->store : NULL) ? "(target!)" : "");
+				b->nsampled++;
+			}
 			unsigned levels = MAX2(t->shape.mip_levels, 1);
 			uint64_t first = sg;
 			/* GENX(panfrost_emit_texture_payload): layer-major, then level */
