@@ -1209,7 +1209,8 @@ emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t
 	unsigned n = util_bitcount(rt_mask);
 	unsigned nblend = MAX2(b->color_count, 1);
 	struct ptr rsd = pool_alloc(b, pan_size(RENDERER_STATE) + nblend * pan_size(BLEND), 64, why, why_size);
-	struct ptr tex = pool_alloc(b, n * (pan_size(TEXTURE) + pan_size(SURFACE_WITH_STRIDE)), 64, why, why_size);
+	/* the descriptors, then each target's surface on 64 bytes of its own (as every texture payload is) */
+	struct ptr tex = pool_alloc(b, ALIGN_POT(n * pan_size(TEXTURE), 64) + n * 64, 64, why, why_size);
 	struct ptr smp = pool_alloc(b, pan_size(SAMPLER), 64, why, why_size);
 	struct ptr var = pool_alloc(b, pan_size(ATTRIBUTE) + 2 * pan_size(ATTRIBUTE_BUFFER), 64, why, why_size);
 	struct ptr crd = pool_alloc(b, 64, 64, why, why_size);   /* an attribute buffer's pointer is 64-byte aligned */
@@ -1235,8 +1236,8 @@ emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t
 			continue;
 		struct rwa_texture *t = b->color[rt];
 		uint8_t *desc = tex.cpu + k * pan_size(TEXTURE);
-		uint8_t *surf = tex.cpu + n * pan_size(TEXTURE) + k * pan_size(SURFACE_WITH_STRIDE);
-		uint64_t surf_gpu = tex.gpu + n * pan_size(TEXTURE) + k * pan_size(SURFACE_WITH_STRIDE);
+		uint8_t *surf = tex.cpu + ALIGN_POT(n * pan_size(TEXTURE), 64) + k * 64;
+		uint64_t surf_gpu = tex.gpu + ALIGN_POT(n * pan_size(TEXTURE), 64) + k * 64;
 		unsigned l = b->level[rt];
 		rwa_surface_desc(surf, t->store->bo->gpu + t->offset + t->level_offset[l], (int32_t)t->row_bytes[l], 0);
 		rwa_texture_desc(desc, t->format, id, MALI_TEXTURE_DIMENSION_2D, u_minify(t->shape.width, l),
