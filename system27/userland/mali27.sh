@@ -71,6 +71,22 @@ PY
 	AK=$REL/rootfs/System/Library/SubFrameworks/ARKitCore.framework/default.metallib
 	[ -f "$AK" ] && cp "$AK" $O/ARKitCore.metallib
 	$CXX -std=c++17 -O2 -fno-exceptions -fno-rtti $PROBE_DEFS -I$S -c $S/probe.cpp -o $O/probe.o
+	# the native Metal library (userland/src/mali/rwa): air_metal.h's contract with the job descriptors written here,
+	# /hakios/lib/libhakiosmali.dylib, which the Metal plug-in loads in place of libhakiosair.dylib with boot-arg
+	# mali_native=1 (userland/src/metal/air.cpp)
+	for f in rwa_shader rwa_mali kmali; do
+		# shellcheck disable=SC2086
+		$CC -std=c11 -O2 -w -DPAN_ARCH=7 $DEFS -I"$B" -I"$MESA_SRC/src" -I"$MESA_SRC/include" -I"$B/compiler/nir" \
+			-I"$MESA_SRC/src/compiler/nir" -I"$B/compiler" -I"$MESA_SRC/src/compiler" -I"$B/panfrost/lib" \
+			-I"$MESA_SRC/src/panfrost/lib" -I"$B/panfrost/lib/genxml" -I"$MESA_SRC/src/panfrost/lib/genxml" \
+			-I"$MESA_SRC/src/panfrost" -I"$B/util/format" -I"$MESA_SRC/src/compiler/air" -I"$ROOT/tools/mesa/air" \
+			-I$S/rwa -c $S/rwa/$f.c -o $O/$f.o
+	done
+	$CXX -dynamiclib -install_name /hakios/lib/libhakiosmali.dylib -Wl,-exported_symbol,_rwa_* -o $O/libhakiosmali.dylib \
+		$O/rwa_mali.o $O/rwa_shader.o $O/kmali.o "${COMPILER_LIBS[@]}" -framework IOKit -framework CoreFoundation -lc++
+	$PACSTRIP macho $O/libhakiosmali.dylib $O/libhakiosmali.dylib.strip > /dev/null && mv $O/libhakiosmali.dylib.strip $O/libhakiosmali.dylib
+	"$LDID" -S $O/libhakiosmali.dylib
+	ls -la $O/libhakiosmali.dylib
 fi
 rm -f $O/libhakios-mali.a
 ar rcs $O/libhakios-mali.a $O/v7.o $O/gpu.o $O/pass.o $O/draw.o $O/blit.o $O/metal.o $O/fake_gpu.o $O/iokit_transport.o

@@ -90,6 +90,8 @@ if [ -n "${MALI27:-}" ]; then
 		mkdir -p $T/share
 		cp $MALI27/ARKitCore.metallib $T/share/
 	fi
+	# the native Metal library: the plug-in loads it in place of libhakiosair.dylib with boot-arg mali_native=1
+	[ -f $MALI27/libhakiosmali.dylib ] && cp $MALI27/libhakiosmali.dylib $T/lib/
 fi
 # the audio server's output device (inj26.sh): arm64e, in place of 16.5's arm64 one, which the audio server cannot load;
 # the system image links /System/Library/Audio/Plug-Ins/HAL/HakiosAudio.driver to it (mkimage26.py)

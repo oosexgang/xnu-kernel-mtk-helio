@@ -12,9 +12,16 @@
 #include <dlfcn.h>
 #include <mutex>
 
+extern "C" const char *
+rwm_air_library_path(void)
+{
+	static const char *path = rwm_boot_arg("mali_native=1") ? "/hakios/lib/libhakiosmali.dylib"
+								 : "/hakios/lib/libhakiosair.dylib";
+	return path;
+}
+
 namespace {
 
-constexpr const char *library_path = "/hakios/lib/libhakiosair.dylib";
 
 struct Call {
 	const char *name;
@@ -35,7 +42,7 @@ call(const char *name, F *slot, bool required)
 void
 load()
 {
-	void *handle = dlopen(library_path, RTLD_NOW);
+	void *handle = dlopen(rwm_air_library_path(), RTLD_NOW);
 
 	if (handle == nullptr) {
 		rwm_print("no compiler library: %s\n", dlerror());

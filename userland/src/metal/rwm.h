@@ -35,6 +35,10 @@ void rwm_print(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 /* the boot arguments, read once (src/metal/perf.cpp); rwm_boot_arg: whether `text` is in them */
 const char *rwm_boot_args(void);
 bool rwm_boot_arg(const char *text);
+/* the compiler library this process loads: /hakios/lib/libhakiosair.dylib (Mesa's Gallium panfrost), or with boot-arg
+ * mali_native=1 /hakios/lib/libhakiosmali.dylib (userland/src/mali/rwa: the same contract, the Mali's job descriptors
+ * written by this port's own library) */
+const char *rwm_air_library_path(void);
 
 /*
  * Where a frame's time goes (src/metal/perf.cpp): counters added to where the work is, said as kept lines every

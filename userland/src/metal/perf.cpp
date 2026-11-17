@@ -29,7 +29,7 @@ say(const char *line)
 void *
 profile_call(const char *name)
 {
-	void *lib = dlopen("/hakios/lib/libhakiosair.dylib", RTLD_NOW | RTLD_NOLOAD);
+	void *lib = dlopen(rwm_air_library_path(), RTLD_NOW | RTLD_NOLOAD);
 
 	return lib != nullptr ? dlsym(lib, name) : nullptr;
 }

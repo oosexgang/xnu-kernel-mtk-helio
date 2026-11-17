@@ -73,6 +73,9 @@
 
 #include "drawable.h"
 
+/* src/metal/air.cpp: the compiler library this process loaded (boot-arg mali_native=1: the native one) */
+extern "C" const char *rwm_air_library_path(void);
+
 /*
  * The two requests this file needs, by the numbers the kernel answers them on
  * (xnu/files/iokit/Kernel/HakiosGPU.cpp:78-95): kHakiosSurface is this port's own and
@@ -514,7 +517,7 @@ rwd_import(void)
 	static int looked;
 
 	if (!looked) {
-		void *library = dlopen("/hakios/lib/libhakiosair.dylib", RTLD_NOW | RTLD_NOLOAD);
+		void *library = dlopen(rwm_air_library_path(), RTLD_NOW | RTLD_NOLOAD);
 
 		looked = 1;
 		if (library != NULL) {
