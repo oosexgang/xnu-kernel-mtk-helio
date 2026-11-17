@@ -157,6 +157,7 @@ int rwa_sampler_desc(void *out, const struct rwa_sampler_state *s, bool compare,
 /* what a render target is (pan_rt_init_format): internal and writeback format words, swizzle and the tile buffer's bytes
  * a sample; false: not a target */
 bool rwa_rt_blendable(enum pipe_format f);
+bool rwa_no_blend_shaders(void);
 bool rwa_rt_format(enum pipe_format f, uint32_t *internal, uint32_t *writeback, uint32_t *swizzle, unsigned *bpp);
 /* the clear colour of a target as the tile buffer holds it (pan_pack_color) */
 void rwa_pack_clear(enum pipe_format f, const float rgba[4], uint32_t out[4]);

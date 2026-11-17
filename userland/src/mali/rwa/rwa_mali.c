@@ -956,6 +956,11 @@ ring_check(unsigned i, bool wait)
 	uint32_t status = 0;
 	memcpy(&status, ring->cpu + i * 256, 4);
 	frag_checked++;
+	if ((status & 0xff) == 1 && strstr(ring_slot[i].what, "r16g16b16a16_float") != NULL) {
+		static unsigned good;
+		if (good++ < 6)
+			keep("fragment job DONE: %.280s", ring_slot[i].what);
+	}
 	if ((status & 0xff) != 1) {
 		frag_failed++;
 		static unsigned said;
@@ -1446,8 +1451,8 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 				      b->color[i] ? util_format_short_name(b->color[i]->format) : "none",
 				      b->color[i] && !b->clear[i] ? "(load)" : "");
 		for (unsigned i = 0; i < b->nrenders && i < 4 && n < (int)sizeof(ring_slot[slot].what) - 40; i++)
-			n += snprintf(ring_slot[slot].what + n, sizeof(ring_slot[slot].what) - n, "%s %.34s", i ? "," : ";",
-				      b->renders[i]->fs.name);
+			n += snprintf(ring_slot[slot].what + n, sizeof(ring_slot[slot].what) - n, "%s %.30s%s", i ? "," : ";",
+				      b->renders[i]->fs.name, b->renders[i]->blend_shader_mask ? "[bs]" : "");
 	}
 	pan_section_pack(frag.cpu, FRAGMENT_JOB, PAYLOAD, payload) {
 		payload.bound_min_x = 0;

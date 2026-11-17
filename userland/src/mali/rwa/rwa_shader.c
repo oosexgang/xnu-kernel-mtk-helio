@@ -11,6 +11,7 @@
  *   GENX(pan_shader_compile), every uniform buffer pushable (the Metal driver's choice in the patched pan_shader.c).
  */
 #include <stdarg.h>
+#include <sys/sysctl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -723,6 +724,22 @@ blend_func(unsigned op, bool *ok)
 	}
 }
 
+bool
+rwa_no_blend_shaders(void)
+{
+	static int off = -1;
+#ifndef RWA_HOST_FAKE
+	if (off < 0) {
+		char args[1024] = "";
+		size_t n = sizeof(args) - 1;
+		off = sysctlbyname("kern.bootargs", args, &n, NULL, 0) == 0 && strstr(args, "rwn_bs=0") != NULL;
+	}
+#else
+	off = 0;
+#endif
+	return off;
+}
+
 static struct pan_blend_shader_cache blend_cache;
 static bool blend_cache_ready;
 
@@ -810,6 +827,12 @@ blend_desc(struct rwa_render *r, unsigned rt, char *why, size_t why_size)
 	}
 	bool opaque = pan_blend_is_opaque(eq);
 	bool reads = pan_blend_reads_dest(eq);
+	/* boot-arg rwn_bs=0: no blend shaders -- such a target written as it comes out (for telling what they cost) */
+	if ((!opaque && !rwa_rt_blendable(format)) && rwa_no_blend_shaders()) {
+		eq.blend_enable = false;
+		opaque = pan_blend_is_opaque(eq);
+		reads = pan_blend_reads_dest(eq);
+	}
 	if ((!opaque && !rwa_rt_blendable(format)) || !pan_blend_can_fixed_function(eq, true)) {
 		/* panfrost_get_blend: a shader, unless the equation is opaque (Bifrost converts any format then) */
 		if (blend_shader(r, rt, eq, why, why_size) != 0)
