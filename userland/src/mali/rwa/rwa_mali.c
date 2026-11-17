@@ -119,6 +119,8 @@ static void report(void);
 /* a draw's time by part: checks, batch_for (with the flush of the batch before), index range and viewport, vertex
  * stage, fragment stage, attributes, varyings and jobs */
 static uint64_t phase_ns[7];
+/* a stage's time by part, vertex [0] and fragment [1]: buffers, textures, samplers, system values, pushed words */
+static uint64_t stage_ns[2][5];
 static uint64_t surface_frames;
 
 static bool
@@ -235,6 +237,44 @@ static unsigned thread_tls_alloc, core_id_range = 1, tiler_levels = 8;
 
 #define HEAP_BYTES (16u << 20)
 
+/* what a GPU buffer's memory costs the processor against its own, once at the start (ns a KB): byte stores (as the
+ * descriptors' pack functions write), 4-byte loads, and a memcpy each way */
+static void
+memory_bench(uint8_t *wc)
+{
+	static uint8_t cached[4096];
+	uint8_t *mem[2] = { wc, cached };
+	double ns[2][4];
+	for (int m = 0; m < 2; m++) {
+		volatile uint8_t *v = mem[m];
+		uint64_t t = now_ns();
+		for (int rep = 0; rep < 4; rep++)
+			for (int i = 0; i < 4096; i++)
+				v[i] = (uint8_t)(i + rep);
+		ns[m][0] = (now_ns() - t) / 16.0;
+		volatile const uint32_t *w = (volatile const uint32_t *)mem[m];
+		uint32_t sum = 0;
+		t = now_ns();
+		for (int rep = 0; rep < 4; rep++)
+			for (int i = 0; i < 1024; i++)
+				sum += w[i];
+		ns[m][1] = (now_ns() - t) / 16.0;
+		static uint8_t tmp[4096];
+		t = now_ns();
+		for (int rep = 0; rep < 4; rep++)
+			memcpy(tmp, mem[m], 4096);
+		ns[m][2] = (now_ns() - t) / 16.0;
+		t = now_ns();
+		for (int rep = 0; rep < 4; rep++)
+			memcpy(mem[m], tmp, 4096);
+		ns[m][3] = (now_ns() - t) / 16.0;
+		(void)sum;
+	}
+	memset(wc, 0, 4096);   /* the dummy's zeros, as they were */
+	keep("memory, ns a KB, GPU buffer / cached: byte stores %.0f / %.0f, word loads %.0f / %.0f, memcpy out %.0f / %.0f, "
+	     "memcpy in %.0f / %.0f", ns[0][0], ns[1][0], ns[0][1], ns[1][1], ns[0][2], ns[1][2], ns[0][3], ns[1][3]);
+}
+
 struct rwa_device *
 rwa_device_open(char *why, size_t why_size)
 {
@@ -296,6 +336,7 @@ rwa_device_open(char *why, size_t why_size)
 	dladdr((const void *)rwa_device_open, &dl);
 	keep("native Mali library up at %p: gpu %#x, %u tiler levels, %u core ids, TLS %u", dl.dli_fbase, d->gpu_id,
 	     tiler_levels, core_id_range, thread_tls_alloc);
+	memory_bench(d->dummy->cpu + 32768);
 	return d;
 }
 
@@ -898,6 +939,11 @@ struct batch {
 	struct region region[24];
 	unsigned nregion;
 	struct km_bo *chunks[512];
+	/* each chunk's descriptors written in the processor's cached memory first and copied to the chunk whole at the
+	 * submit (pool_upload): the buffers are write-combined (HakiosMali.cpp createBO), and a draw packed byte by byte
+	 * into them, and read back from them, took ~250 us (run 536). NULL: a big one, written in place */
+	uint8_t *shadow[512];
+	uint32_t fill[512];
 	unsigned nchunks;
 	uint64_t chunk_used;
 	struct km_bo **bos;
@@ -1039,6 +1085,29 @@ ring_check(unsigned i, bool wait)
 	ring_slot[i].seq = 0;
 }
 
+static uint8_t *shadow_free[64];
+static unsigned shadow_nfree;
+static uint64_t upload_ns, upload_bytes;
+
+static uint8_t *
+shadow_get(void)
+{
+	if (shadow_nfree)
+		return shadow_free[--shadow_nfree];
+	return malloc(CHUNK);   /* NULL: the chunk is written in place */
+}
+
+static void
+shadow_put(uint8_t *sh)
+{
+	if (sh == NULL)
+		return;
+	if (shadow_nfree < ARRAY_SIZE(shadow_free))
+		shadow_free[shadow_nfree++] = sh;
+	else
+		free(sh);
+}
+
 static struct ptr
 pool_alloc(struct batch *b, size_t size, size_t align, char *why, size_t why_size)
 {
@@ -1056,9 +1125,15 @@ pool_alloc(struct batch *b, size_t size, size_t align, char *why, size_t why_siz
 		/* the big one before the current chunk, which stays the one allocated from */
 		if (b->nchunks > 0) {
 			b->chunks[b->nchunks] = b->chunks[b->nchunks - 1];
+			b->shadow[b->nchunks] = b->shadow[b->nchunks - 1];
+			b->fill[b->nchunks] = b->fill[b->nchunks - 1];
 			b->chunks[b->nchunks - 1] = big;
+			b->shadow[b->nchunks - 1] = NULL;
+			b->fill[b->nchunks - 1] = 0;
 		} else {
 			b->chunks[0] = big;
+			b->shadow[0] = NULL;
+			b->fill[0] = 0;
 			b->chunk_used = CHUNK;   /* no small chunk yet */
 		}
 		b->nchunks++;
@@ -1074,14 +1149,41 @@ pool_alloc(struct batch *b, size_t size, size_t align, char *why, size_t why_siz
 		struct km_bo *c = km_bo_new(CHUNK, why, why_size);
 		if (c == NULL)
 			return p;
+		b->shadow[b->nchunks] = shadow_get();
+		b->fill[b->nchunks] = 0;
 		b->chunks[b->nchunks++] = c;
 		at = 0;
 	}
 	struct km_bo *c = b->chunks[b->nchunks - 1];
-	p.cpu = c->cpu + at;
+	uint8_t *sh = b->shadow[b->nchunks - 1];
+	p.cpu = (sh ? sh : c->cpu) + at;
 	p.gpu = c->gpu + at;
 	b->chunk_used = at + size;
+	b->fill[b->nchunks - 1] = (uint32_t)(at + size);
 	return p;
+}
+
+/* the batch's descriptors to the GPU's memory, each chunk as far as it was filled, in one copy each */
+static void
+pool_upload(struct batch *b)
+{
+	uint64_t t = now_ns();
+	for (unsigned i = 0; i < b->nchunks; i++)
+		if (b->shadow[i] && b->fill[i]) {
+			memcpy(b->chunks[i]->cpu, b->shadow[i], b->fill[i]);
+			upload_bytes += b->fill[i];
+		}
+	upload_ns += now_ns() - t;
+}
+
+/* where the GPU's own copy of pool memory CPU is, to read what the GPU wrote there */
+static uint8_t *
+pool_real(struct batch *b, uint8_t *cpu)
+{
+	for (unsigned i = 0; i < b->nchunks; i++)
+		if (b->shadow[i] && cpu >= b->shadow[i] && cpu < b->shadow[i] + CHUNK)
+			return b->chunks[i]->cpu + (cpu - b->shadow[i]);
+	return cpu;
 }
 
 static void
@@ -1229,8 +1331,10 @@ same_targets(const struct batch *b, struct rwa_texture *const *color, const unsi
 static void
 batch_free(struct batch *b, uint64_t seq)
 {
-	for (unsigned i = 0; i < b->nchunks; i++)
+	for (unsigned i = 0; i < b->nchunks; i++) {
 		km_bo_release(b->chunks[i], seq);
+		shadow_put(b->shadow[i]);
+	}
 	for (unsigned i = 0; i < b->nstores; i++) {
 		struct store *s = b->stores[i];
 		if (s->pending == b)
@@ -1641,6 +1745,7 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	for (unsigned i = 0; i < b->nchunks; i++)
 		use_bo(b, b->chunks[i]);
 	use_bo(b, ring);
+	pool_upload(b);
 	uint64_t seq = 0;
 	int e = 0;
 	if (b->first_job) {
@@ -1848,6 +1953,9 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 	uint64_t ssbo_addr[RWA_MAX_UBOS] = { 0 };
 	uint32_t ssbo_size[RWA_MAX_UBOS] = { 0 };
 
+	const unsigned es_kind = st->info.stage == MESA_SHADER_FRAGMENT;
+	uint64_t es_t = now_ns(), es_t1;
+#define ES_PHASE(n) (es_t1 = now_ns(), stage_ns[es_kind][n] += es_t1 - es_t, es_t = es_t1)
 	memset(out, 0, sizeof(*out));
 	memset(views, 0, sizeof(views));
 	struct ptr ubos = { NULL, 0 };
@@ -1958,6 +2066,7 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 	}
 	ntex = MAX2(ntex, st->texture_count);
 	nsamp = MAX2(nsamp, st->sampler_count);
+	ES_PHASE(0);
 	if (ntex) {
 		/* the descriptors, then each one's surfaces (GENX(panfrost_new_texture): levels x layers of them) */
 		/* each texture's surfaces on 64 bytes of their own, as panfrost_create_sampler_view_bo allocates a payload */
@@ -2025,6 +2134,7 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 		}
 		out->textures = tp.gpu;
 	}
+	ES_PHASE(1);
 	if (nsamp) {
 		struct ptr sp = pool_alloc(b, nsamp * pan_size(SAMPLER), 64, why, why_size);
 		if (sp.cpu == NULL)
@@ -2046,6 +2156,7 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 		}
 		out->samplers = sp.gpu;
 	}
+	ES_PHASE(2);
 	/* the system values (panfrost_upload_sysvals) */
 	if (st->sysval_count) {
 		struct ptr sv = pool_alloc(b, st->sysval_count * 16, 16, why, why_size);
@@ -2114,19 +2225,45 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 		}
 	}
 	/* the pushed words (panfrost_emit_const_buf) */
+	ES_PHASE(3);
 	if (st->info.push.count) {
 		struct ptr pp = pool_alloc(b, st->info.push.count * 4, 16, why, why_size);
 		if (pp.cpu == NULL)
 			return -1;
+		/* each buffer's words read in one copy, not one by one: a bound buffer is write-combined memory, and a
+		 * read of it is the memory's, uncached */
+		uint32_t lo[RWA_MAX_UBOS], hi[RWA_MAX_UBOS];
+		static _Thread_local uint8_t local[RWA_MAX_UBOS][1024];
+		for (unsigned u = 0; u < st->ubo_count && u < RWA_MAX_UBOS; u++) {
+			lo[u] = UINT32_MAX;
+			hi[u] = 0;
+		}
+		for (unsigned i = 0; i < st->info.push.count; i++) {
+			unsigned u = st->info.push.words[i].ubo, o = st->info.push.words[i].offset;
+			if (u < st->ubo_count && u < RWA_MAX_UBOS && views[u].cpu && o + 4 <= views[u].size) {
+				lo[u] = MIN2(lo[u], o);
+				hi[u] = MAX2(hi[u], o + 4);
+			}
+		}
+		const uint8_t *base[RWA_MAX_UBOS];
+		for (unsigned u = 0; u < st->ubo_count && u < RWA_MAX_UBOS; u++) {
+			base[u] = NULL;
+			if (lo[u] < hi[u] && hi[u] - lo[u] <= sizeof(local[u])) {
+				memcpy(local[u], views[u].cpu + lo[u], hi[u] - lo[u]);
+				base[u] = local[u] - lo[u];
+			}
+		}
+		uint32_t *words = (uint32_t *)pp.cpu;
 		for (unsigned i = 0; i < st->info.push.count; i++) {
 			unsigned u = st->info.push.words[i].ubo, o = st->info.push.words[i].offset;
 			uint32_t w = 0;
-			if (u < st->ubo_count && views[u].cpu && o + 4 <= views[u].size)
-				memcpy(&w, views[u].cpu + o, 4);
-			memcpy(pp.cpu + 4 * i, &w, 4);
+			if (u < st->ubo_count && u < RWA_MAX_UBOS && views[u].cpu && o + 4 <= views[u].size)
+				memcpy(&w, (base[u] ? base[u] : views[u].cpu) + o, 4);
+			words[i] = w;
 		}
 		out->push = pp.gpu;
 	}
+	ES_PHASE(4);
 	return 0;
 }
 
@@ -2719,12 +2856,13 @@ rwa_dispatch_buffers(struct rwa_compute *c, const struct rwa_bindings *bindings,
 	}
 	for (unsigned i = 0; i < b->nchunks; i++)
 		use_bo(b, b->chunks[i]);
+	pool_upload(b);
 	uint64_t seq = 0;
 	int e = km_submit(job.gpu, false, b->bos, b->nbos, &seq);
 	if (e == 0)
 		e = km_wait(seq, 2000000000);
 	uint32_t status = 0;
-	memcpy(&status, job.cpu, 4);
+	memcpy(&status, pool_real(b, job.cpu), 4);
 	batch_free(b, seq);
 	if (e != 0 || (status & 0xff) != 1) {
 		say(why, why_size, "%s: the compute job %s (status %#x)", c->cs.name, e ? strerror(e) : "did not finish DONE",
@@ -2830,6 +2968,14 @@ report(void)
 		     surface_frames * 1e9 / (double)MAX2(now - stats.since, 1));
 		memset(phase_ns, 0, sizeof(phase_ns));
 		surface_frames = 0;
+		keep("30s: us a draw, vs/fs: buffers %.1f/%.1f, textures %.1f/%.1f, samplers %.1f/%.1f, sysvals %.1f/%.1f, "
+		     "pushed %.1f/%.1f; upload %.1f us a pass, %.1f KB a pass",
+		     stage_ns[0][0] / 1e3 / n, stage_ns[1][0] / 1e3 / n, stage_ns[0][1] / 1e3 / n, stage_ns[1][1] / 1e3 / n,
+		     stage_ns[0][2] / 1e3 / n, stage_ns[1][2] / 1e3 / n, stage_ns[0][3] / 1e3 / n, stage_ns[1][3] / 1e3 / n,
+		     stage_ns[0][4] / 1e3 / n, stage_ns[1][4] / 1e3 / n, upload_ns / 1e3 / MAX2(stats.batches, 1),
+		     upload_bytes / 1024.0 / MAX2(stats.batches, 1));
+		memset(stage_ns, 0, sizeof(stage_ns));
+		upload_ns = upload_bytes = 0;
 	}
 	keep("30s: %llu draws (%llu refused), %llu passes, %llu loaded, %llu cleared, %llu waits by the processor; "
 	     "draws %llu us, submits %llu us; %llu pipelines in %llu ms (%llu refused), %llu surfaces; buffers %llu made, "
