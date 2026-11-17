@@ -1313,17 +1313,24 @@ emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t
 	uint64_t coords_gpu = crd.gpu;
 	const float rect[16] = { minx, miny, 0, 1, maxx + 1, miny, 0, 1, minx, maxy + 1, 0, 1, maxx + 1, maxy + 1, 0, 1 };
 	memcpy(coords, rect, sizeof(rect));
-	pan_cast_and_pack((var.cpu), ATTRIBUTE, cfg) {
+	/* the two attribute buffers first: an Attribute Buffer is 32-byte aligned (v7.xml), and at var + 8, after the
+	 * Attribute, every frame shader's draw descriptor was refused -- DATA_INVALID at dcds+0, every load of runs 526
+	 * to 534 */
+	uint8_t *abuf_cpu = var.cpu;
+	uint64_t abuf_gpu = var.gpu;
+	uint8_t *attr_cpu = var.cpu + 2 * pan_size(ATTRIBUTE_BUFFER);
+	uint64_t attr_gpu = var.gpu + 2 * pan_size(ATTRIBUTE_BUFFER);
+	pan_cast_and_pack((attr_cpu), ATTRIBUTE, cfg) {
 		cfg.buffer_index = 0;
 		cfg.offset_enable = false;
 		cfg.format = GENX(panfrost_format_from_pipe_format)(PIPE_FORMAT_R32G32B32_FLOAT)->hw;
 	}
-	pan_cast_and_pack((var.cpu + pan_size(ATTRIBUTE)), ATTRIBUTE_BUFFER, cfg) {
+	pan_cast_and_pack((abuf_cpu), ATTRIBUTE_BUFFER, cfg) {
 		cfg.pointer = coords_gpu;
 		cfg.stride = 4 * sizeof(float);
 		cfg.size = cfg.stride * 4;
 	}
-	pan_cast_and_pack((var.cpu + pan_size(ATTRIBUTE) + pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg);
+	pan_cast_and_pack((abuf_cpu + pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg);
 	pan_cast_and_pack((vp.cpu), VIEWPORT, cfg) {
 		cfg.scissor_minimum_x = minx;
 		cfg.scissor_minimum_y = miny;
@@ -1337,8 +1344,8 @@ emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t
 		cfg.state = rsd.gpu;
 		cfg.position = coords_gpu;
 		cfg.viewport = vp.gpu;
-		cfg.varyings = var.gpu;
-		cfg.varying_buffers = var.gpu + pan_size(ATTRIBUTE);
+		cfg.varyings = attr_gpu;
+		cfg.varying_buffers = abuf_gpu;
 		cfg.textures = tex.gpu;
 		cfg.samplers = smp.gpu;
 		cfg.clean_fragment_write = true;
@@ -1386,10 +1393,10 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 	for (unsigned i = 0; i < b->color_count; i++)
 		if ((load_mask & (1u << i)) && !rwa_rt_blendable(b->color[i]->format))
 			raw_mask |= 1u << i;
-	/* run 534: a frame of several targets loading a raw one takes, in turn, 0 the frame shader as is, 1 its raw
-	 * targets' blend descriptors with the format's channels (pan_blend_get_internal_desc), 2 its raw targets
-	 * cleared and the others loaded */
-	b->raw_variant = raw_mask && b->color_count > 1 ? raw_variant_next++ % 3 : 0;
+	/* runs 528 to 534 tried other ways for raw targets (b->raw_variant 1: the format's channels, 2: cleared); what
+	 * was refused was the frame shader's attribute buffers' alignment, whatever it loaded */
+	b->raw_variant = 0;
+	(void)raw_variant_next;
 	load_mask &= ~b->drawn_load;   /* those the first draw loaded */
 	if (b->raw_variant == 2) {
 		/* C: the raw targets cleared to zero instead of loaded */
