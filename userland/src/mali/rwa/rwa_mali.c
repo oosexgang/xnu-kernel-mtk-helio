@@ -116,6 +116,10 @@ static struct {
 } stats;
 
 static void report(void);
+/* a draw's time by part: checks, batch_for (with the flush of the batch before), index range and viewport, vertex
+ * stage, fragment stage, attributes, varyings and jobs */
+static uint64_t phase_ns[7];
+static uint64_t surface_frames;
 
 static bool
 boot_arg(const char *text)
@@ -2176,6 +2180,8 @@ static int
 draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size)
 {
 	struct rwa_device *d = the_device;
+	uint64_t t = now_ns(), t1;
+#define PHASE(n) (t1 = now_ns(), phase_ns[n] += t1 - t, t = t1)
 	bool ok;
 	enum mali_draw_mode mode = draw_mode(dr->primitive, &ok);
 
@@ -2203,10 +2209,12 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 			    MAX2(dr->color[i]->shape.mip_levels, 1));
 			return -1;
 		}
+	PHASE(0);
 	struct batch *b = batch_for(dr->color, dr->color_level, dr->color_count, dr->depth, dr->clear_color, dr->clear_depth,
 				    dr->clear_stencil, why, why_size);
 	if (b == NULL)
 		return -1;
+	PHASE(1);
 	unsigned instances = MAX2(dr->instance_count, 1);
 	if (dr->base_instance && instances > 1) {
 		say(why, why_size, "a base instance of %u (not served yet)", dr->base_instance);
@@ -2285,11 +2293,15 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 				.vertex_count = vertex_count };
 	memcpy(svi.viewport, vp, sizeof(vp));
 	struct bound vb, fb;
+	PHASE(2);
 	if (emit_stage(b, &r->vs, &dr->vertex, dr->vertex_buffer_table, dr->vertex_buffer_table_count, &svi, &vb, why,
-		       why_size) != 0 ||
-	    emit_stage(b, &r->fs, &dr->fragment, dr->fragment_buffer_table, dr->fragment_buffer_table_count, &svi, &fb,
+		       why_size) != 0)
+		return -1;
+	PHASE(3);
+	if (emit_stage(b, &r->fs, &dr->fragment, dr->fragment_buffer_table, dr->fragment_buffer_table_count, &svi, &fb,
 		       why, why_size) != 0)
 		return -1;
+	PHASE(4);
 
 	/* the vertex attributes, a buffer each (panfrost_emit_vertex_data, 64-byte aligned bases) */
 	struct ptr attrs = { NULL, 0 }, abufs = { NULL, 0 };
@@ -2395,6 +2407,7 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 		pan_cast_and_pack((abufs.cpu + k * pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg);
 	}
 
+	PHASE(5);
 	/* the varyings: records of both stages and their buffers -- general, position, point size, the end */
 	struct ptr vrec = pool_alloc(b, (r->vs_out_count + r->fs_in_count + 1) * pan_size(ATTRIBUTE), 64, why, why_size);
 	struct ptr vbuf = pool_alloc(b, 4 * pan_size(ATTRIBUTE_BUFFER), 64, why, why_size);
@@ -2550,6 +2563,8 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	b->last_tiler = tindex;
 	b->draws++;
 	(void)d;
+	PHASE(6);
+#undef PHASE
 	return 0;
 }
 
@@ -2743,9 +2758,12 @@ rwa_wait_seq(uint64_t seq, int64_t timeout_ns)
 	return km_wait(seq, timeout_ns);
 }
 
+
 int
 rwa_surface_seq(uint32_t surface, uint64_t seq)
 {
+	if (seq != ~0ull)
+		surface_frames++;
 	return km_surface_seq(surface, seq);
 }
 
@@ -2801,7 +2819,18 @@ report(void)
 		keep("%s", line);
 	}
 	frag_checked = frag_failed = 0;
-	keep("30s: %llu frames of several targets cleared instead of loaded", (unsigned long long)stats.multiload_cleared);
+	{
+		/* microseconds a draw, by part (phase_ns) */
+		uint64_t n = MAX2(stats.draws + stats.refused, 1);
+		keep("30s: us a draw: checks %.1f, batch %.1f, index+viewport %.1f, vs %.1f, fs %.1f, attrs %.1f, "
+		     "varyings+jobs %.1f; %llu cleared instead of loaded; %llu surface frames (%.1f a second)",
+		     phase_ns[0] / 1e3 / n, phase_ns[1] / 1e3 / n, phase_ns[2] / 1e3 / n, phase_ns[3] / 1e3 / n,
+		     phase_ns[4] / 1e3 / n, phase_ns[5] / 1e3 / n, phase_ns[6] / 1e3 / n,
+		     (unsigned long long)stats.multiload_cleared, (unsigned long long)surface_frames,
+		     surface_frames * 1e9 / (double)MAX2(now - stats.since, 1));
+		memset(phase_ns, 0, sizeof(phase_ns));
+		surface_frames = 0;
+	}
 	keep("30s: %llu draws (%llu refused), %llu passes, %llu loaded, %llu cleared, %llu waits by the processor; "
 	     "draws %llu us, submits %llu us; %llu pipelines in %llu ms (%llu refused), %llu surfaces; buffers %llu made, "
 	     "%llu reused, %llu KB kept",
