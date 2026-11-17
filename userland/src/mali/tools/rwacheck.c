@@ -248,7 +248,7 @@ main(int argc, char **argv)
 		d.primitive = 4;
 		d.vertex_count = 4;
 		d.vertex_streams = streams;
-		d.vertex_stream_count = 31;
+		d.vertex_stream_count = info.vertex_streams;   /* what the plug-in covers (air.cpp, render.cpp) */
 		int code = 0;
 		if (!(fine && rwa_render_draw(p, &d, why, sizeof(why)) == 0 && rwa_finish(dev, why, sizeof(why)) == 0)) {
 			printf("  draw refused: %s\n", why);

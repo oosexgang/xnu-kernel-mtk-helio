@@ -25,6 +25,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/sysctl.h>
+#include <dlfcn.h>
 
 #include "genxml/gen_macros.h"
 #include "pan_encoder.h"
@@ -287,8 +288,10 @@ rwa_device_open(char *why, size_t why_size)
 	}
 	stats.since = now_ns();
 	the_device = d;
-	keep("native Mali library up: gpu %#x, %u tiler levels, %u core ids, TLS %u", d->gpu_id, tiler_levels, core_id_range,
-	     thread_tls_alloc);
+	Dl_info dl = { 0 };
+	dladdr((const void *)rwa_device_open, &dl);
+	keep("native Mali library up at %p: gpu %#x, %u tiler levels, %u core ids, TLS %u", dl.dli_fbase, d->gpu_id,
+	     tiler_levels, core_id_range, thread_tls_alloc);
 	return d;
 }
 
@@ -841,7 +844,8 @@ rwa_render_create(struct rwa_device *device, const void *vertex_bitcode, size_t 
 	for (unsigned i = 0; i < r->attr_count; i++)
 		if (r->attr[i].buffer != RWA_ATTR_ZERO)
 			out.vertex_stream_mask |= 1u << r->attr[i].buffer;
-	out.vertex_streams = util_bitcount(out.vertex_stream_mask);
+	/* the slots rwa_draw.vertex_streams must cover: the highest buffer index fetched from, plus one (air_metal.h) */
+	out.vertex_streams = util_last_bit(out.vertex_stream_mask);
 	for (unsigned i = 0; i < r->rt_count && i < r->shape.color_blend_count; i++) {
 		if (r->shape.color_blend[i].blending_enabled)
 			out.blend_enabled_mask |= 1u << i;
