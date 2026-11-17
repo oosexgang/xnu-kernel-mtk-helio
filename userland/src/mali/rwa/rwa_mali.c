@@ -1458,19 +1458,6 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 			n += snprintf(w + n, room - n, "%s %.24s%s", i ? "," : ";", b->renders[i]->fs.name,
 				      b->renders[i]->blend_shader_mask ? "[bs]" : "");
 	}
-	{
-		int n = snprintf(ring_slot[slot].what, sizeof(ring_slot[slot].what), "%ux%u, %u draws, z %s:", b->width,
-				 b->height, b->draws, b->depth ? util_format_short_name(b->depth->format) : "-");
-		for (unsigned i = 0; i < b->color_count && n < (int)sizeof(ring_slot[slot].what) - 24; i++)
-			n += snprintf(ring_slot[slot].what + n, sizeof(ring_slot[slot].what) - n, " %s%s",
-				      b->color[i] ? util_format_short_name(b->color[i]->format) : "none",
-				      b->color[i] && !b->clear[i] ? "(load)" : "");
-		for (unsigned i = 0; i < b->nrenders && i < 4 && n < (int)sizeof(ring_slot[slot].what) - 40; i++)
-			n += snprintf(ring_slot[slot].what + n, sizeof(ring_slot[slot].what) - n, "%s %.30s%s", i ? "," : ";",
-				      b->renders[i]->fs.name, b->renders[i]->blend_shader_mask ? "[bs]" : "");
-		if (n < (int)sizeof(ring_slot[slot].what) - 8)
-			snprintf(ring_slot[slot].what + n, sizeof(ring_slot[slot].what) - n, "; tex%s", b->sampled);
-	}
 	pan_section_pack(frag.cpu, FRAGMENT_JOB, PAYLOAD, payload) {
 		payload.bound_min_x = 0;
 		payload.bound_min_y = 0;
@@ -1712,6 +1699,10 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 		case AIR_RESOURCE_SAMPLER:
 			if (r->inline_sampler) {
 				samp[r->index] = st->inline_sampler[r->index];
+				size_t l = strlen(b->samplers);
+				if (l < sizeof(b->samplers) - 16)
+					snprintf(b->samplers + l, sizeof(b->samplers) - l, " i%08x%08x", st->inline_sampler[r->index][0],
+						 st->inline_sampler[r->index][1]);
 			} else if (r->index < bind->sampler_count && bind->samplers[r->index]) {
 				samp[r->index] = bind->samplers[r->index]->desc;
 				const struct rwa_sampler_state *ss = &bind->samplers[r->index]->state;
