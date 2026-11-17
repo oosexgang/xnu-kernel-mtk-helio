@@ -893,7 +893,6 @@ struct batch {
 	/* what the frame's descriptors are, by name: a refused fragment job's fault pointer is told against them */
 	struct region region[24];
 	unsigned nregion;
-	bool always;   /* the frame shader ALWAYS, not INTERSECT */
 	struct km_bo *chunks[512];
 	unsigned nchunks;
 	uint64_t chunk_used;
@@ -957,7 +956,7 @@ note(struct batch *b, const char *name, uint64_t gpu, uint64_t size)
 enum { F_LOAD_RAW = 1, F_LOAD_BLEND = 2, F_TEX_MIP = 4, F_TEX_F16 = 8, F_CLEAR_ONLY = 16, F_RAW_TARGET = 32,
        F_TEX_SURFACE = 64, F_RAW_A = 128, F_RAW_B = 256, F_RAW_C = 512, NFLAGS = 10 };
 static const char *const flag_names[NFLAGS] = { "load-raw", "load-8bit", "tex-mip", "tex-f16", "clear-only",
-						"raw-target", "tex-surface", "multi-frame-shader", "load-by-draw", "multi-always" };
+						"raw-target", "tex-surface", "multi-frame-shader", "v1-comps", "v2-rawclear" };
 static uint64_t flag_total[NFLAGS], flag_failed[NFLAGS];
 static unsigned ring_next;
 static uint64_t frag_failed, frag_checked;
@@ -1278,7 +1277,8 @@ emit_preload_dcd(struct batch *b, void *dcd, unsigned rt_mask, char *why, size_t
 	for (unsigned i = 0; i < nblend; i++) {
 		void *bd = rsd.cpu + pan_size(RENDERER_STATE) + i * pan_size(BLEND);
 		if (rt_mask & (1u << i))
-			rwa_preload_blend(d, b->color[i]->format, i, bd, false);
+			rwa_preload_blend(d, b->color[i]->format, i, bd,
+					  b->raw_variant == 1 && !rwa_rt_blendable(b->color[i]->format));
 		else
 			pan_cast_and_pack((bd), BLEND, cfg) {
 				cfg.enable = false;
@@ -1386,8 +1386,10 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 	for (unsigned i = 0; i < b->color_count; i++)
 		if ((load_mask & (1u << i)) && !rwa_rt_blendable(b->color[i]->format))
 			raw_mask |= 1u << i;
-	b->raw_variant = 0;
-	(void)raw_variant_next;
+	/* run 534: a frame of several targets loading a raw one takes, in turn, 0 the frame shader as is, 1 its raw
+	 * targets' blend descriptors with the format's channels (pan_blend_get_internal_desc), 2 its raw targets
+	 * cleared and the others loaded */
+	b->raw_variant = raw_mask && b->color_count > 1 ? raw_variant_next++ % 3 : 0;
 	load_mask &= ~b->drawn_load;   /* those the first draw loaded */
 	if (b->raw_variant == 2) {
 		/* C: the raw targets cleared to zero instead of loaded */
@@ -1406,8 +1408,8 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 		if (dcds.cpu == NULL)
 			return 0;
 		memset(dcds.cpu, 0, 3 * pan_size(DRAW));
-		unsigned first = b->raw_variant == 1 ? load_mask & ~raw_mask : load_mask;
-		unsigned second = b->raw_variant == 1 ? load_mask & raw_mask : 0;
+		unsigned first = load_mask;
+		unsigned second = 0;
 		if (first && emit_preload_dcd(b, dcds.cpu, first, why, why_size) != 0)
 			return 0;
 		if (second) {
@@ -1441,10 +1443,7 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 		cfg.sample_locations = d->sample_positions->gpu;
 		/* run 533: every other frame of several targets that loads runs its frame shader ALWAYS (TSIX-2033: a
 		 * forced clean write breaks INTERSECT readbacks), to tell the two apart */
-		static unsigned multi_loads;
-		b->always = load_mask && b->color_count > 1 && (multi_loads++ & 1);
-		cfg.pre_frame_0 = !load_mask ? MALI_PRE_POST_FRAME_SHADER_MODE_NEVER
-			: b->always ? MALI_PRE_POST_FRAME_SHADER_MODE_ALWAYS : MALI_PRE_POST_FRAME_SHADER_MODE_INTERSECT;
+		cfg.pre_frame_0 = !load_mask ? MALI_PRE_POST_FRAME_SHADER_MODE_NEVER : MALI_PRE_POST_FRAME_SHADER_MODE_INTERSECT;
 		cfg.pre_frame_1 = mode1;
 		cfg.post_frame = MALI_PRE_POST_FRAME_SHADER_MODE_NEVER;
 		cfg.frame_shader_dcds = dcds.gpu;
@@ -1593,10 +1592,11 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		if (any_clear && !(fl & (F_LOAD_RAW | F_LOAD_BLEND)) && b->draws == 0)
 			fl |= F_CLEAR_ONLY;
 		fl |= b->tex_flags;
-		if (b->always)
-			fl |= F_RAW_C;
-		if (b->drawn_load)
+		if (b->raw_variant == 1)
 			fl |= F_RAW_B;
+		if (b->raw_variant == 2 && (fl & F_LOAD_BLEND))
+			fl |= F_RAW_C;
+
 		else if (util_bitcount(fl & (F_LOAD_RAW | F_LOAD_BLEND)) && b->color_count > 1)
 			fl |= F_RAW_A;
 		ring_slot[slot].flags = fl;
