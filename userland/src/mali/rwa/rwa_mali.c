@@ -940,6 +940,8 @@ struct batch {
 	struct region region[24];
 	unsigned nregion;
 	unsigned discard;   /* attachments whose store action is DontCare: not written back */
+	unsigned dontcare;  /* attachments whose load action is DontCare: the tile starts at zero, and a tile nothing is
+			     * drawn into is not written (no clean writes), as a tiler leaves it */
 	struct km_bo *chunks[512];
 	/* each chunk's descriptors written in the processor's cached memory first and copied to the chunk whole at the
 	 * submit (pool_upload): the buffers are write-combined (HakiosMali.cpp createBO), and a draw packed byte by byte
@@ -1096,11 +1098,14 @@ static uint64_t commits;   /* command buffers committed (rwa_flush_seq) */
  * the pass before's end, if later) to its end as busy -- how much of the 30 seconds the GPU worked, and a pass's
  * submit-to-done time */
 #define GQ 1024
-static struct { uint64_t seq, submitted; } gq[GQ];
+static struct { uint64_t vseq, seq, submitted; unsigned kind, draws; } gq[GQ];
 static unsigned gq_head, gq_tail;
 static pthread_mutex_t gq_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t gq_cond = PTHREAD_COND_INITIALIZER;
 static uint64_t gpu_busy_ns, gpu_latency_ns, gpu_passes, gpu_last_done, gpu_latency_max;
+/* by kind (width >= 700, >= 300, >= 100, smaller; several targets; loaded): passes, draws, vertex+tiler and fragment
+ * time */
+static uint64_t kind_passes[16], kind_draws[16], kind_vt_ns[16], kind_frag_ns[16];
 static bool gq_running;
 
 static void *
@@ -1111,11 +1116,23 @@ gpu_watch(void *arg)
 		pthread_mutex_lock(&gq_lock);
 		while (gq_head == gq_tail)
 			pthread_cond_wait(&gq_cond, &gq_lock);
-		uint64_t seq = gq[gq_tail % GQ].seq, submitted = gq[gq_tail % GQ].submitted;
+		uint64_t seq = gq[gq_tail % GQ].seq, submitted = gq[gq_tail % GQ].submitted, vseq = gq[gq_tail % GQ].vseq;
+		unsigned kind = gq[gq_tail % GQ].kind & 15, draws = gq[gq_tail % GQ].draws;
 		pthread_mutex_unlock(&gq_lock);
+		uint64_t from0 = MAX2(submitted, gpu_last_done), vdone = from0;
+		if (vseq) {
+			km_wait(vseq, 2000000000);
+			vdone = now_ns();
+		}
 		km_wait(seq, 2000000000);
 		uint64_t done = now_ns();
 		pthread_mutex_lock(&gq_lock);
+		kind_passes[kind]++;
+		kind_draws[kind] += draws;
+		if (vdone > from0)
+			kind_vt_ns[kind] += vdone - from0;
+		if (done > MAX2(vdone, from0))
+			kind_frag_ns[kind] += done - MAX2(vdone, from0);
 		uint64_t from = MAX2(submitted, gpu_last_done);
 		if (done > from)
 			gpu_busy_ns += done - from;
@@ -1130,7 +1147,7 @@ gpu_watch(void *arg)
 }
 
 static void
-gpu_watch_push(uint64_t seq, uint64_t submitted)
+gpu_watch_push(uint64_t vseq, uint64_t seq, uint64_t submitted, unsigned kind, unsigned draws)
 {
 	pthread_mutex_lock(&gq_lock);
 	if (!gq_running) {
@@ -1141,7 +1158,10 @@ gpu_watch_push(uint64_t seq, uint64_t submitted)
 	}
 	if (gq_running && gq_head - gq_tail < GQ) {
 		gq[gq_head % GQ].seq = seq;
+		gq[gq_head % GQ].vseq = vseq;
 		gq[gq_head % GQ].submitted = submitted;
+		gq[gq_head % GQ].kind = kind;
+		gq[gq_head % GQ].draws = draws;
 		gq_head++;
 		pthread_cond_signal(&gq_cond);
 	}
@@ -1696,7 +1716,9 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 				cfg.dithering_enable = true;
 				continue;
 			}
-			cfg.clean_pixel_write_enable = b->clear[i];
+			/* run 540: a DontCare attachment cleared whole, every tile written, lost what the window server
+			 * meant to keep outside what it drew (the Weather widget's blue): such tiles are left alone */
+			cfg.clean_pixel_write_enable = b->clear[i] && !(b->dontcare & (1u << i));
 			if (b->clear[i]) {
 				cfg.clear.color_0 = b->clear_words[i][0];
 				cfg.clear.color_1 = b->clear_words[i][1];
@@ -1827,10 +1849,11 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	pool_upload(b);
 	if (b->color_count && b->color[0] && b->color[0]->store->surface_id)
 		surface_passes++;
-	uint64_t seq = 0, submitted = now_ns();
+	uint64_t seq = 0, vseq = 0, submitted = now_ns();
 	int e = 0;
 	if (b->first_job) {
 		e = km_submit(b->first_job, false, b->bos, b->nbos, &seq);
+		vseq = seq;
 		if (e != 0) {
 			say(why, why_size, "the vertex and tiler jobs were not taken: %s", strerror(e));
 			return -1;
@@ -1842,7 +1865,17 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		return -1;
 	}
 	*seq_out = seq;
-	gpu_watch_push(seq, submitted);
+	{
+		/* the pass's kind for the GPU's time by kind: its size, its targets, its draws */
+		unsigned bytes = 0;
+		for (unsigned i = 0; i < b->color_count; i++)
+			if (b->color[i])
+				bytes += util_format_get_blocksize(b->color[i]->format);
+		unsigned kind = (b->width >= 700 ? 0 : b->width >= 300 ? 1 : b->width >= 100 ? 2 : 3) * 4 +
+				(b->color_count > 1 ? 2 : 0) + ((ring_slot[slot].flags & (F_LOAD_RAW | F_LOAD_BLEND)) ? 1 : 0);
+		(void)bytes;
+		gpu_watch_push(vseq, seq, submitted, kind, b->draws);
+	}
 	ring_slot[slot].seq = seq;
 	use_bo(b, ring);
 	for (unsigned i = 0; i < RING; i++)
@@ -1963,10 +1996,12 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 				b->clear[i] = true;
 				rwa_pack_clear(color[i]->format, dr->color_load[i] == 2 ? dr->color_clear[i] : zero,
 					       b->clear_words[i]);
-				if (dr->color_load[i] == 2)
+				if (dr->color_load[i] == 2) {
 					stats.att_cleared++;
-				else
+				} else {
 					stats.att_dontcare_load++;
+					b->dontcare |= 1u << i;
+				}
 				continue;
 			}
 			if (clear_color == NULL)
@@ -3132,6 +3167,22 @@ report(void)
 		     100.0 * gpu_busy_ns / span, gpu_latency_ns / 1e6 / MAX2(gpu_passes, 1), gpu_latency_max / 1e6,
 		     (unsigned long long)gpu_passes, (unsigned long long)(gq_head - gq_tail), (unsigned long long)commits,
 		     commits * 1e9 / span);
+		{
+			static const char *const wname[4] = { "full", "mid", "small", "tiny" };
+			char line[400];
+			int n = snprintf(line, sizeof(line), "30s: GPU by pass kind (passes, draws, ms vertex+tiler / fragment):");
+			for (unsigned k = 0; k < 16 && n < (int)sizeof(line) - 60; k++)
+				if (kind_passes[k])
+					n += snprintf(line + n, sizeof(line) - n, " %s%s%s %llu %llu %.0f/%.0f;", wname[k / 4],
+						      (k & 2) ? "-multi" : "", (k & 1) ? "-load" : "",
+						      (unsigned long long)kind_passes[k], (unsigned long long)kind_draws[k],
+						      kind_vt_ns[k] / 1e6, kind_frag_ns[k] / 1e6);
+			keep("%s", line);
+			memset(kind_passes, 0, sizeof(kind_passes));
+			memset(kind_draws, 0, sizeof(kind_draws));
+			memset(kind_vt_ns, 0, sizeof(kind_vt_ns));
+			memset(kind_frag_ns, 0, sizeof(kind_frag_ns));
+		}
 		gpu_busy_ns = gpu_latency_ns = gpu_passes = gpu_latency_max = 0;
 		commits = 0;
 		pthread_mutex_unlock(&gq_lock);
