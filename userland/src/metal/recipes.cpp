@@ -206,16 +206,38 @@ say_recipe(const char *text, size_t n, bool to_host)
 
 } // namespace
 
+/*
+ * The native Mali library (/hakios/lib/libhakiosmali.dylib) keeps a build's constants per thread and its own state under
+ * its own locks, so its builds go side by side: run 553 opening Settings had the draws' thread wait here behind the
+ * variants built off the draw and the warm-up, one build at a time at ~1 s each. Gallium's library keeps the lock.
+ * Boot-arg rwm_compile_serial=1: the lock for the native library too.
+ */
+bool
+compile_parallel(void)
+{
+	static int parallel = -1;
+
+	if (parallel < 0) {
+		parallel = strstr(rwm_air_library_path(), "libhakiosmali") != nullptr && !strstr(rwm_boot_args(),
+				"rwm_compile_serial=1");
+	}
+	return parallel == 1;
+}
+
 extern "C" void
 rwm_compile_lock(void)
 {
-	pthread_mutex_lock(&compile_lock);
+	if (!compile_parallel()) {
+		pthread_mutex_lock(&compile_lock);
+	}
 }
 
 extern "C" void
 rwm_compile_unlock(void)
 {
-	pthread_mutex_unlock(&compile_lock);
+	if (!compile_parallel()) {
+		pthread_mutex_unlock(&compile_lock);
+	}
 }
 
 /*

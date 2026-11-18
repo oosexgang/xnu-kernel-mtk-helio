@@ -362,12 +362,21 @@ async_variant_main(void *context)
 	pthread_mutex_unlock(&generic_lock);
 	{
 		static unsigned said;
-		char line[200];
+		char line[300];
 
+		/* as the draw's own line, for tools/rwm-variants.py: "built in T ms: vHEX fHEX" */
 		if (said++ < 120) {
-			snprintf(line, sizeof(line), "!!rwm variant %s #%u %s in %llu ms, off the draw", g->label +
-				 (strncmp(g->label, "com.apple.coreanimation.", 24) == 0 ? 24 : 0), (unsigned)(v - g->variants) + 1,
-				 call.render != nullptr ? "built" : "REFUSED", (unsigned long long)((rwm_ns() - a->began) / 1000000));
+			int n = snprintf(line, sizeof(line), "!!rwm variant %s #%u %s in %llu ms: v", g->label +
+					 (strncmp(g->label, "com.apple.coreanimation.", 24) == 0 ? 24 : 0),
+					 (unsigned)(v - g->variants) + 1, call.render != nullptr ? "built" : "REFUSED",
+					 (unsigned long long)((rwm_ns() - a->began) / 1000000));
+			for (unsigned i = 0; i < g->vertex_config && n > 0 && n < (int)sizeof(line) - 4; i++) {
+				n += snprintf(line + n, sizeof(line) - n, "%02x", v->vertex[i]);
+			}
+			n += snprintf(line + n, sizeof(line) - n, " f");
+			for (unsigned i = 0; i < g->fragment_config && n > 0 && n < (int)sizeof(line) - 4; i++) {
+				n += snprintf(line + n, sizeof(line) - n, "%02x", v->fragment[i]);
+			}
 			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
 		}
 	}
