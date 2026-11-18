@@ -120,6 +120,7 @@ static void report(void);
 /* a draw's time by part: checks, batch_for (with the flush of the batch before), index range and viewport, vertex
  * stage, fragment stage, attributes, varyings and jobs */
 static uint64_t phase_ns[7];
+static uint64_t lib_up_ns;  /* when the device was opened */
 /* the pipelines of full-screen passes of several targets (run 541: one such pass a frame, ~70 ms of the GPU's ~80),
  * by draws, and whether they blend by shader */
 static struct { struct rwa_render *r; uint64_t draws; char name[24]; bool bs, rd; } heavy[48];
@@ -353,6 +354,7 @@ rwa_device_open(char *why, size_t why_size)
 		return NULL;
 	}
 	stats.since = now_ns();
+	lib_up_ns = stats.since;
 	the_device = d;
 	Dl_info dl = { 0 };
 	dladdr((const void *)rwa_device_open, &dl);
@@ -961,6 +963,7 @@ struct batch {
 	struct region region[24];
 	unsigned nregion;
 	unsigned discard;   /* attachments whose store action is DontCare: not written back */
+	unsigned prof_group;   /* boot-arg rwn_profile=1: 1 + which draws a full pass of several targets skips */
 	unsigned dontcare;  /* attachments whose load action is DontCare: the tile starts at zero, and a tile nothing is
 			     * drawn into is not written (no clean writes), as a tiler leaves it */
 	struct km_bo *chunks[512];
@@ -1127,6 +1130,7 @@ static uint64_t gpu_busy_ns, gpu_latency_ns, gpu_passes, gpu_last_done, gpu_late
 /* by kind (width >= 700, >= 300, >= 100, smaller; several targets; loaded): passes, draws, vertex+tiler and fragment
  * time */
 static uint64_t kind_passes[16], kind_draws[16], kind_vt_ns[16], kind_frag_ns[16];
+static uint64_t prof_passes[4], prof_draws[4], prof_ns[4];   /* rwn_profile=1: by group skipped */
 static bool gq_running;
 
 static void *
@@ -1139,6 +1143,7 @@ gpu_watch(void *arg)
 			pthread_cond_wait(&gq_cond, &gq_lock);
 		uint64_t seq = gq[gq_tail % GQ].seq, submitted = gq[gq_tail % GQ].submitted, vseq = gq[gq_tail % GQ].vseq;
 		unsigned kind = gq[gq_tail % GQ].kind & 15, draws = gq[gq_tail % GQ].draws;
+		unsigned group = (gq[gq_tail % GQ].kind >> 4) & 7;
 		pthread_mutex_unlock(&gq_lock);
 		uint64_t from0 = MAX2(submitted, gpu_last_done), vdone = from0;
 		if (vseq) {
@@ -1150,6 +1155,12 @@ gpu_watch(void *arg)
 		pthread_mutex_lock(&gq_lock);
 		kind_passes[kind]++;
 		kind_draws[kind] += draws;
+		if (group >= 1 && group <= 4) {
+			prof_passes[group - 1]++;
+			prof_draws[group - 1] += draws;
+			if (done > MAX2(vdone, from0))
+				prof_ns[group - 1] += done - from0;
+		}
 		if (vdone > from0)
 			kind_vt_ns[kind] += vdone - from0;
 		if (done > MAX2(vdone, from0))
@@ -1895,7 +1906,7 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		unsigned kind = (b->width >= 700 ? 0 : b->width >= 300 ? 1 : b->width >= 100 ? 2 : 3) * 4 +
 				(b->color_count > 1 ? 2 : 0) + ((ring_slot[slot].flags & (F_LOAD_RAW | F_LOAD_BLEND)) ? 1 : 0);
 		(void)bytes;
-		gpu_watch_push(vseq, seq, submitted, kind, b->draws);
+		gpu_watch_push(vseq, seq, submitted, kind | (b->prof_group << 4), b->draws);
 	}
 	ring_slot[slot].seq = seq;
 	use_bo(b, ring);
@@ -1992,7 +2003,7 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 	if (actions) {
 		begins = false;
 		for (unsigned i = 0; i < color_count && i < 8; i++)
-			if (color[i] && dr->color_load[i] != 1)
+			if (color[i] && (dr->color_load[i] == 2 || (dr->color_load[i] == 0 && boot_arg("rwn_dontcare=clear"))))
 				begins = true;
 	}
 	if (open_batch && (!same_targets(open_batch, color, level, color_count, depth) || begins || clear_depth ||
@@ -2009,8 +2020,15 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 			if (actions && i < 8) {
 				/* Clear: its own colour; DontCare: whatever is cheapest, and a clear costs the tile nothing
 				 * where a load reads the whole attachment */
-				if (dr->color_load[i] == 1) {
-					stats.att_loaded++;
+				/* DontCare is loaded, as Load: runs 540 and 541 cleared it (whole, then only the tiles drawn
+				 * into) and the Weather widget lost its blue either way -- the window server keeps what such
+				 * an attachment held -- for no GPU time saved (82% busy, 79%). Boot-arg rwn_dontcare=clear:
+				 * cleared, as run 541 */
+				if (dr->color_load[i] != 2 && !(dr->color_load[i] == 0 && boot_arg("rwn_dontcare=clear"))) {
+					if (dr->color_load[i] == 1)
+						stats.att_loaded++;
+					else
+						stats.att_dontcare_load++;
 					continue;
 				}
 				static const float zero[4] = { 0, 0, 0, 0 };
@@ -2547,6 +2565,18 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	if (b == NULL)
 		return -1;
 	PHASE(1);
+	/* boot-arg rwn_profile=1: the full-screen passes of several targets skip, frame by frame in turn, none of their
+	 * draws, CoreAnimation's path rasterizer's (path_*), the plain layers that read their destination, and those that
+	 * do not -- the GPU's time of each kind of frame told apart (what each group costs) */
+	if (b->width >= 700 && b->color_count > 1 && boot_arg("rwn_profile=1") && now_ns() - lib_up_ns > 150000000000ull &&
+	    now_ns() - lib_up_ns < 300000000000ull) {
+		b->prof_group = 1 + (unsigned)(commits % 4);
+		bool path = strncmp(r->fs.name, "path_", 5) == 0;
+		bool skip = (b->prof_group == 2 && path) || (b->prof_group == 3 && !path && r->reads_dest_mask) ||
+			    (b->prof_group == 4 && !path && !r->reads_dest_mask);
+		if (skip)
+			return 0;
+	}
 	unsigned instances = MAX2(dr->instance_count, 1);
 	if (dr->base_instance && instances > 1) {
 		say(why, why_size, "a base instance of %u (not served yet)", dr->base_instance);
@@ -3178,7 +3208,7 @@ report(void)
 		     upload_bytes / 1024.0 / MAX2(stats.batches, 1), (unsigned long long)ubo_copied,
 		     ubo_copied_bytes / 1024.0 / MAX2(ubo_copied, 1), (unsigned long long)ubo_given);
 		ubo_copied = ubo_copied_bytes = ubo_given = 0;
-		keep("30s: attachments at a pass's start %llu loaded, %llu cleared, %llu DontCare (cleared); at its end %llu "
+		keep("30s: attachments at a pass's start %llu loaded, %llu cleared, %llu DontCare; at its end %llu "
 		     "stored, %llu DontCare (not written back)",
 		     (unsigned long long)stats.att_loaded, (unsigned long long)stats.att_cleared,
 		     (unsigned long long)stats.att_dontcare_load, (unsigned long long)stats.att_stored,
@@ -3219,6 +3249,18 @@ report(void)
 						      (unsigned long long)kind_passes[k], (unsigned long long)kind_draws[k],
 						      kind_vt_ns[k] / 1e6, kind_frag_ns[k] / 1e6);
 			keep("%s", line);
+			if (prof_passes[0] || prof_passes[1] || prof_passes[2] || prof_passes[3]) {
+				static const char *const gname[4] = { "all", "no path_*", "no blended plain", "no opaque plain" };
+				n = snprintf(line, sizeof(line), "30s: full passes, ms a pass (draws) with:");
+				for (unsigned g = 0; g < 4; g++)
+					n += snprintf(line + n, sizeof(line) - n, " %s %.1f (%.0f);", gname[g],
+						      prof_ns[g] / 1e6 / MAX2(prof_passes[g], 1),
+						      (double)prof_draws[g] / MAX2(prof_passes[g], 1));
+				keep("%s", line);
+				memset(prof_passes, 0, sizeof(prof_passes));
+				memset(prof_draws, 0, sizeof(prof_draws));
+				memset(prof_ns, 0, sizeof(prof_ns));
+			}
 			memset(kind_passes, 0, sizeof(kind_passes));
 			memset(kind_draws, 0, sizeof(kind_draws));
 			memset(kind_vt_ns, 0, sizeof(kind_vt_ns));
