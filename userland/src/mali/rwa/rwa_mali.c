@@ -1509,8 +1509,20 @@ batch_new(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 		heap.bottom = d->tiler_heap->gpu;
 		heap.top = d->tiler_heap->gpu + d->tiler_heap->size;
 	}
+	/* boot-arg rwn_profile=3: from 150 to 300 s after the library is up, full-screen passes take, frame by frame in turn,
+	 * Panfrost's hierarchy (the two coarsest levels that cover the frame: this G52 has two active levels,
+	 * TILER_FEATURES 0x2xx) or the frame-covering one with a fine one, 16, 32 or 64 pixels (run 547: the path
+	 * rasterizer's ~23000 small primitives a frame are ~25 ms of a ~41 ms pass) */
+	unsigned hmask = hierarchy_mask(b->width, b->height);
+	if (b->width >= 700 && boot_arg("rwn_profile=3") && now_ns() - lib_up_ns > 150000000000ull &&
+	    now_ns() - lib_up_ns < 300000000000ull && tiler_levels == 2) {
+		b->prof_group = 1 + (unsigned)(commits % 4);
+		unsigned top = util_last_bit(hmask) - 1;
+		if (b->prof_group >= 2)
+			hmask = (1u << top) | (1u << (b->prof_group - 2));
+	}
 	pan_cast_and_pack((b->tiler_ctx.cpu), TILER_CONTEXT, tiler) {
-		tiler.hierarchy_mask = hierarchy_mask(b->width, b->height);
+		tiler.hierarchy_mask = hmask;
 		tiler.fb_width = b->width;
 		tiler.fb_height = b->height;
 		tiler.heap = heap_desc;
@@ -3381,7 +3393,7 @@ report(void)
 						      kind_vt_ns[k] / 1e6, kind_frag_ns[k] / 1e6);
 			keep("%s", line);
 			if (prof_passes[0] || prof_passes[1] || prof_passes[2] || prof_passes[3]) {
-				static const char *const gname[4] = { "all", "no path_clear", "no path_blit", "no path coverage" };
+				static const char *const gname[4] = { "group 1", "group 2", "group 3", "group 4" };
 				n = snprintf(line, sizeof(line), "30s: full passes, ms a pass (draws) with:");
 				for (unsigned g = 0; g < 4; g++)
 					n += snprintf(line + n, sizeof(line) - n, " %s %.1f (%.0f);", gname[g],
