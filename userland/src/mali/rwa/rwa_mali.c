@@ -188,6 +188,9 @@ struct batch;
 
 /* memory one or more resources share: a buffer, a texture and its views, an imported surface */
 struct store {
+	/* the last pass that drew into it, for the texture probe: its first pipeline, draws, cleared or loaded, level */
+	char writer[64];
+	unsigned writes;
 	struct km_bo *bo;
 	unsigned refs;
 	uint64_t last_seq;        /* the last job that used it */
@@ -667,6 +670,8 @@ rwa_texture_write(struct rwa_texture *t, unsigned level, unsigned layer, const u
 	GUARD();
 	if (region_ok(t, level, layer, origin, size, why, why_size) != 0)
 		return -1;
+	t->store->writes++;
+	snprintf(t->store->writer, sizeof(t->store->writer), "the processor (%ux%u at L%u)", size[0], size[1], level);
 	store_sync(t->store);
 	unsigned bx = DIV_ROUND_UP(size[0], t->bw), by = DIV_ROUND_UP(size[1], t->bh);
 	size_t row = (size_t)bx * t->blocksize;
@@ -710,6 +715,10 @@ rwa_texture_copy(struct rwa_texture *dst, unsigned dst_level, unsigned dst_slice
 		say(why, why_size, "a copy between formats of different texel sizes");
 		return -1;
 	}
+	dst->store->writes++;
+	snprintf(dst->store->writer, sizeof(dst->store->writer), "a copy (%ux%u from %s %ux%u, last by %.20s)", size[0],
+		 size[1], util_format_short_name(src->format), src->shape.width, src->shape.height,
+		 src->store->writes ? src->store->writer : "nothing");
 	if (region_ok(dst, dst_level, dst_slice, dst_origin, size, why, why_size) != 0 ||
 	    region_ok(src, src_level, src_slice, src_origin, size, why, why_size) != 0)
 		return -1;
@@ -1977,6 +1986,14 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		memcpy(ring_slot[slot].region, b->region, sizeof(b->region));
 		for (unsigned i = 0; i < b->color_count; i++)
 			if (b->color[i]) {
+				struct store *ts = b->color[i]->store;
+				ts->writes++;
+				snprintf(ts->writer, sizeof(ts->writer), "%.28s %ud %s L%u%s", b->nrenders ? b->renders[0]->fs.name :
+					 "(no draw)", b->draws, b->clear[i] ? "clr" : "ld", b->level[i],
+					 (b->discard >> i) & 1 ? " nostore" : "");
+			}
+		for (unsigned i = 0; i < b->color_count; i++)
+			if (b->color[i]) {
 				if (b->discard & (1u << i))
 					stats.att_discarded++;
 				else
@@ -2316,10 +2333,11 @@ tex_probe(struct batch *b, const struct rwa_stage *st, struct rwa_texture *t)
 	char hex[40] = "";
 	for (unsigned k = 0; k < MIN2(t->blocksize, 8u); k++)
 		snprintf(hex + 2 * k, sizeof(hex) - 2 * k, "%02x", first[k]);
-	keep("texprobe %s: %s %ux%u/%u%s%s = %s, sampled by %.40s into %s %ux%u", what, util_format_short_name(t->format),
-	     t->shape.width, t->shape.height, MAX2(t->shape.mip_levels, 1), s->surface_id ? " surface" : "",
-	     t->is_view ? " view" : "", hex, st->name,
-	     b->color_count && b->color[0] ? util_format_short_name(b->color[0]->format) : "-", b->width, b->height);
+	keep("texprobe %s: %s %ux%u/%u%s%s = %s, sampled by %.30s into %s %ux%u; written %u times, last by %s", what,
+	     util_format_short_name(t->format), t->shape.width, t->shape.height, MAX2(t->shape.mip_levels, 1),
+	     s->surface_id ? " surface" : "", t->is_view ? " view" : "", hex, st->name,
+	     b->color_count && b->color[0] ? util_format_short_name(b->color[0]->format) : "-", b->width, b->height,
+	     s->writes, s->writes ? s->writer : "nothing (uploaded or never drawn)");
 }
 
 /* --- a stage's resources at a draw --------------------------------------------------------------------------------- */
