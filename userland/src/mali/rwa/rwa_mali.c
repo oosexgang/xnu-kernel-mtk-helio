@@ -1088,6 +1088,63 @@ ring_check(unsigned i, bool wait)
 static uint8_t *shadow_free[64];
 static unsigned shadow_nfree;
 static uint64_t upload_ns, upload_bytes;
+static uint64_t commits;   /* command buffers committed (rwa_flush_seq) */
+
+/* the GPU's time: a thread of its own waits for each pass's fragment job in turn and counts the time from its submit (or
+ * the pass before's end, if later) to its end as busy -- how much of the 30 seconds the GPU worked, and a pass's
+ * submit-to-done time */
+#define GQ 1024
+static struct { uint64_t seq, submitted; } gq[GQ];
+static unsigned gq_head, gq_tail;
+static pthread_mutex_t gq_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t gq_cond = PTHREAD_COND_INITIALIZER;
+static uint64_t gpu_busy_ns, gpu_latency_ns, gpu_passes, gpu_last_done, gpu_latency_max;
+static bool gq_running;
+
+static void *
+gpu_watch(void *arg)
+{
+	(void)arg;
+	for (;;) {
+		pthread_mutex_lock(&gq_lock);
+		while (gq_head == gq_tail)
+			pthread_cond_wait(&gq_cond, &gq_lock);
+		uint64_t seq = gq[gq_tail % GQ].seq, submitted = gq[gq_tail % GQ].submitted;
+		pthread_mutex_unlock(&gq_lock);
+		km_wait(seq, 2000000000);
+		uint64_t done = now_ns();
+		pthread_mutex_lock(&gq_lock);
+		uint64_t from = MAX2(submitted, gpu_last_done);
+		if (done > from)
+			gpu_busy_ns += done - from;
+		gpu_latency_ns += done - submitted;
+		gpu_latency_max = MAX2(gpu_latency_max, done - submitted);
+		gpu_passes++;
+		gpu_last_done = done;
+		gq_tail++;
+		pthread_mutex_unlock(&gq_lock);
+	}
+	return NULL;
+}
+
+static void
+gpu_watch_push(uint64_t seq, uint64_t submitted)
+{
+	pthread_mutex_lock(&gq_lock);
+	if (!gq_running) {
+		pthread_t t;
+		gq_running = pthread_create(&t, NULL, gpu_watch, NULL) == 0;
+		if (gq_running)
+			pthread_detach(t);
+	}
+	if (gq_running && gq_head - gq_tail < GQ) {
+		gq[gq_head % GQ].seq = seq;
+		gq[gq_head % GQ].submitted = submitted;
+		gq_head++;
+		pthread_cond_signal(&gq_cond);
+	}
+	pthread_mutex_unlock(&gq_lock);
+}
 static uint64_t ubo_copied, ubo_copied_bytes, ubo_given;   /* uniform buffers off 16 bytes: copied, or given as they are */
 static uint64_t surface_passes;   /* passes into an IOSurface (the window server's frames), for the 30-second lines */
 
@@ -1110,39 +1167,48 @@ shadow_put(uint8_t *sh)
 		free(sh);
 }
 
+/* a buffer of its own for SIZE bytes, written in place (no shadow, not copied at the submit): what is bigger than a
+ * chunk, and the threads' stack, which only the GPU writes */
+static struct ptr
+pool_big(struct batch *b, size_t size, char *why, size_t why_size)
+{
+	struct ptr p = { NULL, 0 };
+
+	if (b->nchunks >= ARRAY_SIZE(b->chunks)) {
+		say(why, why_size, "a batch's descriptors outgrew %u chunks", (unsigned)ARRAY_SIZE(b->chunks));
+		return p;
+	}
+	struct km_bo *big = km_bo_new(size, why, why_size);
+	if (big == NULL)
+		return p;
+	/* the big one before the current chunk, which stays the one allocated from */
+	if (b->nchunks > 0) {
+		b->chunks[b->nchunks] = b->chunks[b->nchunks - 1];
+		b->shadow[b->nchunks] = b->shadow[b->nchunks - 1];
+		b->fill[b->nchunks] = b->fill[b->nchunks - 1];
+		b->chunks[b->nchunks - 1] = big;
+		b->shadow[b->nchunks - 1] = NULL;
+		b->fill[b->nchunks - 1] = 0;
+	} else {
+		b->chunks[0] = big;
+		b->shadow[0] = NULL;
+		b->fill[0] = 0;
+		b->chunk_used = CHUNK;   /* no small chunk yet */
+	}
+	b->nchunks++;
+	p.cpu = big->cpu;
+	p.gpu = big->gpu;
+	return p;
+}
+
 static struct ptr
 pool_alloc(struct batch *b, size_t size, size_t align, char *why, size_t why_size)
 {
 	struct ptr p = { NULL, 0 };
 	uint64_t at = ALIGN_POT(b->chunk_used, align);
 
-	if (size > CHUNK) {
-		if (b->nchunks >= ARRAY_SIZE(b->chunks)) {
-			say(why, why_size, "a batch's descriptors outgrew %u chunks", (unsigned)ARRAY_SIZE(b->chunks));
-			return p;
-		}
-		struct km_bo *big = km_bo_new(size, why, why_size);
-		if (big == NULL)
-			return p;
-		/* the big one before the current chunk, which stays the one allocated from */
-		if (b->nchunks > 0) {
-			b->chunks[b->nchunks] = b->chunks[b->nchunks - 1];
-			b->shadow[b->nchunks] = b->shadow[b->nchunks - 1];
-			b->fill[b->nchunks] = b->fill[b->nchunks - 1];
-			b->chunks[b->nchunks - 1] = big;
-			b->shadow[b->nchunks - 1] = NULL;
-			b->fill[b->nchunks - 1] = 0;
-		} else {
-			b->chunks[0] = big;
-			b->shadow[0] = NULL;
-			b->fill[0] = 0;
-			b->chunk_used = CHUNK;   /* no small chunk yet */
-		}
-		b->nchunks++;
-		p.cpu = big->cpu;
-		p.gpu = big->gpu;
-		return p;
-	}
+	if (size > CHUNK)
+		return pool_big(b, size, why, why_size);
 	if (b->nchunks == 0 || at + size > CHUNK || b->chunks[b->nchunks - 1]->size < CHUNK) {
 		if (b->nchunks >= ARRAY_SIZE(b->chunks)) {
 			say(why, why_size, "a batch's descriptors outgrew %u chunks", (unsigned)ARRAY_SIZE(b->chunks));
@@ -1669,7 +1735,7 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	if (b->tls_size) {
 		unsigned total = panfrost_get_total_stack_size(b->tls_size, thread_tls_alloc ? thread_tls_alloc : 256,
 							       core_id_range);
-		scratch = pool_alloc(b, total, 4096, why, why_size);
+		scratch = pool_big(b, total, why, why_size);   /* only the GPU writes it: not copied */
 		if (scratch.cpu == NULL)
 			return -1;
 	}
@@ -1750,7 +1816,7 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	pool_upload(b);
 	if (b->color_count && b->color[0] && b->color[0]->store->surface_id)
 		surface_passes++;
-	uint64_t seq = 0;
+	uint64_t seq = 0, submitted = now_ns();
 	int e = 0;
 	if (b->first_job) {
 		e = km_submit(b->first_job, false, b->bos, b->nbos, &seq);
@@ -1765,6 +1831,7 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		return -1;
 	}
 	*seq_out = seq;
+	gpu_watch_push(seq, submitted);
 	ring_slot[slot].seq = seq;
 	use_bo(b, ring);
 	for (unsigned i = 0; i < RING; i++)
@@ -2846,7 +2913,7 @@ rwa_dispatch_buffers(struct rwa_compute *c, const struct rwa_bindings *bindings,
 	if (scratch_size) {
 		unsigned total = panfrost_get_total_stack_size(scratch_size, thread_tls_alloc ? thread_tls_alloc : 256,
 							       core_id_range);
-		scratch = pool_alloc(b, total, 4096, why, why_size);
+		scratch = pool_big(b, total, why, why_size);   /* only the GPU writes it: not copied */
 		if (scratch.cpu == NULL) {
 			batch_free(b, 0);
 			return -1;
@@ -2910,6 +2977,7 @@ rwa_flush_seq(struct rwa_device *device)
 {
 	GUARD();
 	(void)device;
+	commits++;
 	flush_batch("the command buffer is committed");
 	return km_last_seq();
 }
@@ -3004,6 +3072,16 @@ report(void)
 		     upload_bytes / 1024.0 / MAX2(stats.batches, 1), (unsigned long long)ubo_copied,
 		     ubo_copied_bytes / 1024.0 / MAX2(ubo_copied, 1), (unsigned long long)ubo_given);
 		ubo_copied = ubo_copied_bytes = ubo_given = 0;
+		pthread_mutex_lock(&gq_lock);
+		double span = (double)MAX2(now - stats.since, 1);
+		keep("30s: GPU busy %.0f%%, a pass submit to done %.1f ms (at most %.1f), %llu passes waited, %llu queued; "
+		     "%llu command buffers committed (%.1f a second)",
+		     100.0 * gpu_busy_ns / span, gpu_latency_ns / 1e6 / MAX2(gpu_passes, 1), gpu_latency_max / 1e6,
+		     (unsigned long long)gpu_passes, (unsigned long long)(gq_head - gq_tail), (unsigned long long)commits,
+		     commits * 1e9 / span);
+		gpu_busy_ns = gpu_latency_ns = gpu_passes = gpu_latency_max = 0;
+		commits = 0;
+		pthread_mutex_unlock(&gq_lock);
 		memset(stage_ns, 0, sizeof(stage_ns));
 		upload_ns = upload_bytes = 0;
 	}
