@@ -126,11 +126,14 @@ static uint64_t lib_up_ns;  /* when the device was opened */
  * lines give each pipeline's draws and the pixels their bounding boxes cover (scissor and frame clipped) */
 struct area_rec {
 	const uint8_t *pos;     /* the GPU's copy (pool_real) of the position buffer: x, y, z, 1/w a vertex */
-	unsigned count;
+	unsigned count;         /* vertices an instance (at most 64) */
+	unsigned stride;        /* vertices between instances (the padded count when instanced) */
+	unsigned instances;     /* read (at most 256) */
+	unsigned all_instances;
 	int16_t clip[4];        /* the scissor: x0, y0, x1, y1 */
 	char name[24];
 };
-static struct { char name[24]; uint64_t draws; double pixels; } area_tab[32];
+static struct { char name[24]; uint64_t draws, instances; double pixels; } area_tab[32];
 static unsigned narea_tab;
 static float area_sample[4];
 
@@ -1182,32 +1185,47 @@ gpu_watch(void *arg)
 		if (areas) {
 			/* the positions are there once the vertex job is done, and the buffers are not reused before
 			 * the fragment job is */
+			static float v[1024 * 4];
 			for (unsigned i = 0; i < nareas; i++) {
 				const struct area_rec *a = &areas[i];
-				float v[64 * 4];
-				memcpy(v, a->pos, a->count * 16);
-				float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
-				for (unsigned k = 0; k < a->count; k++) {
-					x0 = MIN2(x0, v[4 * k]);
-					x1 = MAX2(x1, v[4 * k]);
-					y0 = MIN2(y0, v[4 * k + 1]);
-					y1 = MAX2(y1, v[4 * k + 1]);
+				/* each instance's own box (run 545 boxed several instances' rectangles together) */
+				size_t n = MIN2((size_t)a->stride * a->instances, (size_t)1024);
+				memcpy(v, a->pos, n * 16);
+				double px = 0;
+				for (unsigned in = 0; in < a->instances; in++) {
+					float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+					for (unsigned k = 0; k < a->count && (size_t)in * a->stride + k < n; k++) {
+						const float *q = &v[4 * ((size_t)in * a->stride + k)];
+						x0 = MIN2(x0, q[0]);
+						x1 = MAX2(x1, q[0]);
+						y0 = MIN2(y0, q[1]);
+						y1 = MAX2(y1, q[1]);
+					}
+					x0 = MAX2(x0, a->clip[0]);
+					y0 = MAX2(y0, a->clip[1]);
+					x1 = MIN2(x1, a->clip[2] + 1.0f);
+					y1 = MIN2(y1, a->clip[3] + 1.0f);
+					if (x1 > x0 && y1 > y0)
+						px += (double)(x1 - x0) * (y1 - y0);
 				}
+				/* the instances not read counted as the read ones' mean */
+				if (a->all_instances > a->instances && a->instances)
+					px *= (double)a->all_instances / a->instances;
 				if (i == 0)
 					memcpy(area_sample, v, sizeof(area_sample));
-				x0 = MAX2(x0, a->clip[0]);
-				y0 = MAX2(y0, a->clip[1]);
-				x1 = MIN2(x1, a->clip[2] + 1.0f);
-				y1 = MIN2(y1, a->clip[3] + 1.0f);
-				double px = (x1 > x0 && y1 > y0) ? (double)(x1 - x0) * (y1 - y0) : 0;
 				pthread_mutex_lock(&gq_lock);
 				unsigned t = 0;
 				while (t < narea_tab && strcmp(area_tab[t].name, a->name) != 0)
 					t++;
 				if (t == narea_tab && narea_tab < ARRAY_SIZE(area_tab))
 					snprintf(area_tab[narea_tab++].name, sizeof(area_tab[0].name), "%s", a->name);
+				if (t == narea_tab - 1 && area_tab[t].draws == 0) {
+					area_tab[t].pixels = 0;
+					area_tab[t].instances = 0;
+				}
 				if (t < narea_tab) {
 					area_tab[t].draws++;
+					area_tab[t].instances += a->all_instances;
 					area_tab[t].pixels += px;
 				}
 				pthread_mutex_unlock(&gq_lock);
@@ -2874,7 +2892,10 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 		if (b->areas) {
 			struct area_rec *a = &b->areas[b->nareas++];
 			a->pos = pool_real(b, pos.cpu);
-			a->count = MIN2(alloc, 64);
+			a->count = MIN2(vertex_count, 64);
+			a->stride = instances > 1 ? padded : vertex_count;
+			a->all_instances = instances;
+			a->instances = MIN2(instances, MAX2(1024 / MAX2(a->stride, 1), 1));
 			a->clip[0] = (int16_t)sx0;
 			a->clip[1] = (int16_t)sy0;
 			a->clip[2] = (int16_t)sx1;
@@ -3370,8 +3391,8 @@ report(void)
 				memset(prof_ns, 0, sizeof(prof_ns));
 			}
 			if (narea_tab) {
-				n = snprintf(line, sizeof(line), "30s: full passes, pipelines' draws and Mpx (first vertex %.0f,%.0f,%.2f,%.2f):",
-					     area_sample[0], area_sample[1], area_sample[2], area_sample[3]);
+				n = snprintf(line, sizeof(line), "30s: full passes, pipelines' draws, instances, Mpx (first vertex %.0f,%.0f):",
+					     area_sample[0], area_sample[1]);
 				for (unsigned round = 0; round < 10 && n < (int)sizeof(line) - 50; round++) {
 					unsigned best = ~0u;
 					for (unsigned t = 0; t < narea_tab; t++)
@@ -3379,11 +3400,14 @@ report(void)
 							best = t;
 					if (best == ~0u)
 						break;
-					n += snprintf(line + n, sizeof(line) - n, " %.20s %llu %.1f;", area_tab[best].name,
-						      (unsigned long long)area_tab[best].draws, area_tab[best].pixels / 1e6);
+					n += snprintf(line + n, sizeof(line) - n, " %.18s %llu %llu %.0f;", area_tab[best].name,
+						      (unsigned long long)area_tab[best].draws,
+						      (unsigned long long)area_tab[best].instances, area_tab[best].pixels / 1e6);
 					area_tab[best].draws = 0;
+					area_tab[best].pixels = 0;
 				}
 				keep("%s", line);
+				memset(area_tab, 0, sizeof(area_tab));
 				narea_tab = 0;
 			}
 			memset(kind_passes, 0, sizeof(kind_passes));
