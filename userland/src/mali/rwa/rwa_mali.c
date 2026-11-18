@@ -2880,6 +2880,28 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	sy0 = MAX2(sy0, 0);
 	sx1 = MIN2(sx1, (int64_t)b->width - 1);
 	sy1 = MIN2(sy1, (int64_t)b->height - 1);
+	/* the draws of small offscreen passes that clear (run 556: such passes of fixed_frag_lph_cpf, the glass's backdrops
+	 * among them, came out holding only their clear): what each draw is, and the textures it samples, 60 lines */
+	if (b->width <= 800 && b->height <= 800 && b->color_count && b->color[0] && b->clear[0] &&
+	    !b->color[0]->store->surface_id && !boot_arg("rwn_smalllog=0")) {
+		static unsigned said;
+		if (said < 60) {
+			said++;
+			char tx[200] = "";
+			int n = 0;
+			for (unsigned i = 0; i < dr->fragment.texture_count && i < 4 && n < (int)sizeof(tx) - 50; i++) {
+				const struct rwa_texture *t = dr->fragment.textures ? dr->fragment.textures[i] : NULL;
+				if (t)
+					n += snprintf(tx + n, sizeof(tx) - n, " t%u=%.8s %ux%u by %.14s", i,
+						      util_format_short_name(t->format), t->shape.width, t->shape.height,
+						      t->store->writes ? t->store->writer : (t->store->surface_id ? "surface" : "-"));
+			}
+			keep("small pass %ux%u %s L%u: %.24s v%u i%u vp %.0f,%.0f %.0fx%.0f sc %s -> %lld,%lld..%lld,%lld%s;%s",
+			     b->width, b->height, util_format_short_name(b->color[0]->format), b->level[0], r->fs.name, vertex_count,
+			     instances, vx, vy, vw, vh, dr->scissor ? "set" : "-", (long long)sx0, (long long)sy0, (long long)sx1,
+			     (long long)sy1, (sx0 > sx1 || sy0 > sy1) ? " CULLED" : "", tx);
+		}
+	}
 	if (sx0 > sx1 || sy0 > sy1)
 		return 0;     /* a scissor that leaves no pixel: nothing to draw */
 	/* the depth range the clipper keeps: [0, 1] with a depth attachment (clip_halfz), [-1, 1] otherwise, as the
