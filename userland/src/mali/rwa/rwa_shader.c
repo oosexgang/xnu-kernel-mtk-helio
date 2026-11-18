@@ -32,6 +32,7 @@
 #include "pan_encoder.h"
 #include "pan_format.h"
 #include "pan_shader.h"
+#include "panfrost/util/pan_ir.h"
 #include "pan_texture.h"
 #include "pan_util.h"
 
@@ -659,6 +660,14 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 		return -1;
 	}
 	snprintf(st->name, sizeof(st->name), "%s", st->air.entry_point ? st->air.entry_point : (entry ? entry : "?"));
+	/* [[vertex_id]] is the vertex's own number: Bifrost's is counted from the draw's first vertex (offset_start, the
+	 * lowest index of an indexed draw), and pan_nir_lower_vertex_id adds it back (RWA_SV_VERTEX_OFFSETS). Without it a
+	 * vertex stage that reads its vertices out of a buffer by their number -- CoreAnimation's generic fixed_vert_lph_gen
+	 * -- read other vertices whenever the indices did not start at 0: run 564, every output tinted, its passes (the
+	 * glass's backdrops) still came out holding only their clear, not one fragment drawn. Boot-arg rwn_rawvid=1: as
+	 * before. */
+	if (want == MESA_SHADER_VERTEX && !boot_arg_set("rwn_rawvid=1"))
+		NIR_PASS(_, nir, pan_nir_lower_vertex_id);
 	/* colour outputs past the pass's attachments are not written (Panfrost keeps only the framebuffer's nr_cbufs):
 	 * CoreAnimation's uber shader writes [[color(0..2)]], and drawn into two attachments its third output's BLEND took
 	 * a descriptor past the pipeline's two -- the passes of two attachments it drew (the glass's backdrops, run 557)
