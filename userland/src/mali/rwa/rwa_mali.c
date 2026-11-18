@@ -215,6 +215,9 @@ struct rwa_texture {
 	unsigned dim;                     /* MALI_TEXTURE_DIMENSION_* */
 	unsigned char swizzle[4];
 	bool is_view;
+	/* the texture probe (tex_probe): when it was last looked at, whether it ever held more than one colour */
+	uint64_t probe_ns;
+	bool probe_varied, probe_said;
 };
 
 struct rwa_sampler {
@@ -2251,6 +2254,74 @@ rwa_render_clear(struct rwa_device *device, struct rwa_texture *const *color, un
 	return b ? 0 : -1;
 }
 
+/*
+ * The texture probe (on unless boot-arg rwn_texprobe=0): a texture a draw samples, 16x16 or bigger, is looked at every
+ * 5 s at most -- 16 texels of level 0 on a 4x4 grid, once the GPU is done with it. All of them one colour is said: white
+ * (an icon or the glass drawn as a white square), zero (nothing drawn there), or another colour; and LOST when a texture
+ * that once held more than one colour holds one. Each texture is said once, 40 lines a process at most; the 30-second
+ * lines count them. ~3 us a probe (16 uncached reads).
+ */
+static uint64_t probe_count, probe_white, probe_zero, probe_flat, probe_lost;
+
+static void
+tex_probe(struct batch *b, const struct rwa_stage *st, struct rwa_texture *t)
+{
+	static int on = -1;
+	if (on < 0)
+		on = !boot_arg("rwn_texprobe=0");
+	uint64_t now = now_ns();
+	if (!on || t->shape.width < 16 || t->shape.height < 16 || t->bw != 1 || t->bh != 1 || t->blocksize > 16 ||
+	    now - t->probe_ns < 5000000000ull)
+		return;
+	struct store *s = t->store;
+	if (s->pending != NULL || (s->last_seq && km_wait(s->last_seq, 0) != 0))
+		return;   /* still being drawn: another time */
+	t->probe_ns = now;
+	probe_count++;
+	uint8_t first[16], texel[16];
+	bool flat = true;
+	const uint8_t *base = s->bo->cpu + t->offset;
+	for (unsigned i = 0; i < 16; i++) {
+		unsigned x = (2 * (i % 4) + 1) * t->shape.width / 8, y = (2 * (i / 4) + 1) * t->shape.height / 8;
+		memcpy(i ? texel : first, base + (size_t)y * t->row_bytes[0] + (size_t)x * t->blocksize, t->blocksize);
+		if (i && memcmp(texel, first, t->blocksize) != 0)
+			flat = false;
+	}
+	if (!flat) {
+		t->probe_varied = true;
+		return;
+	}
+	bool white = true, zero = true;
+	for (unsigned k = 0; k < t->blocksize; k++) {
+		zero &= first[k] == 0;
+		white &= first[k] == 0xff;
+	}
+	if (t->format == PIPE_FORMAT_R16G16B16A16_FLOAT)
+		white = first[1] == 0x3c && first[3] == 0x3c && first[5] == 0x3c && first[7] == 0x3c && !first[0] &&
+			!first[2] && !first[4] && !first[6];   /* 1.0 in all four */
+	const char *what = t->probe_varied ? "LOST" : white ? "WHITE" : zero ? "ZERO" : "FLAT";
+	if (t->probe_varied)
+		probe_lost++;
+	else if (white)
+		probe_white++;
+	else if (zero)
+		probe_zero++;
+	else
+		probe_flat++;
+	static unsigned said;
+	if ((t->probe_said && !t->probe_varied) || said >= 40)
+		return;
+	t->probe_said = true;
+	said++;
+	char hex[40] = "";
+	for (unsigned k = 0; k < MIN2(t->blocksize, 8u); k++)
+		snprintf(hex + 2 * k, sizeof(hex) - 2 * k, "%02x", first[k]);
+	keep("texprobe %s: %s %ux%u/%u%s%s = %s, sampled by %.40s into %s %ux%u", what, util_format_short_name(t->format),
+	     t->shape.width, t->shape.height, MAX2(t->shape.mip_levels, 1), s->surface_id ? " surface" : "",
+	     t->is_view ? " view" : "", hex, st->name,
+	     b->color_count && b->color[0] ? util_format_short_name(b->color[0]->format) : "-", b->width, b->height);
+}
+
 /* --- a stage's resources at a draw --------------------------------------------------------------------------------- */
 
 struct bound {
@@ -2453,6 +2524,7 @@ emit_stage(struct batch *b, const struct rwa_stage *st, const struct rwa_binding
 				    util_format_short_name(t->format));
 				return -1;
 			}
+			tex_probe(b, st, (struct rwa_texture *)t);
 			use_store(b, t->store);
 			if (MAX2(t->shape.mip_levels, 1) > 1)
 				b->tex_flags |= F_TEX_MIP;
@@ -3371,6 +3443,10 @@ report(void)
 		     upload_bytes / 1024.0 / MAX2(stats.batches, 1), (unsigned long long)ubo_copied,
 		     ubo_copied_bytes / 1024.0 / MAX2(ubo_copied, 1), (unsigned long long)ubo_given);
 		ubo_copied = ubo_copied_bytes = ubo_given = 0;
+		keep("30s: texture probe: %llu looked at, one colour: %llu white, %llu zero, %llu other, %llu LOST (held more before)",
+		     (unsigned long long)probe_count, (unsigned long long)probe_white, (unsigned long long)probe_zero,
+		     (unsigned long long)probe_flat, (unsigned long long)probe_lost);
+		probe_count = probe_white = probe_zero = probe_flat = probe_lost = 0;
 		keep("30s: attachments at a pass's start %llu loaded, %llu cleared, %llu DontCare; at its end %llu "
 		     "stored, %llu DontCare (not written back)",
 		     (unsigned long long)stats.att_loaded, (unsigned long long)stats.att_cleared,
