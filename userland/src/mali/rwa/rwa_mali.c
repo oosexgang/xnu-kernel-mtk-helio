@@ -3535,6 +3535,7 @@ report(void)
 	     (unsigned long long)(rwa_compile_ns[0] / 1000000), (unsigned long long)(rwa_compile_ns[1] / 1000000),
 	     (unsigned long long)(rwa_compile_ns[2] / 1000000));
 	memset(rwa_compile_ns, 0, sizeof(rwa_compile_ns));
+	keep("30s: at %llu s of the library", (unsigned long long)((now - lib_up_ns) / 1000000000ull));
 	keep("30s: %llu draws (%llu refused), %llu passes, %llu loaded, %llu cleared, %llu waits by the processor; "
 	     "draws %llu us, submits %llu us; %llu pipelines in %llu ms (%llu refused), %llu surfaces; buffers %llu made, "
 	     "%llu reused, %llu KB kept",
