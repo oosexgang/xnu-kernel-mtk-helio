@@ -1370,6 +1370,15 @@ struct rwa_draw {
 	 * level after level of one texture, each pass sampling the level above; drawn into level 0, every pass cleared what
 	 * the next was to read, and the glass came out black. The pass is the size of the smallest attachment. */
 	const unsigned *color_level;
+	/* APPENDED (17 November): what the pass does with each colour attachment at its start and at its end -- Metal's
+	 * own MTLLoadAction (0 DontCare, 1 Load, 2 Clear) and MTLStoreAction (0 DontCare, 1 Store, ...) and each one's
+	 * clear colour -- when color_actions is not 0; without, clear_color alone as before (every attachment cleared to
+	 * it, or every one loaded). The draws after a pass's first carry Load. The window server's passes load and write
+	 * back RGBA16Float and R32Float attachments as well as its BGRA8 one, and they were most of the Mali's time a
+	 * frame (run 539: 10 frames a second, the GPU 82% busy). */
+	unsigned color_actions;
+	unsigned char color_load[8], color_store[8];
+	float color_clear[8][4];
 };
 
 int rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,

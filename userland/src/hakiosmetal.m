@@ -4367,7 +4367,7 @@ rw_core_of(id texture)
 		}
 		c = [attachment clearColor];
 		rwm_render_color(&_state, i, (unsigned)[attachment level], texture, rw_core_of(texture),
-				 [attachment loadAction] == MTLLoadActionClear,
+				 [attachment loadAction] == MTLLoadActionClear, (unsigned long)[attachment loadAction],
 				 (const double[4]){ c.red, c.green, c.blue, c.alpha }, [attachment storeAction],
 				 [attachment resolveTexture] != nil);
 	}

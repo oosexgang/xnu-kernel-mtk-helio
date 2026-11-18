@@ -59,6 +59,9 @@ loaded(struct rwm_render_state *s)
 	s->clears = false;
 	s->clears_depth = false;
 	s->clears_stencil = false;
+	for (unsigned i = 0; i < 8; i++) {
+		s->color_load[i] = 1;   /* MTLLoadActionLoad: what the first draw left */
+	}
 }
 
 } // namespace
@@ -204,7 +207,7 @@ rwm_render_begin(struct rwm_render_state *s, struct rwa_device *device)
  */
 extern "C" void
 rwm_render_color(struct rwm_render_state *s, unsigned index, unsigned level, void *object, struct rwm_texture *core, bool clears,
-		 const double color[4], unsigned long store, bool resolve_texture)
+		 unsigned long load_action, const double color[4], unsigned long store, bool resolve_texture)
 {
 	if (index >= 8 || object == nullptr) {
 		return;
@@ -232,7 +235,15 @@ rwm_render_color(struct rwm_render_state *s, unsigned index, unsigned level, voi
 		static const double transparent[4] = { 0, 0, 0, 0 };
 
 		clears = true;
+		load_action = 2;
 		color = transparent;
+	}
+	/* every attachment's own actions and clear colour, for the library (rwa_draw.color_actions) */
+	s->color_actions = true;
+	s->color_load[index] = (unsigned char)(load_action <= 2 ? load_action : 1);
+	s->color_store[index] = (unsigned char)(store <= 255 ? store : 1);
+	for (unsigned i = 0; i < 4; i++) {
+		s->color_clear[index][i] = (float)color[i];
 	}
 	if (index == 0 && clears) {
 		for (unsigned i = 0; i < 4; i++) {
@@ -572,6 +583,10 @@ rwm_render_draw(struct rwm_render_state *s, const struct rwm_draw_call *call, st
 	}
 	memcpy(w->clear_color, s->clear_color, sizeof(w->clear_color));
 	d->clear_color = s->clears ? w->clear_color : nullptr;
+	d->color_actions = s->color_actions;
+	memcpy(d->color_load, s->color_load, sizeof(d->color_load));
+	memcpy(d->color_store, s->color_store, sizeof(d->color_store));
+	memcpy(d->color_clear, s->color_clear, sizeof(d->color_clear));
 	d->depth = mesa_of(s->depth.core);
 	w->clear_depth = s->clear_depth;
 	w->clear_stencil = s->clear_stencil;

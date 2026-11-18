@@ -113,6 +113,7 @@ now_ns(void)
 static struct {
 	uint64_t since, draws, refused, batches, preloads, clears, cpu_syncs, draw_ns, flush_ns, pipelines, pipeline_ns;
 	uint64_t refused_pipelines, imports, multiload_cleared;
+	uint64_t att_loaded, att_cleared, att_dontcare_load, att_stored, att_discarded;
 } stats;
 
 static void report(void);
@@ -938,6 +939,7 @@ struct batch {
 	/* what the frame's descriptors are, by name: a refused fragment job's fault pointer is told against them */
 	struct region region[24];
 	unsigned nregion;
+	unsigned discard;   /* attachments whose store action is DontCare: not written back */
 	struct km_bo *chunks[512];
 	/* each chunk's descriptors written in the processor's cached memory first and copied to the chunk whole at the
 	 * submit (pool_upload): the buffers are write-combined (HakiosMali.cpp createBO), and a draw packed byte by byte
@@ -1701,7 +1703,9 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 				cfg.clear.color_2 = b->clear_words[i][2];
 				cfg.clear.color_3 = b->clear_words[i][3];
 			}
-			cfg.write_enable = true;
+			/* MTLStoreActionDontCare: the tile buffer is not written back (its contents are undefined after the
+			 * pass, and nothing reads them) */
+			cfg.write_enable = !(b->discard & (1u << i));
 			cfg.dithering_enable = true;
 			cfg.writeback_msaa = MALI_MSAA_SINGLE;
 			cfg.srgb = util_format_is_srgb(t->format);
@@ -1784,6 +1788,13 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 			fl |= F_RAW_A;
 		ring_slot[slot].flags = fl;
 		memcpy(ring_slot[slot].region, b->region, sizeof(b->region));
+		for (unsigned i = 0; i < b->color_count; i++)
+			if (b->color[i]) {
+				if (b->discard & (1u << i))
+					stats.att_discarded++;
+				else
+					stats.att_stored++;
+			}
 		ring_slot[slot].nregion = b->nregion;
 	}
 	{
@@ -1918,9 +1929,19 @@ emit_preload_draw(struct batch *b, unsigned mask, char *why, size_t why_size)
 static struct batch *
 batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned color_count, struct rwa_texture *depth,
 	  const float *clear_color,
-	  const float *clear_depth, const unsigned *clear_stencil, char *why, size_t why_size)
+	  const float *clear_depth, const unsigned *clear_stencil, const struct rwa_draw *dr, char *why, size_t why_size)
 {
-	if (open_batch && (!same_targets(open_batch, color, level, color_count, depth) || clear_color || clear_depth ||
+	/* each attachment's own load and store actions (rwa_draw.color_actions; boot-arg rwn_actions=0: clear_color
+	 * alone, as before) */
+	const bool actions = dr && dr->color_actions && !boot_arg("rwn_actions=0");
+	bool begins = clear_color != NULL;
+	if (actions) {
+		begins = false;
+		for (unsigned i = 0; i < color_count && i < 8; i++)
+			if (color[i] && dr->color_load[i] != 1)
+				begins = true;
+	}
+	if (open_batch && (!same_targets(open_batch, color, level, color_count, depth) || begins || clear_depth ||
 			   clear_stencil))
 		flush_batch("another pass");
 	if (open_batch == NULL) {
@@ -1929,7 +1950,26 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 			return NULL;
 		struct batch *b = open_batch;
 		for (unsigned i = 0; i < color_count; i++) {
-			if (color[i] == NULL || clear_color == NULL)
+			if (color[i] == NULL)
+				continue;
+			if (actions && i < 8) {
+				/* Clear: its own colour; DontCare: whatever is cheapest, and a clear costs the tile nothing
+				 * where a load reads the whole attachment */
+				if (dr->color_load[i] == 1) {
+					stats.att_loaded++;
+					continue;
+				}
+				static const float zero[4] = { 0, 0, 0, 0 };
+				b->clear[i] = true;
+				rwa_pack_clear(color[i]->format, dr->color_load[i] == 2 ? dr->color_clear[i] : zero,
+					       b->clear_words[i]);
+				if (dr->color_load[i] == 2)
+					stats.att_cleared++;
+				else
+					stats.att_dontcare_load++;
+				continue;
+			}
+			if (clear_color == NULL)
 				continue;
 			b->clear[i] = true;
 			rwa_pack_clear(color[i]->format, clear_color, b->clear_words[i]);
@@ -1939,7 +1979,7 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 			b->z_clear = clear_depth ? *clear_depth : 1.0f;
 			b->s_clear = clear_stencil ? (uint8_t)*clear_stencil : 0;
 		}
-		if (clear_color)
+		if (clear_color || begins)
 			stats.clears++;
 		/* A frame of several targets loads them by its frame shader, as a frame of one does. Runs 526 to 530 had every
 		 * such frame refused: the frame shader's renderer state named as many samplers as textures, and there is one
@@ -1965,6 +2005,14 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 			stats.multiload_cleared++;
 		}
 	}
+	/* the store actions: the pass's last draw's (one Metal pass, or passes merged into one batch, the last says) */
+	if (open_batch && actions)
+		for (unsigned i = 0; i < color_count && i < 8; i++) {
+			if (dr->color_store[i] == 0)
+				open_batch->discard |= 1u << i;
+			else
+				open_batch->discard &= ~(1u << i);
+		}
 	return open_batch;
 }
 
@@ -1981,7 +2029,7 @@ rwa_render_clear(struct rwa_device *device, struct rwa_texture *const *color, un
 	}
 	static const float black[4] = { 0, 0, 0, 0 };
 	struct batch *b = batch_for(color, NULL, color_count, depth, clear_color ? clear_color : black, clear_depth,
-				    clear_stencil, why, why_size);
+				    clear_stencil, NULL, why, why_size);
 	return b ? 0 : -1;
 }
 
@@ -2439,7 +2487,7 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 		}
 	PHASE(0);
 	struct batch *b = batch_for(dr->color, dr->color_level, dr->color_count, dr->depth, dr->clear_color, dr->clear_depth,
-				    dr->clear_stencil, why, why_size);
+				    dr->clear_stencil, dr, why, why_size);
 	if (b == NULL)
 		return -1;
 	PHASE(1);
@@ -3072,6 +3120,11 @@ report(void)
 		     upload_bytes / 1024.0 / MAX2(stats.batches, 1), (unsigned long long)ubo_copied,
 		     ubo_copied_bytes / 1024.0 / MAX2(ubo_copied, 1), (unsigned long long)ubo_given);
 		ubo_copied = ubo_copied_bytes = ubo_given = 0;
+		keep("30s: attachments at a pass's start %llu loaded, %llu cleared, %llu DontCare (cleared); at its end %llu "
+		     "stored, %llu DontCare (not written back)",
+		     (unsigned long long)stats.att_loaded, (unsigned long long)stats.att_cleared,
+		     (unsigned long long)stats.att_dontcare_load, (unsigned long long)stats.att_stored,
+		     (unsigned long long)stats.att_discarded);
 		pthread_mutex_lock(&gq_lock);
 		double span = (double)MAX2(now - stats.since, 1);
 		keep("30s: GPU busy %.0f%%, a pass submit to done %.1f ms (at most %.1f), %llu passes waited, %llu queued; "

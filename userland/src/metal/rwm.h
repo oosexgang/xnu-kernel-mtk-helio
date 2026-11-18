@@ -262,6 +262,10 @@ struct rwm_draw {
 	unsigned color_level[8];        /* the mip level of each (rwa_draw.color_level) */
 	unsigned color_count;
 	const float *clear_color;       /* NULL: kept, not cleared */
+	/* each attachment's load and store actions and clear colour (rwa_draw.color_actions) */
+	bool color_actions;
+	unsigned char color_load[8], color_store[8];
+	float color_clear[8][4];
 	struct rwa_texture *depth;
 	const float *clear_depth;
 	const unsigned *clear_stencil;
@@ -385,6 +389,11 @@ struct rwm_render_state {
 	float clear_color[4], clear_depth;
 	unsigned clear_stencil;
 	bool clears, clears_depth, clears_stencil;
+	/* each colour attachment's MTLLoadAction (Load once the pass's first draw is recorded), MTLStoreAction and clear
+	 * colour */
+	bool color_actions;
+	unsigned char color_load[8], color_store[8];
+	float color_clear[8][4];
 	void *pipeline;
 	struct rwa_render *render;
 	unsigned stream_mask, stream_count;
@@ -410,7 +419,8 @@ struct rwm_render_state {
  * carries both aspects; two different ones: said, neither) */
 void rwm_render_begin(struct rwm_render_state *state, struct rwa_device *device);
 void rwm_render_color(struct rwm_render_state *state, unsigned index, unsigned level, void *object, struct rwm_texture *core,
-		      bool clears, const double color[4], unsigned long store_action, bool resolve_texture);
+		      bool clears, unsigned long load_action, const double color[4], unsigned long store_action,
+		      bool resolve_texture);
 void rwm_render_depth(struct rwm_render_state *state, void *depth, struct rwm_texture *depth_core, bool clears_depth,
 		      double clear_depth, void *stencil, struct rwm_texture *stencil_core, bool clears_stencil,
 		      unsigned clear_stencil);
