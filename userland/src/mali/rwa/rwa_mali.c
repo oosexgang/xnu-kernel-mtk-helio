@@ -1449,6 +1449,15 @@ use_render(struct batch *b, struct rwa_render *r)
 	use_bo(b, r->fs.code);
 }
 
+/*
+ * The tiler's levels (bins of 16 << n pixels) for a frame. pan_select_tiler_hierarchy_mask takes the coarsest ones that
+ * cover the frame when the GPU has fewer active levels than that, and this G52 has two (TILER_FEATURES 0x2xx): 512 and
+ * 1024 pixels for the window server's 750x1624, every tile then walking every primitive of its 512-pixel bin. Run 548:
+ * the full pass of the swiped home screen took 40-44 ms so, 21-22 with the 32-pixel level beside the frame-covering one
+ * (16: 22, 64: 21-22), the path rasterizer's ~23000 small primitives a frame binned where they are. So: the level that
+ * covers the frame, the 32-pixel one, and any more the GPU has from the coarse end down. Boot-arg rwn_hier=panfrost:
+ * Panfrost's.
+ */
 static unsigned
 hierarchy_mask(unsigned width, unsigned height)
 {
@@ -1456,8 +1465,19 @@ hierarchy_mask(unsigned width, unsigned height)
 	unsigned last = util_last_bit((max_wh + 15) / 16);
 	unsigned mask = BITFIELD_MASK(tiler_levels);
 
-	if (last > tiler_levels)
-		mask <<= last - tiler_levels;
+	if (last <= tiler_levels)
+		return mask;
+	if (boot_arg("rwn_hier=panfrost"))
+		return mask << (last - tiler_levels);
+	unsigned top = last - 1;
+	mask = 1u << top;
+	unsigned left = tiler_levels - 1;
+	if (left && top > 1) {
+		mask |= 1u << 1;
+		left--;
+	}
+	for (unsigned l = top - 1; left && l > 1; l--, left--)
+		mask |= 1u << l;
 	return mask;
 }
 
