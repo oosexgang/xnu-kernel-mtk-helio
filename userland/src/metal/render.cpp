@@ -577,6 +577,7 @@ rwm_render_draw(struct rwm_render_state *s, const struct rwm_draw_call *call, st
 	rwm_work_keep(w, call->index_object);
 
 	d->render = special != nullptr ? special : s->render;
+	d->base_render = s->render;
 	d->stream_mask = s->stream_mask;
 	d->stream_count = s->stream_count;
 	d->color_count = s->color_count;

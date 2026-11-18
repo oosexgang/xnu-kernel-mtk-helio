@@ -150,7 +150,9 @@ rwm_capture_draw(const struct rwm_draw *d)
 		after = at != nullptr ? strtoul(at + 18, nullptr, 10) : 50;
 		after = after != 0 ? after : 1;
 	}
-	if (draw_captured || captured_render == nullptr || d->render != captured_render || ++seen < after ||
+	/* a generic pipeline is drawn by its variant: the draw is matched by the pipeline as bound too */
+	if (draw_captured || captured_render == nullptr ||
+	    (d->render != captured_render && d->base_render != captured_render) || ++seen < after ||
 	    air->buffer_map == nullptr) {
 		return;
 	}

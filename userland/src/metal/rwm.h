@@ -256,6 +256,7 @@ int rwm_run_blit(const struct rwm_blit *blit, char *why, size_t why_size);
 
 struct rwm_draw {
 	struct rwa_render *render;
+	struct rwa_render *base_render; /* the pipeline as bound: a generic one's, when render is its variant (rwm_capture) */
 	unsigned stream_mask;           /* the pipeline's: which vertex buffer indices are streams */
 	unsigned stream_count;          /* ... and the highest it fetches from, plus one */
 	struct rwa_texture *color[8];
