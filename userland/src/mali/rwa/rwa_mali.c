@@ -121,6 +121,19 @@ static void report(void);
  * stage, fragment stage, attributes, varyings and jobs */
 static uint64_t phase_ns[7];
 static uint64_t lib_up_ns;  /* when the device was opened */
+/* boot-arg rwn_profile=2: each draw of a full-screen pass of several targets, its pipeline and where the GPU wrote its
+ * vertices' screen positions -- the watcher thread reads them once the pass's vertex job is done, and the 30-second
+ * lines give each pipeline's draws and the pixels their bounding boxes cover (scissor and frame clipped) */
+struct area_rec {
+	const uint8_t *pos;     /* the GPU's copy (pool_real) of the position buffer: x, y, z, 1/w a vertex */
+	unsigned count;
+	int16_t clip[4];        /* the scissor: x0, y0, x1, y1 */
+	char name[24];
+};
+static struct { char name[24]; uint64_t draws; double pixels; } area_tab[32];
+static unsigned narea_tab;
+static float area_sample[4];
+
 /* the pipelines of full-screen passes of several targets (run 541: one such pass a frame, ~70 ms of the GPU's ~80),
  * by draws, and whether they blend by shader */
 static struct { struct rwa_render *r; uint64_t draws; char name[24]; bool bs, rd; } heavy[48];
@@ -964,6 +977,8 @@ struct batch {
 	unsigned nregion;
 	unsigned discard;   /* attachments whose store action is DontCare: not written back */
 	unsigned prof_group;   /* boot-arg rwn_profile=1: 1 + which draws a full pass of several targets skips */
+	struct area_rec *areas;   /* rwn_profile=2: where each draw's positions land, read once its vertex job is done */
+	unsigned nareas;
 	unsigned dontcare;  /* attachments whose load action is DontCare: the tile starts at zero, and a tile nothing is
 			     * drawn into is not written (no clean writes), as a tiler leaves it */
 	struct km_bo *chunks[512];
@@ -1122,7 +1137,7 @@ static uint64_t commits;   /* command buffers committed (rwa_flush_seq) */
  * the pass before's end, if later) to its end as busy -- how much of the 30 seconds the GPU worked, and a pass's
  * submit-to-done time */
 #define GQ 1024
-static struct { uint64_t vseq, seq, submitted; unsigned kind, draws; } gq[GQ];
+static struct { uint64_t vseq, seq, submitted; unsigned kind, draws; struct area_rec *areas; unsigned nareas; } gq[GQ];
 static unsigned gq_head, gq_tail;
 static pthread_mutex_t gq_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t gq_cond = PTHREAD_COND_INITIALIZER;
@@ -1144,11 +1159,49 @@ gpu_watch(void *arg)
 		uint64_t seq = gq[gq_tail % GQ].seq, submitted = gq[gq_tail % GQ].submitted, vseq = gq[gq_tail % GQ].vseq;
 		unsigned kind = gq[gq_tail % GQ].kind & 15, draws = gq[gq_tail % GQ].draws;
 		unsigned group = (gq[gq_tail % GQ].kind >> 4) & 7;
+		struct area_rec *areas = gq[gq_tail % GQ].areas;
+		unsigned nareas = gq[gq_tail % GQ].nareas;
+		gq[gq_tail % GQ].areas = NULL;
 		pthread_mutex_unlock(&gq_lock);
 		uint64_t from0 = MAX2(submitted, gpu_last_done), vdone = from0;
 		if (vseq) {
 			km_wait(vseq, 2000000000);
 			vdone = now_ns();
+		}
+		if (areas) {
+			/* the positions are there once the vertex job is done, and the buffers are not reused before
+			 * the fragment job is */
+			for (unsigned i = 0; i < nareas; i++) {
+				const struct area_rec *a = &areas[i];
+				float v[64 * 4];
+				memcpy(v, a->pos, a->count * 16);
+				float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+				for (unsigned k = 0; k < a->count; k++) {
+					x0 = MIN2(x0, v[4 * k]);
+					x1 = MAX2(x1, v[4 * k]);
+					y0 = MIN2(y0, v[4 * k + 1]);
+					y1 = MAX2(y1, v[4 * k + 1]);
+				}
+				if (i == 0)
+					memcpy(area_sample, v, sizeof(area_sample));
+				x0 = MAX2(x0, a->clip[0]);
+				y0 = MAX2(y0, a->clip[1]);
+				x1 = MIN2(x1, a->clip[2] + 1.0f);
+				y1 = MIN2(y1, a->clip[3] + 1.0f);
+				double px = (x1 > x0 && y1 > y0) ? (double)(x1 - x0) * (y1 - y0) : 0;
+				pthread_mutex_lock(&gq_lock);
+				unsigned t = 0;
+				while (t < narea_tab && strcmp(area_tab[t].name, a->name) != 0)
+					t++;
+				if (t == narea_tab && narea_tab < ARRAY_SIZE(area_tab))
+					snprintf(area_tab[narea_tab++].name, sizeof(area_tab[0].name), "%s", a->name);
+				if (t < narea_tab) {
+					area_tab[t].draws++;
+					area_tab[t].pixels += px;
+				}
+				pthread_mutex_unlock(&gq_lock);
+			}
+			free(areas);
 		}
 		km_wait(seq, 2000000000);
 		uint64_t done = now_ns();
@@ -1179,7 +1232,8 @@ gpu_watch(void *arg)
 }
 
 static void
-gpu_watch_push(uint64_t vseq, uint64_t seq, uint64_t submitted, unsigned kind, unsigned draws)
+gpu_watch_push(uint64_t vseq, uint64_t seq, uint64_t submitted, unsigned kind, unsigned draws, struct area_rec *areas,
+	       unsigned nareas)
 {
 	pthread_mutex_lock(&gq_lock);
 	if (!gq_running) {
@@ -1194,10 +1248,14 @@ gpu_watch_push(uint64_t vseq, uint64_t seq, uint64_t submitted, unsigned kind, u
 		gq[gq_head % GQ].submitted = submitted;
 		gq[gq_head % GQ].kind = kind;
 		gq[gq_head % GQ].draws = draws;
+		gq[gq_head % GQ].areas = areas;
+		gq[gq_head % GQ].nareas = nareas;
+		areas = NULL;
 		gq_head++;
 		pthread_cond_signal(&gq_cond);
 	}
 	pthread_mutex_unlock(&gq_lock);
+	free(areas);   /* not queued */
 }
 static uint64_t ubo_copied, ubo_copied_bytes, ubo_given;   /* uniform buffers off 16 bytes: copied, or given as they are */
 static uint64_t surface_passes;   /* passes into an IOSurface (the window server's frames), for the 30-second lines */
@@ -1468,6 +1526,7 @@ batch_free(struct batch *b, uint64_t seq)
 	free(b->stores);
 	free(b->bos);
 	free(b->renders);
+	free(b->areas);
 	free(b);
 }
 
@@ -1906,7 +1965,9 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		unsigned kind = (b->width >= 700 ? 0 : b->width >= 300 ? 1 : b->width >= 100 ? 2 : 3) * 4 +
 				(b->color_count > 1 ? 2 : 0) + ((ring_slot[slot].flags & (F_LOAD_RAW | F_LOAD_BLEND)) ? 1 : 0);
 		(void)bytes;
-		gpu_watch_push(vseq, seq, submitted, kind | (b->prof_group << 4), b->draws);
+		gpu_watch_push(vseq, seq, submitted, kind | (b->prof_group << 4), b->draws, b->areas, b->nareas);
+		b->areas = NULL;   /* the watcher's now */
+		b->nareas = 0;
 	}
 	ring_slot[slot].seq = seq;
 	use_bo(b, ring);
@@ -2774,6 +2835,20 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	struct ptr vrec = pool_alloc(b, (r->vs_out_count + r->fs_in_count + 1) * pan_size(ATTRIBUTE), 64, why, why_size);
 	struct ptr vbuf = pool_alloc(b, 4 * pan_size(ATTRIBUTE_BUFFER), 64, why, why_size);
 	struct ptr general = { NULL, 0 }, pos = pool_alloc(b, 16 * alloc, 64, why, why_size), psiz = { NULL, 0 };
+	if (pos.cpu && b->width >= 700 && b->color_count > 1 && boot_arg("rwn_profile=2") && b->nareas < 256) {
+		if (b->areas == NULL)
+			b->areas = calloc(256, sizeof(*b->areas));
+		if (b->areas) {
+			struct area_rec *a = &b->areas[b->nareas++];
+			a->pos = pool_real(b, pos.cpu);
+			a->count = MIN2(alloc, 64);
+			a->clip[0] = (int16_t)sx0;
+			a->clip[1] = (int16_t)sy0;
+			a->clip[2] = (int16_t)sx1;
+			a->clip[3] = (int16_t)sy1;
+			snprintf(a->name, sizeof(a->name), "%s", r->fs.name);
+		}
+	}
 	if (r->general_stride)
 		general = pool_alloc(b, (size_t)r->general_stride * alloc, 64, why, why_size);
 	if (r->writes_psiz)
@@ -3260,6 +3335,23 @@ report(void)
 				memset(prof_passes, 0, sizeof(prof_passes));
 				memset(prof_draws, 0, sizeof(prof_draws));
 				memset(prof_ns, 0, sizeof(prof_ns));
+			}
+			if (narea_tab) {
+				n = snprintf(line, sizeof(line), "30s: full passes, pipelines' draws and Mpx (first vertex %.0f,%.0f,%.2f,%.2f):",
+					     area_sample[0], area_sample[1], area_sample[2], area_sample[3]);
+				for (unsigned round = 0; round < 10 && n < (int)sizeof(line) - 50; round++) {
+					unsigned best = ~0u;
+					for (unsigned t = 0; t < narea_tab; t++)
+						if (area_tab[t].draws && (best == ~0u || area_tab[t].pixels > area_tab[best].pixels))
+							best = t;
+					if (best == ~0u)
+						break;
+					n += snprintf(line + n, sizeof(line) - n, " %.20s %llu %.1f;", area_tab[best].name,
+						      (unsigned long long)area_tab[best].draws, area_tab[best].pixels / 1e6);
+					area_tab[best].draws = 0;
+				}
+				keep("%s", line);
+				narea_tab = 0;
 			}
 			memset(kind_passes, 0, sizeof(kind_passes));
 			memset(kind_draws, 0, sizeof(kind_draws));
