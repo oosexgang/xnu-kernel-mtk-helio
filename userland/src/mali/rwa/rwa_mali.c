@@ -120,6 +120,27 @@ static void report(void);
 /* a draw's time by part: checks, batch_for (with the flush of the batch before), index range and viewport, vertex
  * stage, fragment stage, attributes, varyings and jobs */
 static uint64_t phase_ns[7];
+/* the pipelines of full-screen passes of several targets (run 541: one such pass a frame, ~70 ms of the GPU's ~80),
+ * by draws, and whether they blend by shader */
+static struct { struct rwa_render *r; uint64_t draws; char name[24]; bool bs, rd; } heavy[48];
+static unsigned nheavy;
+
+static void
+heavy_note(struct rwa_render *r)
+{
+	for (unsigned i = 0; i < nheavy; i++)
+		if (heavy[i].r == r) {
+			heavy[i].draws++;
+			return;
+		}
+	if (nheavy < ARRAY_SIZE(heavy)) {
+		heavy[nheavy].r = r;
+		snprintf(heavy[nheavy].name, sizeof(heavy[nheavy].name), "%s", r->fs.name);
+		heavy[nheavy].bs = r->blend_shader_mask != 0;
+		heavy[nheavy].rd = r->reads_dest_mask != 0;
+		heavy[nheavy++].draws = 1;
+	}
+}
 /* a stage's time by part, vertex [0] and fragment [1]: buffers, textures, samplers, system values, pushed words */
 static uint64_t stage_ns[2][5];
 static uint64_t surface_frames;
@@ -2873,6 +2894,8 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	link_job(b, tj, tjg);
 	b->last_tiler = tindex;
 	b->draws++;
+	if (b->width >= 700 && b->color_count > 1)
+		heavy_note(r);
 	(void)d;
 	PHASE(6);
 #undef PHASE
@@ -3160,6 +3183,24 @@ report(void)
 		     (unsigned long long)stats.att_loaded, (unsigned long long)stats.att_cleared,
 		     (unsigned long long)stats.att_dontcare_load, (unsigned long long)stats.att_stored,
 		     (unsigned long long)stats.att_discarded);
+		{
+			char line[460];
+			int n = snprintf(line, sizeof(line), "30s: full passes' pipelines by draws:");
+			for (unsigned round = 0; round < 8 && n < (int)sizeof(line) - 50; round++) {
+				unsigned best = ~0u;
+				for (unsigned i = 0; i < nheavy; i++)
+					if (heavy[i].draws && (best == ~0u || heavy[i].draws > heavy[best].draws))
+						best = i;
+				if (best == ~0u)
+					break;
+				n += snprintf(line + n, sizeof(line) - n, " %s%s%s %llu;", heavy[best].name,
+					      heavy[best].bs ? " bs" : "", heavy[best].rd ? " rd" : "",
+					      (unsigned long long)heavy[best].draws);
+				heavy[best].draws = 0;
+			}
+			keep("%s", line);
+			nheavy = 0;
+		}
 		pthread_mutex_lock(&gq_lock);
 		double span = (double)MAX2(now - stats.since, 1);
 		keep("30s: GPU busy %.0f%%, a pass submit to done %.1f ms (at most %.1f), %llu passes waited, %llu queued; "
