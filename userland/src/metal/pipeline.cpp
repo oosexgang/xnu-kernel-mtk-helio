@@ -320,6 +320,21 @@ prebuilt_load(void)
 	fclose(f);
 }
 
+/* the generic pipeline drawn as it is, which draws nothing: why, the first 40 times and then every 256th (run 559: the
+ * glass's backdrops still came out holding only their clear) */
+void
+generic_fallback(const char *label, const char *why)
+{
+	static unsigned n;
+	char line[200];
+
+	if (++n <= 40 || (n & 255) == 0) {
+		snprintf(line, sizeof(line), "!!rwm generic %s drawn as it is (%u so far): %s", label +
+			 (strncmp(label, "com.apple.coreanimation.", 24) == 0 ? 24 : 0), n, why);
+		sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+	}
+}
+
 bool
 variant_sync(void)
 {
@@ -660,9 +675,14 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 			break;
 		}
 	}
-	if (g == nullptr || !config_of(vertex, vertex_offset, g->vertex_config, vcfg) ||
+	if (g == nullptr) {
+		pthread_mutex_unlock(&generic_lock);
+		return nullptr;
+	}
+	if (!config_of(vertex, vertex_offset, g->vertex_config, vcfg) ||
 	    !config_of(fragment, fragment_offset, g->fragment_config, fcfg)) {
 		pthread_mutex_unlock(&generic_lock);
+		generic_fallback(g->label, "no configuration in buffer 0");
 		return nullptr;
 	}
 	/* the padding inside the two FragmentShaderConfig::Image entries (bytes 3 and 15 of each 16): never read */
@@ -674,6 +694,7 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 			 * held the screen and the touches for 20 s opening Settings), or waited for with rwm_variant_sync=1 */
 			if (g->variants[i].building && !variant_sync() && !wait) {
 				pthread_mutex_unlock(&generic_lock);
+				generic_fallback(g->label, "its variant still building (a surface's pass)");
 				return nullptr;
 			}
 			while (g->variants[i].building) {
@@ -682,6 +703,9 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 			found = g->variants[i].render;
 			last_variant = i + 1;
 			pthread_mutex_unlock(&generic_lock);
+			if (found == nullptr) {
+				generic_fallback(g->label, "its variant was refused");
+			}
 			return found;
 		}
 	}
@@ -692,6 +716,7 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 				  g->nvariants);
 		}
 		pthread_mutex_unlock(&generic_lock);
+		generic_fallback(g->label, "no room for another variant");
 		return nullptr;
 	}
 
@@ -730,6 +755,7 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 			}
 		}
 		if (started) {
+			generic_fallback(g->label, "its variant started off the draw (a surface's pass)");
 			return nullptr;
 		}
 	}
