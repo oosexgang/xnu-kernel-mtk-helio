@@ -13,6 +13,7 @@
 #include <stdarg.h>
 #include <sys/sysctl.h>
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -613,6 +614,16 @@ upload_code(struct rwa_stage *st, const struct util_dynarray *bin, char *why, si
 	return 0;
 }
 
+uint64_t rwa_compile_ns[3];   /* AIR to NIR, preprocessing and lowering, the Bifrost compiler */
+
+static uint64_t
+rwa_clock_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000000ull + ts.tv_nsec;
+}
+
 int
 rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *bitcode, size_t size, const char *entry,
 		  gl_shader_stage want, const struct rwa_constant *constants, unsigned nconst, const void *config,
@@ -639,6 +650,7 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 		.defined = defined, .num_defined = ndefined,
 	};
 	const char *error = NULL;
+	uint64_t ct0 = rwa_clock_ns();
 	nir_shader *nir = air_to_nir(st->mem, bitcode, size, entry, &opts, GENX(pan_shader_get_compiler_options)(),
 				     &st->air, &error);
 	if (nir == NULL) {
@@ -706,6 +718,7 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 				var->data.driver_location = util_bitcount64(read & BITFIELD64_MASK(loc));
 		}
 	}
+	uint64_t ct1 = rwa_clock_ns();
 	bifrost_preprocess_nir(nir, device->gpu_id);   /* pan_shader_preprocess, v6 and later */
 	/* noperspective varyings: the fragment stage's set (pan_nir_collect_noperspective_varyings_fs, as
 	 * panfrost_create_shader_state keeps it), and the vertex stage multiplied by W for exactly that set */
@@ -745,7 +758,17 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 	};
 	struct util_dynarray bin;
 	util_dynarray_init(&bin, NULL);
+	uint64_t ct2 = rwa_clock_ns();
 	GENX(pan_shader_compile)(nir, &inputs, &bin, &st->info);
+	uint64_t ct3 = rwa_clock_ns();
+	rwa_compile_ns[0] += ct1 - ct0;
+	rwa_compile_ns[1] += ct2 - ct1;
+	rwa_compile_ns[2] += ct3 - ct2;
+#ifdef RWA_HOST_FAKE
+	if (getenv("RWA_COMPILE_TRACE"))
+		fprintf(stderr, "COMPILE %s air %.1f lower %.1f bifrost %.1f ms\n", entry, (ct1 - ct0) / 1e6, (ct2 - ct1) / 1e6,
+			(ct3 - ct2) / 1e6);
+#endif
 	st->texture_count = st->info.texture_count;
 	st->sampler_count = st->info.sampler_count;
 	int e = upload_code(st, &bin, why, why_size);

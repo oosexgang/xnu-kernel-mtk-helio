@@ -320,6 +320,61 @@ prebuilt_load(void)
 	fclose(f);
 }
 
+bool
+variant_sync(void)
+{
+	static int sync = -1;
+
+	if (sync < 0) {
+		sync = boot_arg("rwm_variant_sync=1") ? 1 : 0;
+	}
+	return sync == 1;
+}
+
+struct async_variant {
+	struct generic_record *g;
+	struct generic_variant *v;
+	uint64_t began;
+};
+
+/* a variant a draw asked for, built off the draw's thread (rwm_generic_variant) */
+void *
+async_variant_main(void *context)
+{
+	struct async_variant *a = (struct async_variant *)context;
+	struct generic_record *g = a->g;
+	struct generic_variant *v = a->v;
+	variant_call call = {};
+
+	call.g = g;
+	call.vertex = v->vertex;
+	call.fragment = v->fragment;
+	rwm_compile_lock();
+	rwm_on_big_stack(variant_main, &call);
+	rwm_compile_unlock();
+	pthread_mutex_lock(&generic_lock);
+	v->render = call.render;
+	v->building = false;
+	pthread_cond_broadcast(&generic_cond);
+	if (call.render != nullptr) {
+		rwm_area_label(call.render, g->label);
+	}
+	pthread_mutex_unlock(&generic_lock);
+	{
+		static unsigned said;
+		char line[200];
+
+		if (said++ < 120) {
+			snprintf(line, sizeof(line), "!!rwm variant %s #%u %s in %llu ms, off the draw", g->label +
+				 (strncmp(g->label, "com.apple.coreanimation.", 24) == 0 ? 24 : 0), (unsigned)(v - g->variants) + 1,
+				 call.render != nullptr ? "built" : "REFUSED", (unsigned long long)((rwm_ns() - a->began) / 1000000));
+			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+		}
+	}
+	free(a);
+	return nullptr;
+}
+
 void *
 prebuild_main(void *context)
 {
@@ -606,7 +661,12 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 	for (unsigned i = 0; i < g->nvariants; i++) {
 		if (memcmp(g->variants[i].vertex, vcfg, sizeof(vcfg)) == 0 &&
 		    memcmp(g->variants[i].fragment, fcfg, sizeof(fcfg)) == 0) {
-			/* built ahead and not done yet: waited for rather than built twice */
+			/* built ahead and not done yet: drawn with the generic pipeline meanwhile (run 551: the draw that waited
+			 * held the screen and the touches for 20 s opening Settings), or waited for with rwm_variant_sync=1 */
+			if (g->variants[i].building && !variant_sync()) {
+				pthread_mutex_unlock(&generic_lock);
+				return nullptr;
+			}
 			while (g->variants[i].building) {
 				pthread_cond_wait(&generic_cond, &generic_lock);
 			}
@@ -637,6 +697,33 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 	v->render = nullptr;
 	v->building = true;
 	pthread_mutex_unlock(&generic_lock);
+
+	/* built on a thread of its own, the draw going on with the generic pipeline (which reads the same configuration
+	 * from buffer 0 and draws the same, only slower): a variant takes ~1 s on the phone, and run 551's Settings asked
+	 * for 23 in a row */
+	if (!variant_sync()) {
+		struct async_variant *a = (struct async_variant *)calloc(1, sizeof(*a));
+		pthread_t thread;
+		pthread_attr_t attr;
+		bool started = false;
+
+		if (a != nullptr) {
+			a->g = g;
+			a->v = v;
+			a->began = began;
+			pthread_attr_init(&attr);
+			pthread_attr_setstacksize(&attr, 1u << 20);
+			pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+			started = pthread_create(&thread, &attr, async_variant_main, a) == 0;
+			pthread_attr_destroy(&attr);
+			if (!started) {
+				free(a);
+			}
+		}
+		if (started) {
+			return nullptr;
+		}
+	}
 
 	call.g = g;
 	call.vertex = vcfg;

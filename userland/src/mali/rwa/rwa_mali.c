@@ -3531,6 +3531,10 @@ report(void)
 		memset(stage_ns, 0, sizeof(stage_ns));
 		upload_ns = upload_bytes = 0;
 	}
+	keep("30s: pipeline compiling, ms: AIR to NIR %llu, lowering %llu, Bifrost compiler %llu",
+	     (unsigned long long)(rwa_compile_ns[0] / 1000000), (unsigned long long)(rwa_compile_ns[1] / 1000000),
+	     (unsigned long long)(rwa_compile_ns[2] / 1000000));
+	memset(rwa_compile_ns, 0, sizeof(rwa_compile_ns));
 	keep("30s: %llu draws (%llu refused), %llu passes, %llu loaded, %llu cleared, %llu waits by the processor; "
 	     "draws %llu us, submits %llu us; %llu pipelines in %llu ms (%llu refused), %llu surfaces; buffers %llu made, "
 	     "%llu reused, %llu KB kept",

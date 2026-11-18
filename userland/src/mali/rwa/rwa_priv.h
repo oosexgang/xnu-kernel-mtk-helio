@@ -51,6 +51,8 @@ enum rwa_sysval {
 #define RWA_SV_ARG(sv) ((sv) >> 8)
 
 /* one compiled stage */
+extern uint64_t rwa_compile_ns[3];
+
 struct rwa_stage {
 	void *mem;                    /* ralloc context: the AIR info's strings and arrays live in it */
 	struct air_shader_info air;

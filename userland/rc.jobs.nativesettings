@@ -1,0 +1,11 @@
+# The native Mali library opening Settings (boot-arg mali_native=1): Wallet's question allowed as in
+# rc.jobs.nativehome, a picture of the home screen, Settings opened from its icon (second column, third row), its list
+# flung down and up, the home button, then the home screen's pages swiped both ways -- the 30-second lines give the
+# pipelines built and the frames committed meanwhile.
+/hakios/bin/rwtouch wait 170 swipe 0.705 0.586 0.707 0.587 150
+/hakios/bin/rwtouch wait 40
+/hakios/bin/fbgrab -log home 750 0.7
+/hakios/bin/rwtouch tap 0.375 0.585 wait 8 swipe 0.5 0.8 0.5 0.3 150 wait 3 swipe 0.5 0.3 0.5 0.8 150 wait 3 button home wait 4
+/hakios/bin/rwtouch tap 0.375 0.585 wait 5 swipe 0.5 0.8 0.5 0.3 150 wait 3 button home wait 4
+/hakios/bin/rwtouch swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 2 swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 2
+/hakios/bin/rwtouch wait 60
