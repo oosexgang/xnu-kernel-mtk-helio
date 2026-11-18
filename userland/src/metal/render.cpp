@@ -478,10 +478,13 @@ rwm_render_draw(struct rwm_render_state *s, const struct rwm_draw_call *call, st
 		}
 	}
 	/* a generic pipeline drawn with its variant for the configuration bound in buffer 0 (src/metal/pipeline.cpp) */
+	/* an offscreen pass waits for its variant: CoreAnimation keeps what such a pass drew (the glass's backdrops are
+	 * drawn once), and the generic pipeline itself draws nothing; a pass into a surface is drawn again next frame */
+	const bool offscreen = s->color_count == 0 || s->color[0].core == nullptr || rwm_texture_in_place(s->color[0].core) == 0;
 	struct rwa_render *special = rwm_generic_variant(s->render, s->vertex_count > 0 ? s->vertex[0].buffer : nullptr,
 							  s->vertex_count > 0 ? s->vertex[0].offset : 0,
 							  s->fragment_count > 0 ? s->fragment[0].buffer : nullptr,
-							  s->fragment_count > 0 ? s->fragment[0].offset : 0);
+							  s->fragment_count > 0 ? s->fragment[0].offset : 0, offscreen);
 	if (passlog_on()) {
 		const char *label = rwm_area_label_of(s->render);
 		char tex[120];

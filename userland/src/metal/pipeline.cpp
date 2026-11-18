@@ -134,7 +134,7 @@ struct generic_record {
 	unsigned nv, nf;
 	struct rwa_render_shape shape;
 	unsigned vertex_config, fragment_config;  /* bytes of buffer 0 read for each stage */
-	struct generic_variant variants[48];
+	struct generic_variant variants[192];   /* run 557: past 48, the generic pipeline itself, which draws nothing */
 	unsigned nvariants;
 	bool full_said;
 };
@@ -644,7 +644,7 @@ rwm_render_compile(struct rwa_device *device, const char *label, const struct rw
  * drawn with; NULL: draw with the pipeline itself (not a generic one, no configuration bound, no room, a failed build) */
 extern "C" struct rwa_render *
 rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t vertex_offset,
-		    struct rwa_buffer *fragment, size_t fragment_offset)
+		    struct rwa_buffer *fragment, size_t fragment_offset, bool wait)
 {
 	struct generic_record *g = nullptr;
 	uint8_t vcfg[8] = { 0 }, fcfg[64] = { 0 };
@@ -672,7 +672,7 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 		    memcmp(g->variants[i].fragment, fcfg, sizeof(fcfg)) == 0) {
 			/* built ahead and not done yet: drawn with the generic pipeline meanwhile (run 551: the draw that waited
 			 * held the screen and the touches for 20 s opening Settings), or waited for with rwm_variant_sync=1 */
-			if (g->variants[i].building && !variant_sync()) {
+			if (g->variants[i].building && !variant_sync() && !wait) {
 				pthread_mutex_unlock(&generic_lock);
 				return nullptr;
 			}
@@ -710,7 +710,7 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 	/* built on a thread of its own, the draw going on with the generic pipeline (which reads the same configuration
 	 * from buffer 0 and draws the same, only slower): a variant takes ~1 s on the phone, and run 551's Settings asked
 	 * for 23 in a row */
-	if (!variant_sync()) {
+	if (!variant_sync() && !wait) {
 		struct async_variant *a = (struct async_variant *)calloc(1, sizeof(*a));
 		pthread_t thread;
 		pthread_attr_t attr;
