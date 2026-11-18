@@ -2683,9 +2683,11 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	if (b->width >= 700 && b->color_count > 1 && boot_arg("rwn_profile=1") && now_ns() - lib_up_ns > 150000000000ull &&
 	    now_ns() - lib_up_ns < 300000000000ull) {
 		b->prof_group = 1 + (unsigned)(commits % 4);
-		bool path = strncmp(r->fs.name, "path_", 5) == 0;
-		bool skip = (b->prof_group == 2 && path) || (b->prof_group == 3 && !path && r->reads_dest_mask) ||
-			    (b->prof_group == 4 && !path && !r->reads_dest_mask);
+		/* run 546 showed the path draws are three quarters: now which of them -- the clears, the blits (framebuffer
+		 * fetch of the R32Float coverage), or the coverage itself (rect, cubic, stroke; additive R32Float) */
+		bool clear = strncmp(r->fs.name, "path_clear", 10) == 0, blit = strncmp(r->fs.name, "path_blit", 9) == 0;
+		bool cover = strncmp(r->fs.name, "path_", 5) == 0 && !clear && !blit;
+		bool skip = (b->prof_group == 2 && clear) || (b->prof_group == 3 && blit) || (b->prof_group == 4 && cover);
 		if (skip)
 			return 0;
 	}
@@ -3379,7 +3381,7 @@ report(void)
 						      kind_vt_ns[k] / 1e6, kind_frag_ns[k] / 1e6);
 			keep("%s", line);
 			if (prof_passes[0] || prof_passes[1] || prof_passes[2] || prof_passes[3]) {
-				static const char *const gname[4] = { "all", "no path_*", "no blended plain", "no opaque plain" };
+				static const char *const gname[4] = { "all", "no path_clear", "no path_blit", "no path coverage" };
 				n = snprintf(line, sizeof(line), "30s: full passes, ms a pass (draws) with:");
 				for (unsigned g = 0; g < 4; g++)
 					n += snprintf(line + n, sizeof(line) - n, " %s %.1f (%.0f);", gname[g],
