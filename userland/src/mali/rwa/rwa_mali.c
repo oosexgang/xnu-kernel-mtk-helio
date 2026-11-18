@@ -979,6 +979,7 @@ struct batch {
 	unsigned prof_group;   /* boot-arg rwn_profile=1: 1 + which draws a full pass of several targets skips */
 	struct area_rec *areas;   /* rwn_profile=2: where each draw's positions land, read once its vertex job is done */
 	unsigned nareas;
+	bool chunks_given;        /* its chunks handed to the GPU thread, which gives them back once it has read them */
 	unsigned dontcare;  /* attachments whose load action is DontCare: the tile starts at zero, and a tile nothing is
 			     * drawn into is not written (no clean writes), as a tiler leaves it */
 	struct km_bo *chunks[512];
@@ -1137,7 +1138,14 @@ static uint64_t commits;   /* command buffers committed (rwa_flush_seq) */
  * the pass before's end, if later) to its end as busy -- how much of the 30 seconds the GPU worked, and a pass's
  * submit-to-done time */
 #define GQ 1024
-static struct { uint64_t vseq, seq, submitted; unsigned kind, draws; struct area_rec *areas; unsigned nareas; } gq[GQ];
+static struct {
+	uint64_t vseq, seq, submitted;
+	unsigned kind, draws;
+	struct area_rec *areas;
+	unsigned nareas;
+	struct km_bo **chunks;   /* given back by the GPU thread, once it has read the areas */
+	unsigned nchunks;
+} gq[GQ];
 static unsigned gq_head, gq_tail;
 static pthread_mutex_t gq_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t gq_cond = PTHREAD_COND_INITIALIZER;
@@ -1161,7 +1169,10 @@ gpu_watch(void *arg)
 		unsigned group = (gq[gq_tail % GQ].kind >> 4) & 7;
 		struct area_rec *areas = gq[gq_tail % GQ].areas;
 		unsigned nareas = gq[gq_tail % GQ].nareas;
+		struct km_bo **chunks = gq[gq_tail % GQ].chunks;
+		unsigned nchunks = gq[gq_tail % GQ].nchunks;
 		gq[gq_tail % GQ].areas = NULL;
+		gq[gq_tail % GQ].chunks = NULL;
 		pthread_mutex_unlock(&gq_lock);
 		uint64_t from0 = MAX2(submitted, gpu_last_done), vdone = from0;
 		if (vseq) {
@@ -1203,6 +1214,9 @@ gpu_watch(void *arg)
 			}
 			free(areas);
 		}
+		for (unsigned i = 0; chunks && i < nchunks; i++)
+			km_bo_release(chunks[i], seq);
+		free(chunks);
 		km_wait(seq, 2000000000);
 		uint64_t done = now_ns();
 		pthread_mutex_lock(&gq_lock);
@@ -1233,7 +1247,7 @@ gpu_watch(void *arg)
 
 static void
 gpu_watch_push(uint64_t vseq, uint64_t seq, uint64_t submitted, unsigned kind, unsigned draws, struct area_rec *areas,
-	       unsigned nareas)
+	       unsigned nareas, struct km_bo **chunks, unsigned nchunks)
 {
 	pthread_mutex_lock(&gq_lock);
 	if (!gq_running) {
@@ -1250,12 +1264,18 @@ gpu_watch_push(uint64_t vseq, uint64_t seq, uint64_t submitted, unsigned kind, u
 		gq[gq_head % GQ].draws = draws;
 		gq[gq_head % GQ].areas = areas;
 		gq[gq_head % GQ].nareas = nareas;
+		gq[gq_head % GQ].chunks = chunks;
+		gq[gq_head % GQ].nchunks = nchunks;
 		areas = NULL;
+		chunks = NULL;
 		gq_head++;
 		pthread_cond_signal(&gq_cond);
 	}
 	pthread_mutex_unlock(&gq_lock);
 	free(areas);   /* not queued */
+	for (unsigned i = 0; chunks && i < nchunks; i++)
+		km_bo_release(chunks[i], seq);
+	free(chunks);
 }
 static uint64_t ubo_copied, ubo_copied_bytes, ubo_given;   /* uniform buffers off 16 bytes: copied, or given as they are */
 static uint64_t surface_passes;   /* passes into an IOSurface (the window server's frames), for the 30-second lines */
@@ -1512,7 +1532,8 @@ static void
 batch_free(struct batch *b, uint64_t seq)
 {
 	for (unsigned i = 0; i < b->nchunks; i++) {
-		km_bo_release(b->chunks[i], seq);
+		if (!b->chunks_given)
+			km_bo_release(b->chunks[i], seq);
 		shadow_put(b->shadow[i]);
 	}
 	for (unsigned i = 0; i < b->nstores; i++) {
@@ -1965,7 +1986,19 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		unsigned kind = (b->width >= 700 ? 0 : b->width >= 300 ? 1 : b->width >= 100 ? 2 : 3) * 4 +
 				(b->color_count > 1 ? 2 : 0) + ((ring_slot[slot].flags & (F_LOAD_RAW | F_LOAD_BLEND)) ? 1 : 0);
 		(void)bytes;
-		gpu_watch_push(vseq, seq, submitted, kind | (b->prof_group << 4), b->draws, b->areas, b->nareas);
+		/* run 544: the GPU thread read a position buffer the cache had already closed (it closes the oldest past
+		 * 48 MB, done or not): a batch whose positions it reads gives it its chunks to give back afterwards */
+		struct km_bo **given = NULL;
+		if (b->areas && (given = malloc(b->nchunks * sizeof(*given))) != NULL) {
+			memcpy(given, b->chunks, b->nchunks * sizeof(*given));
+			b->chunks_given = true;
+		} else if (b->areas) {
+			free(b->areas);
+			b->areas = NULL;
+			b->nareas = 0;
+		}
+		gpu_watch_push(vseq, seq, submitted, kind | (b->prof_group << 4), b->draws, b->areas, b->nareas, given,
+			       b->chunks_given ? b->nchunks : 0);
 		b->areas = NULL;   /* the watcher's now */
 		b->nareas = 0;
 	}
