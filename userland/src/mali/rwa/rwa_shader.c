@@ -659,6 +659,26 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 		return -1;
 	}
 	snprintf(st->name, sizeof(st->name), "%s", st->air.entry_point ? st->air.entry_point : (entry ? entry : "?"));
+	/* colour outputs past the pass's attachments are not written (Panfrost keeps only the framebuffer's nr_cbufs):
+	 * CoreAnimation's uber shader writes [[color(0..2)]], and drawn into two attachments its third output's BLEND took
+	 * a descriptor past the pipeline's two -- the passes of two attachments it drew (the glass's backdrops, run 557)
+	 * came out holding only their clear. Boot-arg rwn_keepout=1: kept, as before. */
+	if (want == MESA_SHADER_FRAGMENT && shape && !boot_arg_set("rwn_keepout=1")) {
+		bool dropped = false;
+		nir_foreach_variable_with_modes(var, nir, nir_var_shader_out) {
+			if (var->data.location >= FRAG_RESULT_DATA0 &&
+			    var->data.location >= FRAG_RESULT_DATA0 + (int)MAX2(shape->color_count, 1)) {
+				var->data.mode = nir_var_shader_temp;
+				dropped = true;
+			}
+		}
+		if (dropped) {
+			nir_fixup_deref_modes(nir);
+			NIR_PASS(_, nir, nir_lower_vars_to_ssa);
+			NIR_PASS(_, nir, nir_opt_dce);
+			NIR_PASS(_, nir, nir_remove_dead_variables, nir_var_shader_temp, NULL);
+		}
+	}
 	if (nir->info.stage != want) {
 		say(why, why_size, "%s is a %s function, and a %s one is wanted", st->name,
 		    _mesa_shader_stage_to_string(nir->info.stage), _mesa_shader_stage_to_string(want));
