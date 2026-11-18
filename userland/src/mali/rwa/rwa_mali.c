@@ -130,6 +130,8 @@ struct area_rec {
 	unsigned stride;        /* vertices between instances (the padded count when instanced) */
 	unsigned instances;     /* read (at most 256) */
 	unsigned all_instances;
+	bool say;               /* a small offscreen pass's draw: its box said by itself */
+	uint16_t target[2];
 	int16_t clip[4];        /* the scissor: x0, y0, x1, y1 */
 	char name[24];
 };
@@ -1225,6 +1227,21 @@ gpu_watch(void *arg)
 					px *= (double)a->all_instances / a->instances;
 				if (i == 0)
 					memcpy(area_sample, v, sizeof(area_sample));
+				if (a->say) {
+					static unsigned said;
+					if (said++ < 40) {
+						float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+						for (size_t k = 0; k < n; k++) {
+							bx0 = MIN2(bx0, v[4 * k]);
+							bx1 = MAX2(bx1, v[4 * k]);
+							by0 = MIN2(by0, v[4 * k + 1]);
+							by1 = MAX2(by1, v[4 * k + 1]);
+						}
+						keep("small pass positions %ux%u %.20s: %zu vertices in %.0f,%.0f..%.0f,%.0f; first %g %g %g %g, "
+						     "%g %g %g %g", a->target[0], a->target[1], a->name, n, bx0, by0, bx1, by1, v[0], v[1], v[2],
+						     v[3], v[4], v[5], v[6], v[7]);
+					}
+				}
 				pthread_mutex_lock(&gq_lock);
 				unsigned t = 0;
 				while (t < narea_tab && strcmp(area_tab[t].name, a->name) != 0)
@@ -3032,7 +3049,10 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	struct ptr vrec = pool_alloc(b, (r->vs_out_count + r->fs_in_count + 1) * pan_size(ATTRIBUTE), 64, why, why_size);
 	struct ptr vbuf = pool_alloc(b, 4 * pan_size(ATTRIBUTE_BUFFER), 64, why, why_size);
 	struct ptr general = { NULL, 0 }, pos = pool_alloc(b, 16 * alloc, 64, why, why_size), psiz = { NULL, 0 };
-	if (pos.cpu && b->width >= 700 && b->color_count > 1 && boot_arg("rwn_profile=2") && b->nareas < 256) {
+	const bool small_say = b->width <= 800 && b->height <= 800 && b->color_count && b->color[0] && b->clear[0] &&
+			       !b->color[0]->store->surface_id && !boot_arg("rwn_smalllog=0");
+	if (pos.cpu && ((b->width >= 700 && b->color_count > 1 && boot_arg("rwn_profile=2")) || small_say) &&
+	    b->nareas < 256) {
 		if (b->areas == NULL)
 			b->areas = calloc(256, sizeof(*b->areas));
 		if (b->areas) {
@@ -3047,6 +3067,9 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 			a->clip[2] = (int16_t)sx1;
 			a->clip[3] = (int16_t)sy1;
 			snprintf(a->name, sizeof(a->name), "%s", r->fs.name);
+			a->say = small_say;
+			a->target[0] = (uint16_t)b->width;
+			a->target[1] = (uint16_t)b->height;
 		}
 	}
 	if (r->general_stride)
