@@ -284,6 +284,15 @@ cat > $T/etc/rc.jobs <<'EOF'
 /bin/ps -A
 EOF
 fi
+# the first phone's CONNSYS firmware (Wi-Fi, Bluetooth), the phone's own /vendor/firmware taken off it into
+# kernel/deps/build/connsys-fw (never in the repository): the 27 release's system image is made without it, so it is
+# here, /hakios/fw/connsys, where bsd/dev/mtk_connsys.c looks after /fw/connsys (1.5 MB; connsys_step=5 and on)
+rm -rf $T/fw/connsys
+if [ -d "$RN/../kernel/deps/build/connsys-fw/firmware" ]; then
+	mkdir -p $T/fw/connsys
+	cp "$RN"/../kernel/deps/build/connsys-fw/firmware/* $T/fw/connsys/
+	echo "  fw/connsys: $(ls -1 $T/fw/connsys | wc -l | tr -d ' ') files"
+fi
 cd $DR/userland
 # the firmware directories (fw, fw-wifi-..., fw-audio-...) stay uncompressed: the kernel reads them as they lie
 plain=(); for d in "$T"/fw*/; do if [ -d "$d" ]; then plain+=(--plain "$(basename "$d")"); fi; done

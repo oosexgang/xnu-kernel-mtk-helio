@@ -378,9 +378,16 @@ connsys_file(const char *name, uint32_t *size)
 	uint8_t *data;
 	int left = 0;
 
+	/*
+	 * The system image's /fw/connsys (16.5: userland/build.sh), else the small image's (the 27 release, whose system
+	 * image is made without it: system27/userland/root26-sys.sh puts the files into the tree mounted at /hakios).
+	 */
 	snprintf(path, sizeof(path), "/fw/connsys/%s", name);
 	if (vnode_lookup(path, 0, &vnode, context) != 0) {
-		return NULL;
+		snprintf(path, sizeof(path), "/hakios/fw/connsys/%s", name);
+		if (vnode_lookup(path, 0, &vnode, context) != 0) {
+			return NULL;
+		}
 	}
 	VATTR_INIT(&attributes);
 	VATTR_WANTED(&attributes, va_data_size);
