@@ -1206,6 +1206,8 @@ static uint64_t gpu_busy_ns, gpu_latency_ns, gpu_passes, gpu_last_done, gpu_late
 /* by kind (width >= 700, >= 300, >= 100, smaller; several targets; loaded): passes, draws, vertex+tiler and fragment
  * time */
 static uint64_t kind_passes[16], kind_draws[16], kind_vt_ns[16], kind_frag_ns[16];
+/* the passes that clear nothing and so are bounded by their draws (submit_batch): how many, their tiles, of how many */
+static uint64_t bound_passes, bound_tiles, bound_of;
 static uint64_t prof_passes[4], prof_draws[4], prof_ns[4];   /* rwn_profile=1: by group skipped */
 static bool gq_running;
 
@@ -2067,11 +2069,36 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 			n += snprintf(w + n, room - n, "%s %.24s%s", i ? "," : ";", b->renders[i]->fs.name,
 				      b->renders[i]->blend_shader_mask ? "[bs]" : "");
 	}
+	/*
+	 * The tiles the fragment job goes through. A pass that clears nothing -- every target loaded, no depth -- leaves
+	 * what its draws do not touch as it was, so only the tiles under the union of its draws' scissors are gone
+	 * through (Panfrost's batch extent: panfrost_batch_union_scissor per draw, the whole frame for a clear); the
+	 * window server's passes that load its targets redraw what changed. Boot-arg rwn_fullbound=1: the whole frame.
+	 */
+	unsigned tx0 = 0, ty0 = 0, tx1 = (b->width - 1) >> MALI_TILE_SHIFT, ty1 = (b->height - 1) >> MALI_TILE_SHIFT;
+	{
+		bool cleared = b->depth != NULL;
+		for (unsigned i = 0; i < b->color_count; i++)
+			cleared |= b->color[i] && b->clear[i];
+		static int full = -1;
+		if (full < 0)
+			full = boot_arg("rwn_fullbound=1");
+		if (!cleared && !full && b->draws && b->minx <= b->maxx && b->miny <= b->maxy) {
+			unsigned of = (tx1 + 1) * (ty1 + 1);
+			tx0 = b->minx >> MALI_TILE_SHIFT;
+			ty0 = b->miny >> MALI_TILE_SHIFT;
+			tx1 = MIN2(tx1, b->maxx >> MALI_TILE_SHIFT);
+			ty1 = MIN2(ty1, b->maxy >> MALI_TILE_SHIFT);
+			__atomic_fetch_add(&bound_passes, 1, __ATOMIC_RELAXED);
+			__atomic_fetch_add(&bound_tiles, (tx1 - tx0 + 1) * (ty1 - ty0 + 1), __ATOMIC_RELAXED);
+			__atomic_fetch_add(&bound_of, of, __ATOMIC_RELAXED);
+		}
+	}
 	pan_section_pack(frag.cpu, FRAGMENT_JOB, PAYLOAD, payload) {
-		payload.bound_min_x = 0;
-		payload.bound_min_y = 0;
-		payload.bound_max_x = (b->width - 1) >> MALI_TILE_SHIFT;
-		payload.bound_max_y = (b->height - 1) >> MALI_TILE_SHIFT;
+		payload.bound_min_x = tx0;
+		payload.bound_min_y = ty0;
+		payload.bound_max_x = tx1;
+		payload.bound_max_y = ty1;
 		payload.framebuffer = fbd;
 	}
 	pan_section_pack(frag.cpu, FRAGMENT_JOB, HEADER, header) {
@@ -3589,6 +3616,12 @@ report(void)
 						      (unsigned long long)kind_passes[k], (unsigned long long)kind_draws[k],
 						      kind_vt_ns[k] / 1e6, kind_frag_ns[k] / 1e6);
 			keep("%s", line);
+			uint64_t bp = __atomic_exchange_n(&bound_passes, 0, __ATOMIC_RELAXED);
+			uint64_t bt = __atomic_exchange_n(&bound_tiles, 0, __ATOMIC_RELAXED);
+			uint64_t bo = __atomic_exchange_n(&bound_of, 0, __ATOMIC_RELAXED);
+			if (bp)
+				keep("30s: %llu passes that clear nothing bounded by their draws: %.0f%% of their tiles gone through",
+				     (unsigned long long)bp, 100.0 * bt / MAX2(bo, 1));
 			if (prof_passes[0] || prof_passes[1] || prof_passes[2] || prof_passes[3]) {
 				static const char *const gname[4] = { "all", "no path_*", "no glass_*", "no plain layers" };
 				n = snprintf(line, sizeof(line), "30s: full passes, ms a pass (draws) with:");
