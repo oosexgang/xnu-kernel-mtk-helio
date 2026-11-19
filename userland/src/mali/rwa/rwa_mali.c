@@ -2086,9 +2086,11 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	 */
 	unsigned tx0 = 0, ty0 = 0, tx1 = (b->width - 1) >> MALI_TILE_SHIFT, ty1 = (b->height - 1) >> MALI_TILE_SHIFT;
 	{
+		/* a target whose load action is DontCare is cleared where the job goes, and what it holds elsewhere is
+		 * undefined anyway (run 572: with that counted as a clear no pass was bounded) */
 		bool cleared = b->depth != NULL;
 		for (unsigned i = 0; i < b->color_count; i++)
-			cleared |= b->color[i] && b->clear[i];
+			cleared |= b->color[i] && b->clear[i] && !(b->dontcare & (1u << i));
 		static int full = -1;
 		if (full < 0)
 			full = boot_arg("rwn_fullbound=1");
