@@ -3488,11 +3488,21 @@ rwa_wait_seq(uint64_t seq, int64_t timeout_ns)
 }
 
 
+/* the time between one frame handed to the display and the next, in 60 Hz refreshes: <= 1, 2, 3, 4, 5, 6 and longer */
+static uint64_t frame_gap[7];
+
 int
 rwa_surface_seq(uint32_t surface, uint64_t seq)
 {
-	if (seq != ~0ull)
+	if (seq != ~0ull) {
+		static uint64_t last;
+		uint64_t now = now_ns(), was = __atomic_exchange_n(&last, now, __ATOMIC_RELAXED);
 		surface_frames++;
+		if (was) {
+			uint64_t gap = (now - was + 8333333) / 16666667;   /* refreshes, rounded */
+			__atomic_fetch_add(&frame_gap[MIN2(MAX2(gap, 1), 7) - 1], 1, __ATOMIC_RELAXED);
+		}
+	}
 	return km_surface_seq(surface, seq);
 }
 
@@ -3616,6 +3626,17 @@ report(void)
 						      (unsigned long long)kind_passes[k], (unsigned long long)kind_draws[k],
 						      kind_vt_ns[k] / 1e6, kind_frag_ns[k] / 1e6);
 			keep("%s", line);
+			{
+				uint64_t g[7];
+				for (unsigned i = 0; i < 7; i++)
+					g[i] = __atomic_exchange_n(&frame_gap[i], 0, __ATOMIC_RELAXED);
+				/* swipes: how many frames came after 2 refreshes (30 a second), 3 (20), ... -- the idle 10 a second
+				 * is 6 */
+				keep("30s: frames to the display by the refreshes since the one before: 1 %llu, 2 %llu, 3 %llu, "
+				     "4 %llu, 5 %llu, 6 %llu, more %llu", (unsigned long long)g[0], (unsigned long long)g[1],
+				     (unsigned long long)g[2], (unsigned long long)g[3], (unsigned long long)g[4],
+				     (unsigned long long)g[5], (unsigned long long)g[6]);
+			}
 			uint64_t bp = __atomic_exchange_n(&bound_passes, 0, __ATOMIC_RELAXED);
 			uint64_t bt = __atomic_exchange_n(&bound_tiles, 0, __ATOMIC_RELAXED);
 			uint64_t bo = __atomic_exchange_n(&bound_of, 0, __ATOMIC_RELAXED);
