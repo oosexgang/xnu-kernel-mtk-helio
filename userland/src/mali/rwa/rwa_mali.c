@@ -3923,6 +3923,14 @@ report(void)
 		memset(stage_ns, 0, sizeof(stage_ns));
 		upload_ns = upload_bytes = 0;
 	}
+	{
+		uint64_t hits, misses;
+		unsigned records;
+		rwa_cache_stats(&hits, &misses, &records);
+		if (hits || misses)
+			keep("30s: stage cache: %llu stages taken from it, %llu compiled (%u records)", (unsigned long long)hits,
+			     (unsigned long long)misses, records);
+	}
 	keep("30s: pipeline compiling, ms: AIR to NIR %llu, lowering %llu, Bifrost compiler %llu",
 	     (unsigned long long)(rwa_compile_ns[0] / 1000000), (unsigned long long)(rwa_compile_ns[1] / 1000000),
 	     (unsigned long long)(rwa_compile_ns[2] / 1000000));

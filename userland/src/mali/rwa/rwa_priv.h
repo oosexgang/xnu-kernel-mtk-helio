@@ -64,6 +64,8 @@ struct rwa_helio {
 const struct rwa_helio *rwa_helio_find(const char *soc, unsigned gpu_id);
 const char *rwa_board_soc(void);
 bool rwa_f16as8(void);
+/* the stage cache (rwa_shader.c): stages taken from it, compiled for want of it, records it has */
+void rwa_cache_stats(uint64_t *hits, uint64_t *misses, unsigned *records);
 const char *rwa_arch_status(unsigned arch, unsigned gpu_id);
 
 struct rwa_stage {

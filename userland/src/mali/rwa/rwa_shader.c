@@ -16,6 +16,11 @@
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 
 #include "compiler/nir/nir.h"
 #include "compiler/nir/nir_builder.h"
@@ -644,13 +649,360 @@ rwa_clock_ns(void)
 	return (uint64_t)ts.tv_sec * 1000000000ull + ts.tv_nsec;
 }
 
+
+/* --- the stage cache -----------------------------------------------------------------------------------------------
+ *
+ * A stage compiled on the phone costs ~1 to 8 s of its processor (AIR to NIR, the lowering, the Bifrost compiler), and
+ * CoreAnimation asks for pipelines in the middle of its frames: applications opened at 0 to 4 frames a second while
+ * they were built (runs 580, 581, 584). The same library built for the Mac (RWA_HOST=1, tools mk-rwa-host.sh) compiles
+ * the same stages from the same QuartzCore library with the same Mesa, so the recipes and variant configurations the
+ * runs collected are compiled there (tools rwacache) and their results put in the small image: /hakios/share/
+ * rwa-cache.bin, records of a 64-bit key -- FNV-1a of everything a compile takes: the stage, its entry, its module, the
+ * function constants, the configuration folded in, the pipeline's shape, the fragment stage's noperspective set (for
+ * the vertex stage), the boot-args that change a compile, and this format's version -- and the stage as it came out.
+ * A stage found there is loaded, its code uploaded and its Renderer State packed, in a millisecond; one not found is
+ * compiled as before. RWA_CACHE_OUT=FILE (the Mac): each stage compiled is appended to FILE. Boot-arg rwn_cache=0: not
+ * looked at.
+ */
+#define RWA_CACHE_VERSION 1u
+
+static uint64_t
+fnv64(uint64_t h, const void *data, size_t size)
+{
+	const uint8_t *p = data;
+	for (size_t i = 0; i < size; i++) {
+		h ^= p[i];
+		h *= 0x100000001b3ull;
+	}
+	return h;
+}
+
+static uint64_t
+stage_key(const void *bitcode, size_t size, const char *entry, gl_shader_stage want,
+	  const struct rwa_constant *constants, unsigned nconst, const void *config, unsigned config_size,
+	  const struct rwa_render_shape *shape)
+{
+	uint64_t h = 0xcbf29ce484222325ull;
+	uint32_t head[6] = { RWA_CACHE_VERSION, (uint32_t)want, (uint32_t)sizeof(struct rwa_stage),
+			     (uint32_t)sizeof(struct pan_shader_info), want == MESA_SHADER_VERTEX ? rwa_next_noperspective : 0,
+			     0 };
+	static const char *const flags[] = { "rwn_rawvid=1", "rwn_dupout=1", "rwn_keepout=1", "rwn_ubocopy=1",
+					     "rwn_f16as8=1" };
+	for (unsigned i = 0; i < ARRAY_SIZE(flags); i++)
+		head[5] |= boot_arg_set(flags[i]) ? 1u << i : 0;
+	h = fnv64(h, head, sizeof(head));
+	h = fnv64(h, entry ? entry : "", entry ? strlen(entry) + 1 : 1);
+	/* the LLVM module inside the bitcode wrapper (0x0B17C0DE: offset at 8, size at 12): what -[_MTLFunction
+	 * bitcodeData] hands the plug-in on the phone and what the Mac reads out of the same AIR slice need not agree
+	 * on the wrapper's own words */
+	const uint8_t *b8 = bitcode;
+	size_t inner_at = 0, inner = size;
+	if (size >= 20 && b8[0] == 0xde && b8[1] == 0xc0 && b8[2] == 0x17 && b8[3] == 0x0b) {
+		uint32_t off, len;
+		memcpy(&off, b8 + 8, 4);
+		memcpy(&len, b8 + 12, 4);
+		if ((size_t)off + len <= size) {
+			inner_at = off;
+			inner = len;
+		}
+	}
+	h = fnv64(h, &inner, sizeof(inner));
+	h = fnv64(h, b8 + inner_at, inner);
+#ifndef RWA_HOST_FAKE
+	{
+		/* the first few stages' module, said: whether the phone's bytes are the Mac's */
+		static unsigned said;
+		if (said < 6) {
+			said++;
+			char line[200];
+			int n = snprintf(line, sizeof(line), "!!rwn cache key: %s module %zu bytes, inner %zu at %zu, fnv %016llx; head",
+					 entry ? entry : "?", size, inner, inner_at,
+					 (unsigned long long)fnv64(0xcbf29ce484222325ull, b8 + inner_at, inner));
+			for (unsigned i = 0; i < 20 && i < size && n < (int)sizeof(line) - 4; i++)
+				n += snprintf(line + n, sizeof(line) - n, " %02x", b8[i]);
+			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+		}
+	}
+#endif
+	/* the constants by index, whatever order they came in */
+	bool *done = calloc(nconst ? nconst : 1, 1);
+	for (unsigned left = nconst; done && left; left--) {
+		unsigned best = ~0u;
+		for (unsigned k = 0; k < nconst; k++)
+			if (!done[k] && (best == ~0u || constants[k].index < constants[best].index))
+				best = k;
+		done[best] = true;
+		h = fnv64(h, &constants[best].index, sizeof(constants[best].index));
+		h = fnv64(h, &constants[best].bits, sizeof(constants[best].bits));
+	}
+	free(done);
+	h = fnv64(h, &config_size, sizeof(config_size));
+	if (config_size)
+		h = fnv64(h, config, config_size);
+	if (shape)
+		h = fnv64(h, shape, sizeof(*shape));
+	return h;
+}
+
+struct cblob {
+	uint8_t *data;
+	size_t size, room;
+	bool bad;
+};
+
+static void
+cblob_put(struct cblob *b, const void *data, size_t size)
+{
+	if (b->bad)
+		return;
+	if (b->size + size > b->room) {
+		size_t room = MAX2(b->room * 2, b->size + size + 4096);
+		uint8_t *d = realloc(b->data, room);
+		if (d == NULL) {
+			b->bad = true;
+			return;
+		}
+		b->data = d;
+		b->room = room;
+	}
+	memcpy(b->data + b->size, data, size);
+	b->size += size;
+}
+
+static void
+cblob_str(struct cblob *b, const char *str)
+{
+	uint32_t n = str ? (uint32_t)strlen(str) : 0xffffffffu;
+	cblob_put(b, &n, 4);
+	if (str)
+		cblob_put(b, str, n);
+}
+
+struct reader {
+	const uint8_t *at, *end;
+	bool bad;
+};
+
+static const void *
+rd_take(struct reader *r, size_t size)
+{
+	if (r->bad || (size_t)(r->end - r->at) < size) {
+		r->bad = true;
+		return NULL;
+	}
+	const void *p = r->at;
+	r->at += size;
+	return p;
+}
+
+static const char *
+rd_str(struct reader *r, void *mem)
+{
+	const uint32_t *n = rd_take(r, 4);
+	if (n == NULL || *n == 0xffffffffu)
+		return NULL;
+	const char *p = rd_take(r, *n);
+	return p ? ralloc_strndup(mem, p, *n) : NULL;
+}
+
+/* the stage ST as it came out (its code BIN) appended to RWA_CACHE_OUT under KEY */
+static void
+cache_record(uint64_t key, const struct rwa_stage *st, const void *bin, size_t bin_size)
+{
+	const char *out = getenv("RWA_CACHE_OUT");
+	if (out == NULL)
+		return;
+	struct cblob b = { 0 };
+	uint32_t magic = 0x43415752u;   /* "RWAC" */
+	cblob_put(&b, &magic, 4);
+	cblob_put(&b, &key, 8);
+	uint32_t len = 0;               /* filled below */
+	cblob_put(&b, &len, 4);
+	size_t start = b.size;
+	uint32_t code = (uint32_t)bin_size;
+	cblob_put(&b, &code, 4);
+	cblob_put(&b, bin, bin_size);
+	cblob_put(&b, st, sizeof(*st));
+	const struct air_shader_info *a = &st->air;
+	cblob_str(&b, a->entry_point);
+	for (unsigned i = 0; i < a->num_resources; i++) {
+		cblob_put(&b, &a->resources[i], sizeof(a->resources[i]));
+		cblob_str(&b, a->resources[i].name);
+		cblob_str(&b, a->resources[i].type_name);
+	}
+	for (unsigned i = 0; i < a->num_varyings; i++) {
+		cblob_put(&b, &a->varyings[i], sizeof(a->varyings[i]));
+		cblob_str(&b, a->varyings[i].name);
+	}
+	for (unsigned i = 0; i < a->num_vertex_attributes; i++) {
+		cblob_put(&b, &a->vertex_attributes[i], sizeof(a->vertex_attributes[i]));
+		cblob_str(&b, a->vertex_attributes[i].name);
+		cblob_str(&b, a->vertex_attributes[i].type_name);
+		cblob_str(&b, a->vertex_attributes[i].function_constant);
+	}
+	for (unsigned i = 0; i < a->num_notes; i++)
+		cblob_str(&b, a->notes[i]);
+	if (b.bad) {
+		free(b.data);
+		return;
+	}
+	len = (uint32_t)(b.size - start);
+	memcpy(b.data + 12, &len, 4);
+	int fd = open(out, O_WRONLY | O_APPEND | O_CREAT, 0644);
+	if (fd >= 0) {
+		ssize_t w = write(fd, b.data, b.size);   /* one write: the forked builds append side by side */
+		(void)w;
+		close(fd);
+	}
+	free(b.data);
+}
+
+/* the cache file, read once: its records' keys sorted, each with where its stage is */
+static struct cache_entry { uint64_t key; const uint8_t *at; uint32_t size; } *cache;
+static unsigned ncache;
+static pthread_once_t cache_once = PTHREAD_ONCE_INIT;
+static uint64_t cache_hits, cache_misses;
+
+static int
+cache_cmp(const void *a, const void *b)
+{
+	uint64_t x = ((const struct cache_entry *)a)->key, y = ((const struct cache_entry *)b)->key;
+	return x < y ? -1 : x > y;
+}
+
+static void
+cache_load(void)
+{
+	if (boot_arg_set("rwn_cache=0"))
+		return;
+	const char *path = getenv("RWA_CACHE");
+	if (path == NULL)
+		path = "/hakios/share/rwa-cache.bin";
+	int fd = open(path, O_RDONLY);
+	if (fd < 0)
+		return;
+	struct stat sb;
+	if (fstat(fd, &sb) != 0 || sb.st_size < 16) {
+		close(fd);
+		return;
+	}
+	const uint8_t *m = mmap(NULL, (size_t)sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	close(fd);
+	if (m == MAP_FAILED)
+		return;
+	unsigned room = 0;
+	for (const uint8_t *at = m; at + 16 <= m + sb.st_size;) {
+		uint32_t magic, len;
+		uint64_t key;
+		memcpy(&magic, at, 4);
+		memcpy(&key, at + 4, 8);
+		memcpy(&len, at + 12, 4);
+		if (magic != 0x43415752u || at + 16 + len > m + sb.st_size)
+			break;
+		if (ncache == room) {
+			room = room ? room * 2 : 512;
+			struct cache_entry *c = realloc(cache, room * sizeof(*c));
+			if (c == NULL)
+				break;
+			cache = c;
+		}
+		cache[ncache++] = (struct cache_entry){ key, at + 16, len };
+		at += 16 + len;
+	}
+	qsort(cache, ncache, sizeof(*cache), cache_cmp);
+}
+
+/* the stage of KEY out of the cache into ST: 0, or -1 when it has none (or the record does not read) */
+static int
+cache_take(uint64_t key, struct rwa_stage *st)
+{
+	pthread_once(&cache_once, cache_load);
+	struct cache_entry probe = { key, NULL, 0 };
+	const struct cache_entry *e = ncache ? bsearch(&probe, cache, ncache, sizeof(*cache), cache_cmp) : NULL;
+	if (e == NULL) {
+		__atomic_fetch_add(&cache_misses, 1, __ATOMIC_RELAXED);
+		return -1;
+	}
+	struct reader r = { e->at, e->at + e->size, false };
+	const uint32_t *code = rd_take(&r, 4);
+	const void *bin = code ? rd_take(&r, *code) : NULL;
+	const struct rwa_stage *raw = rd_take(&r, sizeof(*raw));
+	if (r.bad)
+		return -1;
+	memcpy(st, raw, sizeof(*st));
+	st->mem = ralloc_context(NULL);
+	st->code = NULL;
+	struct air_shader_info *a = &st->air;
+	a->entry_point = rd_str(&r, st->mem);
+	a->resources = a->num_resources ? ralloc_array(st->mem, struct air_resource, a->num_resources) : NULL;
+	for (unsigned i = 0; i < a->num_resources && !r.bad; i++) {
+		const void *x = rd_take(&r, sizeof(a->resources[i]));
+		if (x)
+			memcpy(&a->resources[i], x, sizeof(a->resources[i]));
+		a->resources[i].name = rd_str(&r, st->mem);
+		a->resources[i].type_name = rd_str(&r, st->mem);
+	}
+	a->varyings = a->num_varyings ? ralloc_array(st->mem, struct air_varying, a->num_varyings) : NULL;
+	for (unsigned i = 0; i < a->num_varyings && !r.bad; i++) {
+		const void *x = rd_take(&r, sizeof(a->varyings[i]));
+		if (x)
+			memcpy(&a->varyings[i], x, sizeof(a->varyings[i]));
+		a->varyings[i].name = rd_str(&r, st->mem);
+	}
+	a->vertex_attributes = a->num_vertex_attributes ?
+		ralloc_array(st->mem, struct air_vertex_attribute, a->num_vertex_attributes) : NULL;
+	for (unsigned i = 0; i < a->num_vertex_attributes && !r.bad; i++) {
+		const void *x = rd_take(&r, sizeof(a->vertex_attributes[i]));
+		if (x)
+			memcpy(&a->vertex_attributes[i], x, sizeof(a->vertex_attributes[i]));
+		a->vertex_attributes[i].name = rd_str(&r, st->mem);
+		a->vertex_attributes[i].type_name = rd_str(&r, st->mem);
+		a->vertex_attributes[i].function_constant = rd_str(&r, st->mem);
+	}
+	a->notes = a->num_notes ? ralloc_array(st->mem, const char *, a->num_notes) : NULL;
+	for (unsigned i = 0; i < a->num_notes && !r.bad; i++)
+		a->notes[i] = rd_str(&r, st->mem);
+	if (r.bad) {
+		ralloc_free(st->mem);
+		memset(st, 0, sizeof(*st));
+		return -1;
+	}
+	char why[64];
+	struct util_dynarray d = { .data = (void *)bin, .size = *code };
+	if (upload_code(st, &d, why, sizeof(why)) != 0) {
+		ralloc_free(st->mem);
+		memset(st, 0, sizeof(*st));
+		return -1;
+	}
+	struct mali_renderer_state_packed rsd;
+	pan_pack(&rsd, RENDERER_STATE, cfg) {
+		pan_shader_prepare_rsd(&st->info, st->code->gpu, &cfg);
+	}
+	memcpy(st->rsd, rsd.opaque, sizeof(st->rsd));
+	__atomic_fetch_add(&cache_hits, 1, __ATOMIC_RELAXED);
+	return 0;
+}
+
+void
+rwa_cache_stats(uint64_t *hits, uint64_t *misses, unsigned *records)
+{
+	*hits = __atomic_load_n(&cache_hits, __ATOMIC_RELAXED);
+	*misses = __atomic_load_n(&cache_misses, __ATOMIC_RELAXED);
+	*records = ncache;
+}
+
 int
 rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *bitcode, size_t size, const char *entry,
 		  gl_shader_stage want, const struct rwa_constant *constants, unsigned nconst, const void *config,
 		  unsigned config_size, const struct rwa_render_shape *shape, char *why, size_t why_size)
 {
-	(void)shape;
+	uint64_t key = stage_key(bitcode, size, entry, want, constants, nconst, config, config_size, shape);
 	memset(st, 0, sizeof(*st));
+	if (getenv("RWA_CACHE_OUT") == NULL && cache_take(key, st) == 0) {
+		if (want == MESA_SHADER_FRAGMENT)
+			rwa_next_noperspective = st->noperspective;   /* as the compile leaves it for the vertex stage */
+		return 0;
+	}
 	st->mem = ralloc_context(NULL);
 
 	struct air_constant_value *fc = NULL;
@@ -860,6 +1212,8 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 #endif
 	st->texture_count = st->info.texture_count;
 	st->sampler_count = st->info.sampler_count;
+	if (!st->info.vs.idvs && !st->info.vs.secondary_enable)
+		cache_record(key, st, bin.data, bin.size);
 	int e = upload_code(st, &bin, why, why_size);
 	util_dynarray_fini(&bin);
 	ralloc_free(nir);

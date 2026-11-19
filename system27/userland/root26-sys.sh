@@ -50,6 +50,8 @@ if [ -n "${METAL27:-}" ]; then
 	[ -f "$(dirname "$RN")/userland/share/rwm-recipes27.txt" ] && cp "$(dirname "$RN")/userland/share/rwm-recipes27.txt" $T/share/rwm-recipes.txt
 	# ... and the generic pipelines' variants, built ahead the same way (tools/rwm-variants.py)
 	[ -f "$(dirname "$RN")/userland/share/rwm-variants27.txt" ] && cp "$(dirname "$RN")/userland/share/rwm-variants27.txt" $T/share/rwm-variants.txt
+	# RWA_CACHE_BIN=FILE: the native library's stages compiled on the Mac (tools/rwacache.sh), loaded instead of built
+	[ -n "${RWA_CACHE_BIN:-}" ] && [ -f "$RWA_CACHE_BIN" ] && cp "$RWA_CACHE_BIN" $T/share/rwa-cache.bin
 	{ echo "/hakios/bin/tolog /hakios/bin/metal_props on ../../../hakios/lib/HakiosMetal HakiosMetalDevice"; cat $T/etc/rc; } > $T/etc/rc.m
 	mv $T/etc/rc.m $T/etc/rc
 	# RWA_REPLAY_DIR=DIR: captured draws (capNNN.txt) and the two shader modules (vspc.bc, fcph.bc) drawn again on the
