@@ -12,4 +12,4 @@
 /hakios/bin/rwtouch tap 0.625 0.355 wait 6 button home wait 5 tap 0.625 0.355 wait 6 button home wait 5
 /hakios/bin/rwtouch tap 0.125 0.47 wait 6 button home wait 5 tap 0.125 0.47 wait 6 button home wait 5
 /hakios/bin/rwtouch tap 0.375 0.585 wait 6 button home wait 5 tap 0.375 0.585 wait 6 button home wait 5
-/hakios/bin/rwtouch notify com.hakios.rwm_recipes wait 30
+/hakios/bin/rwtouch wait 20 notify com.hakios.rwm_recipes wait 20
