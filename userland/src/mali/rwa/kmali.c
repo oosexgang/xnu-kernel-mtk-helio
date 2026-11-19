@@ -180,13 +180,27 @@ close_bo(struct km_bo *bo)
 	free(bo);
 }
 
+/*
+ * Whether job SEQ is done. The kernel runs every process's jobs one after another in the order given (mtk_mali.c's
+ * one queue), so a job done means every job before it done: the highest seen done is kept and what is at or below it
+ * answered here, not by a KM_WAIT each -- km_bo_new asked that of every busy buffer in its cache before the free one
+ * it found, a call each (run 577: the path rasterizer's varyings in chunks of their own, ~4 us more a draw).
+ */
+static uint64_t known_done;
+
 static bool
 done(uint64_t seq)
 {
-	if (seq == 0)
+	if (seq == 0 || seq <= __atomic_load_n(&known_done, __ATOMIC_RELAXED))
 		return true;
 	struct km_wait_req w = { seq, 0 };
-	return call(KM_WAIT, &w, sizeof(w)) == 0;
+	if (call(KM_WAIT, &w, sizeof(w)) != 0)
+		return false;
+	uint64_t was = __atomic_load_n(&known_done, __ATOMIC_RELAXED);
+	while (was < seq && !__atomic_compare_exchange_n(&known_done, &was, seq, false, __ATOMIC_RELAXED,
+							 __ATOMIC_RELAXED))
+		;
+	return true;
 }
 
 struct km_bo *
@@ -211,16 +225,22 @@ km_bo_new(uint64_t size, char *why, size_t why_size)
 		return bo;
 	}
 	pthread_mutex_lock(&lock);
-	/* the smallest free one that is big enough and not more than twice the size */
+	/* the smallest free one that is big enough and not more than twice the size; one found busy, every one of its
+	 * job or later is busy too (done) */
 	struct km_bo **best = NULL;
+	uint64_t busy_from = UINT64_MAX;
 	for (struct km_bo **p = &cache; *p != NULL; p = &(*p)->next) {
 		struct km_bo *b = *p;
 		if (b->size < size || b->size > 2 * size + 65536)
 			continue;
 		if (best != NULL && (*best)->size <= b->size)
 			continue;
-		if (!done(b->busy_seq))
+		if (b->busy_seq >= busy_from)
 			continue;
+		if (!done(b->busy_seq)) {
+			busy_from = b->busy_seq;
+			continue;
+		}
 		best = p;
 	}
 	if (best != NULL) {
@@ -463,10 +483,18 @@ km_submit(uint64_t jc, bool fragment, struct km_bo *const *bos, unsigned count, 
 int
 km_wait(uint64_t seq, int64_t timeout_ns)
 {
-	if (seq == 0 || fake)
+	if (seq == 0 || fake || seq <= __atomic_load_n(&known_done, __ATOMIC_RELAXED))
 		return 0;
 	struct km_wait_req w = { seq, timeout_ns };
-	return call(KM_WAIT, &w, sizeof(w));
+	int e = call(KM_WAIT, &w, sizeof(w));
+	if (e == 0) {
+		/* done, and so is every job before it (done) */
+		uint64_t was = __atomic_load_n(&known_done, __ATOMIC_RELAXED);
+		while (was < seq && !__atomic_compare_exchange_n(&known_done, &was, seq, false, __ATOMIC_RELAXED,
+								 __ATOMIC_RELAXED))
+			;
+	}
+	return e;
 }
 
 uint64_t
