@@ -50,4 +50,7 @@ clang++ -o "$OUT/airdump" "$OUT/airdump.o" $L/compiler/air/libair.a $L/compiler/
 clang -std=c11 -O1 -g -Wall -DPAN_ARCH=7 -DRWA_HOST_FAKE=1 $DEFS "${INC[@]}" -c "$HERE/rwavariant.c" -o "$OUT/rwavariant.o"
 clang++ -o "$OUT/rwavariant" "$OUT/rwavariant.o" "$OUT/rwa_mali.o" "$OUT/rwa_shader.o" "$OUT/rwa_helio.o" "$OUT/kmali.o" \
 	"${LIBS[@]}" -framework IOKit -framework CoreFoundation
-echo "$OUT/rwacheck $OUT/airdump $OUT/rwavariant"
+clang -std=c11 -O1 -g -Wall -DPAN_ARCH=7 -DRWA_HOST_FAKE=1 $DEFS "${INC[@]}" -c "$HERE/rwagen.c" -o "$OUT/rwagen.o"
+clang++ -o "$OUT/rwagen" "$OUT/rwagen.o" "$OUT/rwa_mali.o" "$OUT/rwa_shader.o" "$OUT/rwa_helio.o" "$OUT/kmali.o" \
+	"${LIBS[@]}" -framework IOKit -framework CoreFoundation
+echo "$OUT/rwacheck $OUT/airdump $OUT/rwavariant $OUT/rwagen"

@@ -697,6 +697,8 @@ struct rwa_render *rwm_render_compile(struct rwa_device *device, const char *lab
 unsigned rwm_generic_last_variant(void);
 struct rwa_render *rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t vertex_offset,
 				       struct rwa_buffer *fragment, size_t fragment_offset, bool wait);
+/* boot-arg rwm_capture_gen=1: a generic pipeline's functions, constants and shape, once (src/metal/capture.cpp) */
+void rwm_capture_generic(const char *label, const struct rwm_render_request *r, const struct rwa_render_shape *shape);
 void rwm_capture_pipeline(const char *label, const struct rwm_render_request *r, const struct rwa_render_shape *shape,
 			  const struct rwa_render *render);
 struct rwm_draw;

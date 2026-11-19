@@ -90,6 +90,40 @@ bool draw_captured;
 
 } // namespace
 
+/*
+ * Boot-arg rwm_capture_gen=1: each generic pipeline, once, as it is kept (generic_keep) -- its functions, constants
+ * and shape, "!!gen LABEL ..." -- for the Mac to build every variant configuration of userland/share/
+ * rwm-variants27.txt the way the phone does (userland/src/mali/tools/rwagen.c) into the stage cache.
+ */
+extern "C" void
+rwm_capture_generic(const char *label, const struct rwm_render_request *r, const struct rwa_render_shape *shape)
+{
+	char line[240];
+	const char *l;
+
+	if (label == nullptr || strstr(rwm_boot_args(), "rwm_capture_gen=1") == nullptr) {
+		return;
+	}
+	l = strncmp(label, "com.apple.coreanimation.", 24) == 0 ? label + 24 : label;
+	snprintf(line, sizeof(line), "!!gen %s functions %s %zu %016llx %s %zu %016llx", l,
+		 r->vertex_name ? r->vertex_name : "-", r->vertex_size, (unsigned long long)fnv(r->vertex, r->vertex_size),
+		 r->fragment_name ? r->fragment_name : "-", r->fragment_size,
+		 (unsigned long long)fnv(r->fragment, r->fragment_size));
+	say(line);
+	for (unsigned i = 0; i < r->vertex_constant_count; i++) {
+		snprintf(line, sizeof(line), "!!gen %s vconst %u %016llx", l, r->vertex_constants[i].index,
+			 (unsigned long long)r->vertex_constants[i].bits);
+		say(line);
+	}
+	for (unsigned i = 0; i < r->fragment_constant_count; i++) {
+		snprintf(line, sizeof(line), "!!gen %s fconst %u %016llx", l, r->fragment_constants[i].index,
+			 (unsigned long long)r->fragment_constants[i].bits);
+		say(line);
+	}
+	snprintf(line, sizeof(line), "gen-%s-shape", l);
+	say_bytes(line, shape, sizeof(*shape));
+}
+
 extern "C" void
 rwm_capture_pipeline(const char *label, const struct rwm_render_request *r, const struct rwa_render_shape *shape,
 		     const struct rwa_render *render)

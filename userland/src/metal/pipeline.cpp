@@ -214,6 +214,7 @@ generic_keep(struct rwa_device *device, const char *label, const struct rwm_rend
 	memcpy(g->vc, r->vertex_constants, g->nv * sizeof(g->vc[0]));
 	memcpy(g->fc, r->fragment_constants, g->nf * sizeof(g->fc[0]));
 	g->shape = *shape;
+	rwm_capture_generic(label, r, shape);
 	/* FragmentShaderConfig's fields end at byte 48 (has_lut_texture); 49 to 51 are its padding, and hold whatever
 	 * CoreAnimation's ring of uniforms had there -- run 93 built a variant again for each new value in them */
 	g->fragment_config = 49;
