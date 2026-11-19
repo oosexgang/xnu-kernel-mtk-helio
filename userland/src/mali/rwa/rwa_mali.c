@@ -2084,7 +2084,10 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	 * The tiles the fragment job goes through. A pass that clears nothing -- every target loaded, no depth -- leaves
 	 * what its draws do not touch as it was, so only the tiles under the union of its draws' scissors are gone
 	 * through (Panfrost's batch extent: panfrost_batch_union_scissor per draw, the whole frame for a clear); the
-	 * window server's passes that load its targets redraw what changed. Boot-arg rwn_fullbound=1: the whole frame.
+	 * window server's passes that load its targets redraw what changed. Off unless boot-arg rwn_bound=1: run 574
+	 * bounded 600 to 760 passes in 30 s and went through 90 to 96% of their tiles all the same, and it is the only
+	 * run with a two-minute stall in the swipes, compute jobs faulting near address 0 and a strip of noise at the
+	 * left edge of the second home page -- not tied to this, but nothing here is worth that doubt.
 	 */
 	unsigned tx0 = 0, ty0 = 0, tx1 = (b->width - 1) >> MALI_TILE_SHIFT, ty1 = (b->height - 1) >> MALI_TILE_SHIFT;
 	{
@@ -2095,7 +2098,7 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 			cleared |= b->color[i] && b->clear[i] && !(b->dontcare & (1u << i));
 		static int full = -1;
 		if (full < 0)
-			full = boot_arg("rwn_fullbound=1");
+			full = !boot_arg("rwn_bound=1");
 		if (!cleared && !full && b->draws && b->minx <= b->maxx && b->miny <= b->maxy) {
 			unsigned of = (tx1 + 1) * (ty1 + 1);
 			tx0 = b->minx >> MALI_TILE_SHIFT;
