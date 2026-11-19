@@ -2184,7 +2184,7 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 	if (actions) {
 		begins = false;
 		for (unsigned i = 0; i < color_count && i < 8; i++)
-			if (color[i] && (dr->color_load[i] == 2 || (dr->color_load[i] == 0 && boot_arg("rwn_dontcare=clear"))))
+			if (color[i] && (dr->color_load[i] == 2 || (dr->color_load[i] == 0 && !boot_arg("rwn_dontcare=load"))))
 				begins = true;
 	}
 	if (open_batch && (!same_targets(open_batch, color, level, color_count, depth) || begins || clear_depth ||
@@ -2201,11 +2201,11 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 			if (actions && i < 8) {
 				/* Clear: its own colour; DontCare: whatever is cheapest, and a clear costs the tile nothing
 				 * where a load reads the whole attachment */
-				/* DontCare is loaded, as Load: runs 540 and 541 cleared it (whole, then only the tiles drawn
-				 * into) and the Weather widget lost its blue either way -- the window server keeps what such
-				 * an attachment held -- for no GPU time saved (82% busy, 79%). Boot-arg rwn_dontcare=clear:
-				 * cleared, as run 541 */
-				if (dr->color_load[i] != 2 && !(dr->color_load[i] == 0 && boot_arg("rwn_dontcare=clear"))) {
+				/* DontCare is cleared (its tiles start at zero, untouched ones not written): runs 540 and 541
+				 * lost the Weather widget's blue doing so, but what lost it was the generic vertex stage's
+				 * sliding varyings (c26f18f) -- run 569 cleared DontCare with the widgets whole, ~8% less
+				 * fragment work idle, 16.4 frames a second swiping. Boot-arg rwn_dontcare=load: loaded */
+				if (dr->color_load[i] != 2 && !(dr->color_load[i] == 0 && !boot_arg("rwn_dontcare=load"))) {
 					if (dr->color_load[i] == 1)
 						stats.att_loaded++;
 					else
