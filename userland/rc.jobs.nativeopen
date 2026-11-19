@@ -1,0 +1,15 @@
+# The native Mali library opening applications (boot-arg mali_native=1): Wallet's question allowed as in
+# rc.jobs.nativehome, a picture of the home screen, then Clock, Calendar, Photos, Notes and Settings each opened from
+# its icon on the first page, left with the home button, and opened again -- the library's 30-second lines count the
+# command buffers and the pipelines made second by second, so an opening that CoreAnimation animates by the clock
+# while pipelines are built shows as seconds with no frames; the recipes and variants made are said for
+# tools/rwm-recipes.py and tools/rwm-variants.py.
+/hakios/bin/rwtouch wait 170 swipe 0.705 0.586 0.707 0.587 150
+/hakios/bin/rwtouch wait 40
+/hakios/bin/fbgrab -log home 750 0.7
+/hakios/bin/rwtouch tap 0.375 0.47 wait 6 button home wait 5 tap 0.375 0.47 wait 6 button home wait 5
+/hakios/bin/rwtouch tap 0.375 0.355 wait 6 button home wait 5 tap 0.375 0.355 wait 6 button home wait 5
+/hakios/bin/rwtouch tap 0.625 0.355 wait 6 button home wait 5 tap 0.625 0.355 wait 6 button home wait 5
+/hakios/bin/rwtouch tap 0.125 0.47 wait 6 button home wait 5 tap 0.125 0.47 wait 6 button home wait 5
+/hakios/bin/rwtouch tap 0.375 0.585 wait 6 button home wait 5 tap 0.375 0.585 wait 6 button home wait 5
+/hakios/bin/rwtouch notify com.hakios.rwm_recipes wait 30

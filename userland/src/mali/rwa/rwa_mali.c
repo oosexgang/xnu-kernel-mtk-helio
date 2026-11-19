@@ -123,6 +123,7 @@ static void report(void);
  * stage, fragment stage, attributes, varyings and jobs */
 static uint64_t phase_ns[7];
 static uint64_t lib_up_ns;  /* when the device was opened */
+static void sec_pipe_note(void);
 /* boot-arg rwn_profile=2: each draw of a full-screen pass of several targets, its pipeline and where the GPU wrote its
  * vertices' screen positions -- the watcher thread reads them once the pass's vertex job is done, and the 30-second
  * lines give each pipeline's draws and the pixels their bounding boxes cover (scissor and frame clipped) */
@@ -1014,6 +1015,7 @@ rwa_render_create(struct rwa_device *device, const void *vertex_bitcode, size_t 
 	GUARD();
 	stats.pipelines++;
 	stats.pipeline_ns += now_ns() - began;
+	sec_pipe_note();
 	return r;
 }
 
@@ -1228,7 +1230,22 @@ static struct {
 	unsigned nchunks;
 } gq[GQ];
 static unsigned gq_head, gq_tail;
+/* each second of the 30 (from sec_base, seconds of the library): command buffers committed and pipelines made -- an
+ * application's opening, which CoreAnimation animates by the clock, seen second by second (under gq_lock) */
+static uint16_t sec_frames[32], sec_pipes[32];
+static uint64_t sec_base;
 static pthread_mutex_t gq_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* a pipeline made, counted in its second (sec_pipes) */
+static void
+sec_pipe_note(void)
+{
+	uint64_t sec = (now_ns() - lib_up_ns) / 1000000000ull;
+	pthread_mutex_lock(&gq_lock);
+	if (sec >= sec_base && sec - sec_base < 32 && sec_pipes[sec - sec_base] < 0xffff)
+		sec_pipes[sec - sec_base]++;
+	pthread_mutex_unlock(&gq_lock);
+}
 static pthread_cond_t gq_cond = PTHREAD_COND_INITIALIZER;
 static uint64_t gpu_busy_ns, gpu_latency_ns, gpu_passes, gpu_last_done, gpu_latency_max;
 /* by kind (width >= 700, >= 300, >= 100, smaller; several targets; loaded): passes, draws, vertex+tiler and fragment
@@ -3643,6 +3660,11 @@ rwa_flush_seq(struct rwa_device *device)
 			uint64_t gap = (now - was + 8333333) / 16666667;   /* refreshes, rounded */
 			frame_gap[MIN2(MAX2(gap, 1), 7) - 1]++;
 		}
+		{
+			uint64_t sec = (now - lib_up_ns) / 1000000000ull;
+			if (sec >= sec_base && sec - sec_base < 32 && sec_frames[sec - sec_base] < 0xffff)
+				sec_frames[sec - sec_base]++;
+		}
 		if (was && now - was < 80000000ull && tl_begin && tl_begin < now) {
 			tl_frames++;
 			tl_span_ns += now - tl_begin;
@@ -3811,6 +3833,23 @@ report(void)
 				     (unsigned long long)g[5], (unsigned long long)g[6]);
 			}
 			/* (gq_lock held) */
+			{
+				uint64_t now_sec = (now_ns() - lib_up_ns) / 1000000000ull;
+				unsigned span = (unsigned)MIN2(now_sec - MIN2(sec_base, now_sec), 32);
+				char fl[160] = "", pl[160] = "";
+				int fn = 0, pn = 0;
+				bool any_pipe = false;
+				for (unsigned i = 0; i < span; i++) {
+					fn += snprintf(fl + fn, sizeof(fl) - fn, "%s%u", i ? " " : "", sec_frames[i]);
+					pn += snprintf(pl + pn, sizeof(pl) - pn, "%s%u", i ? " " : "", sec_pipes[i]);
+					any_pipe |= sec_pipes[i] != 0;
+				}
+				keep("30s: from %llu s, command buffers each second: %s%s%s", (unsigned long long)sec_base, fl,
+				     any_pipe ? "; pipelines made: " : "", any_pipe ? pl : "");
+				memset(sec_frames, 0, sizeof(sec_frames));
+				memset(sec_pipes, 0, sizeof(sec_pipes));
+				sec_base = now_sec;
+			}
 			if (tl_frames)
 				keep("30s: %llu frames in motion: the first draw with the GPU at the frame before %llu, after it went "
 				     "idle %llu (%.1f ms after); first draw to commit %.1f ms", (unsigned long long)tl_frames,
