@@ -3551,8 +3551,25 @@ rwa_dispatch_buffers(struct rwa_compute *c, const struct rwa_bindings *bindings,
 	flush_batch("a dispatch");
 	if (groups[0] == 0 || groups[1] == 0 || groups[2] == 0)
 		return 0;
-	if (c->cs.info.wls_size || c->cs.air.threadgroup_bytes) {
-		say(why, why_size, "%s uses threadgroup memory (not served yet by the native library)", c->cs.name);
+	/*
+	 * A threadgroup buffer argument ([[threadgroup(0)]]) is sized at the dispatch, -setThreadgroupMemoryLength:
+	 * atIndex:, which neither the plug-in nor rwa_dispatch carries; its shader addresses it from 0 and the
+	 * compiler counts none of it, so it went to the GPU with no workgroup memory at all -- CoreAnimation's
+	 * compute_average_luma faulted at 0x800 and 0x880 (runs 574, 578), a second's stall and a reset of the GPU each.
+	 * Refused like the static kind, as the Gallium library refuses it, until the length comes with the dispatch.
+	 */
+	bool dynamic_tg = false;
+	for (unsigned i = 0; i < c->cs.air.num_resources; i++)
+		dynamic_tg |= c->cs.air.resources[i].kind == AIR_RESOURCE_THREADGROUP_BUFFER;
+	if (c->cs.info.wls_size || c->cs.air.threadgroup_bytes || dynamic_tg) {
+		static unsigned said;
+		if (dynamic_tg && said < 4) {
+			said++;
+			keep("%s: a threadgroup buffer sized at the dispatch, %ux%ux%u groups of %ux%ux%u: refused (%u so far)",
+			     c->cs.name, groups[0], groups[1], groups[2], group_size[0], group_size[1], group_size[2], said);
+		}
+		say(why, why_size, "%s uses threadgroup memory%s (not served yet by the native library)", c->cs.name,
+		    dynamic_tg ? " sized at the dispatch" : "");
 		return -1;
 	}
 	struct batch *b = calloc(1, sizeof(*b));
