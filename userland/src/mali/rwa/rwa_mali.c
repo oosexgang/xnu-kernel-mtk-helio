@@ -115,6 +115,7 @@ static struct {
 	uint64_t since, draws, refused, batches, preloads, clears, cpu_syncs, draw_ns, flush_ns, pipelines, pipeline_ns;
 	uint64_t refused_pipelines, imports, multiload_cleared;
 	uint64_t att_loaded, att_cleared, att_dontcare_load, att_stored, att_discarded;
+	uint64_t vt_parts;   /* rwn_vtsplit: vertex and tiler parts sent before their pass's submit */
 } stats;
 
 static void report(void);
@@ -183,6 +184,24 @@ boot_arg(const char *text)
 	}
 	return strstr(args, text) != NULL;
 #endif
+}
+
+/* boot-arg NAME=N (NAME with its '='): N, or DEFAULT without it */
+static unsigned
+boot_arg_uint(const char *name, unsigned dflt)
+{
+	char args[1024] = "";
+#ifdef RWA_HOST_FAKE
+	const char *env = getenv("RWA_BOOTARGS");
+	if (env)
+		snprintf(args, sizeof(args), "%s", env);
+#else
+	size_t n = sizeof(args) - 1;
+	if (sysctlbyname("kern.bootargs", args, &n, NULL, 0) != 0)
+		args[0] = 0;
+#endif
+	const char *at = strstr(args, name);
+	return at ? (unsigned)strtoul(at + strlen(name), NULL, 10) : dflt;
 }
 
 /* --- objects ------------------------------------------------------------------------------------------------------- */
@@ -1041,8 +1060,13 @@ struct batch {
 	 * into them, and read back from them, took ~250 us (run 536). NULL: a big one, written in place */
 	uint8_t *shadow[512];
 	uint32_t fill[512];
+	uint32_t up[512];   /* how much of each chunk is already in the GPU's memory (pool_upload, by parts: vt_flush) */
 	unsigned nchunks;
 	uint64_t chunk_used;
+	/* rwn_vtsplit: the vertex and tiler jobs already sent (vt_flush), and the thread storage they were sent with */
+	unsigned vt_parts;
+	bool tls_frozen;
+	unsigned tls_frozen_size;
 	/* what only the GPU writes -- the vertex jobs' positions, varyings and point sizes -- in chunks of its own with
 	 * no shadow (pool_gpu), not copied at the submit */
 	uint8_t *gpu_cpu;
@@ -1418,13 +1442,16 @@ pool_big(struct batch *b, size_t size, char *why, size_t why_size)
 		b->chunks[b->nchunks] = b->chunks[b->nchunks - 1];
 		b->shadow[b->nchunks] = b->shadow[b->nchunks - 1];
 		b->fill[b->nchunks] = b->fill[b->nchunks - 1];
+		b->up[b->nchunks] = b->up[b->nchunks - 1];
 		b->chunks[b->nchunks - 1] = big;
 		b->shadow[b->nchunks - 1] = NULL;
 		b->fill[b->nchunks - 1] = 0;
+		b->up[b->nchunks - 1] = 0;
 	} else {
 		b->chunks[0] = big;
 		b->shadow[0] = NULL;
 		b->fill[0] = 0;
+		b->up[0] = 0;
 		b->chunk_used = CHUNK;   /* no small chunk yet */
 	}
 	b->nchunks++;
@@ -1483,6 +1510,7 @@ pool_alloc(struct batch *b, size_t size, size_t align, char *why, size_t why_siz
 			return p;
 		b->shadow[b->nchunks] = shadow_get();
 		b->fill[b->nchunks] = 0;
+		b->up[b->nchunks] = 0;
 		b->chunks[b->nchunks++] = c;
 		at = 0;
 	}
@@ -1495,15 +1523,18 @@ pool_alloc(struct batch *b, size_t size, size_t align, char *why, size_t why_siz
 	return p;
 }
 
-/* the batch's descriptors to the GPU's memory, each chunk as far as it was filled, in one copy each */
+/* the batch's descriptors to the GPU's memory, each chunk as far as it was filled, in one copy each -- from where the
+ * last upload stopped: a pass whose vertex and tiler jobs went in parts (vt_flush) is uploaded in parts, and what went
+ * already is not copied again (the tiler context among it, which the GPU writes to) */
 static void
 pool_upload(struct batch *b)
 {
 	uint64_t t = now_ns();
 	for (unsigned i = 0; i < b->nchunks; i++)
-		if (b->shadow[i] && b->fill[i]) {
-			memcpy(b->chunks[i]->cpu, b->shadow[i], b->fill[i]);
-			upload_bytes += b->fill[i];
+		if (b->shadow[i] && b->fill[i] > b->up[i]) {
+			memcpy(b->chunks[i]->cpu + b->up[i], b->shadow[i] + b->up[i], b->fill[i] - b->up[i]);
+			upload_bytes += b->fill[i] - b->up[i];
+			b->up[i] = b->fill[i];
 		}
 	upload_ns += now_ns() - t;
 }
@@ -2026,13 +2057,10 @@ emit_framebuffer(struct batch *b, char *why, size_t why_size)
 	return fb.gpu | tag.opaque[0];
 }
 
+/* the thread storage: the draws' stack (panfrost_batch_get_scratchpad, pan_emit_tls), as big as the draws so far ask */
 static int
-submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
+tls_pack(struct batch *b, char *why, size_t why_size)
 {
-	struct rwa_device *d = the_device;
-	uint64_t began = now_ns();
-
-	/* the thread storage: the draws' stack (panfrost_batch_get_scratchpad, pan_emit_tls) */
 	struct ptr scratch = { NULL, 0 };
 	if (b->tls_size) {
 		unsigned total = panfrost_get_total_stack_size(b->tls_size, thread_tls_alloc ? thread_tls_alloc : 256,
@@ -2048,6 +2076,55 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		}
 		cfg.wls_instances = MALI_LOCAL_STORAGE_NO_WORKGROUP_MEM;
 	}
+	return 0;
+}
+
+/*
+ * Boot-arg rwn_vtsplit=N: a full-screen pass of several targets sends its vertex and tiler jobs every N draws, while
+ * the rest is still being recorded, instead of all at its submit. The window server's frame is recorded at -commit
+ * (6.6 ms, run 575) and its full pass is the last, so its ~3 ms of vertex and tiler work came after all of that; run
+ * 575 also showed every frame in motion begins only once the GPU is done with the one before, so what the GPU does
+ * after the commit is the frame's time. The parts go one after another on the kernel's one queue, the tiler context
+ * and its heap carry on in memory from one part to the next, and the thread storage goes with the first part as big
+ * as the draws so far ask (a later draw that asks more takes a descriptor of its own: draw).
+ */
+static int
+vt_flush(struct batch *b, char *why, size_t why_size)
+{
+	if (b->first_job == 0)
+		return 0;
+	if (!b->tls_frozen) {
+		if (tls_pack(b, why, why_size) != 0)
+			return -1;
+		b->tls_frozen = true;
+		b->tls_frozen_size = b->tls_size;
+	}
+	for (unsigned i = 0; i < b->nchunks; i++)
+		use_bo(b, b->chunks[i]);
+	pool_upload(b);
+	uint64_t seq = 0;
+	int e = km_submit(b->first_job, false, b->bos, b->nbos, &seq);
+	if (e != 0) {
+		say(why, why_size, "a part of the vertex and tiler jobs was not taken: %s", strerror(e));
+		return -1;
+	}
+	b->first_job = 0;
+	b->last_header = NULL;
+	b->job_index = 0;
+	b->last_tiler = 0;
+	b->vt_parts++;
+	stats.vt_parts++;
+	return 0;
+}
+
+static int
+submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
+{
+	struct rwa_device *d = the_device;
+	uint64_t began = now_ns();
+
+	if (!b->tls_frozen && tls_pack(b, why, why_size) != 0)
+		return -1;
 	uint64_t fbd = emit_framebuffer(b, why, why_size);
 	if (fbd == 0)
 		return -1;
@@ -3240,6 +3317,14 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 		cfg.minimum_z = minz;
 		cfg.maximum_z = maxz;
 	}
+	if (b->tls_frozen && MAX2(r->vs.info.tls_size, r->fs.info.tls_size) > b->tls_frozen_size) {
+		/* the thread storage went with a part already sent (vt_flush), smaller than this draw asks: a descriptor of
+		 * its own for this draw and those after, filled at the submit (or the next part) */
+		b->tls = pool_alloc(b, pan_size(LOCAL_STORAGE), 64, why, why_size);
+		if (b->tls.cpu == NULL)
+			return -1;
+		b->tls_frozen = false;
+	}
 	b->tls_size = MAX3(b->tls_size, r->vs.info.tls_size, r->fs.info.tls_size);
 	b->minx = MIN2(b->minx, (unsigned)sx0);
 	b->miny = MIN2(b->miny, (unsigned)sy0);
@@ -3341,6 +3426,14 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	b->draws++;
 	if (b->width >= 700 && b->color_count > 1)
 		heavy_note(r);
+	{
+		static unsigned every = ~0u;
+		if (every == ~0u)
+			every = boot_arg_uint("rwn_vtsplit=", 0);
+		if (every && b->width >= 700 && b->color_count > 1 && b->job_index >= 2 * every &&
+		    vt_flush(b, why, why_size) != 0)
+			return -1;
+	}
 	(void)d;
 	PHASE(6);
 #undef PHASE
@@ -3650,13 +3743,15 @@ report(void)
 		surface_frames = 0;
 		keep("30s: us a draw, vs/fs: buffers %.1f/%.1f, textures %.1f/%.1f, samplers %.1f/%.1f, sysvals %.1f/%.1f, "
 		     "pushed %.1f/%.1f; upload %.1f us a pass, %.1f KB a pass; buffers off 16 bytes %llu copied (%.1f KB "
-		     "each), %llu given as they are",
+		     "each), %llu given as they are; %llu vertex and tiler parts sent ahead",
 		     stage_ns[0][0] / 1e3 / n, stage_ns[1][0] / 1e3 / n, stage_ns[0][1] / 1e3 / n, stage_ns[1][1] / 1e3 / n,
 		     stage_ns[0][2] / 1e3 / n, stage_ns[1][2] / 1e3 / n, stage_ns[0][3] / 1e3 / n, stage_ns[1][3] / 1e3 / n,
 		     stage_ns[0][4] / 1e3 / n, stage_ns[1][4] / 1e3 / n, upload_ns / 1e3 / MAX2(stats.batches, 1),
 		     upload_bytes / 1024.0 / MAX2(stats.batches, 1), (unsigned long long)ubo_copied,
-		     ubo_copied_bytes / 1024.0 / MAX2(ubo_copied, 1), (unsigned long long)ubo_given);
+		     ubo_copied_bytes / 1024.0 / MAX2(ubo_copied, 1), (unsigned long long)ubo_given,
+		     (unsigned long long)stats.vt_parts);
 		ubo_copied = ubo_copied_bytes = ubo_given = 0;
+		stats.vt_parts = 0;
 		keep("30s: texture probe: %llu looked at, one colour: %llu white, %llu zero, %llu other, %llu LOST (held more before)",
 		     (unsigned long long)probe_count, (unsigned long long)probe_white, (unsigned long long)probe_zero,
 		     (unsigned long long)probe_flat, (unsigned long long)probe_lost);

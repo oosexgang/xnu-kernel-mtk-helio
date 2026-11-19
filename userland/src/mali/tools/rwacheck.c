@@ -237,8 +237,16 @@ main(int argc, char **argv)
 		struct rwa_texture *texs[16] = { 0 };
 		struct rwa_vertex_stream streams[31] = { 0 };
 		bool fine = true;
+		/* RWACHECK_SIZE=N: targets N by 2N instead of 64 by 64; RWACHECK_DRAWS=N: the draw N times into one pass (a
+		 * full-screen pass of many draws, as rwn_vtsplit's parts want) */
+		const char *size_env = getenv("RWACHECK_SIZE"), *draws_env = getenv("RWACHECK_DRAWS");
+		unsigned side = size_env ? (unsigned)strtoul(size_env, NULL, 0) : 64;
+		unsigned repeat = draws_env ? (unsigned)strtoul(draws_env, NULL, 0) : 1;
+		if (repeat == 0)
+			repeat = 1;
 		for (unsigned i = 0; i < r.shape.color_count && fine; i++) {
-			struct rwa_texture_shape ts = { r.shape.color_format[i], 2, 64, 64, 1, 1, 1, 1, 5 };
+			struct rwa_texture_shape ts = { r.shape.color_format[i], 2, side, size_env ? 2 * side : 64, 1, 1, 1, 1,
+							size_env ? 1 : 5 };
 			color[i] = rwa_texture_create(dev, &ts, why, sizeof(why));
 			fine = color[i] != NULL;
 		}
@@ -275,6 +283,8 @@ main(int argc, char **argv)
 			d.vertex_buffer_table_count = d.fragment_buffer_table_count = 31;
 		}
 		int code = 0;
+		for (unsigned k = 1; k < repeat && fine; k++)
+			fine = rwa_render_draw(p, &d, why, sizeof(why)) == 0;
 		if (!(fine && rwa_render_draw(p, &d, why, sizeof(why)) == 0 && rwa_finish(dev, why, sizeof(why)) == 0)) {
 			printf("  draw refused: %s\n", why);
 			code = 2;
