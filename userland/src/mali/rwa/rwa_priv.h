@@ -53,6 +53,18 @@ enum rwa_sysval {
 /* one compiled stage */
 extern uint64_t rwa_compile_ns[3];
 
+/* a MediaTek Helio chip and its GPU (rwa_helio.c) */
+struct rwa_helio {
+	const char *soc;              /* hw.board.soc, soc/NAME.toml: "mt6768" */
+	const char *name;             /* "Helio G85 (MT6768)" */
+	const char *gpu;              /* "Mali-G52 MC2" */
+	unsigned gpu_id[2];           /* Panfrost's product ids (0: no Mali) */
+	bool run;                     /* run on a phone with this library */
+};
+const struct rwa_helio *rwa_helio_find(const char *soc, unsigned gpu_id);
+const char *rwa_board_soc(void);
+const char *rwa_arch_status(unsigned arch, unsigned gpu_id);
+
 struct rwa_stage {
 	void *mem;                    /* ralloc context: the AIR info's strings and arrays live in it */
 	struct air_shader_info air;

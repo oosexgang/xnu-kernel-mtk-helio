@@ -336,8 +336,14 @@ rwa_device_open(char *why, size_t why_size)
 		return NULL;
 	}
 	d->gpu_id = km_gpu_id();
+	/* which Helio and which Mali (rwa_helio.c): said at the start, and in the refusal of a GPU not served */
+	const char *soc = rwa_board_soc();
+	const struct rwa_helio *h = rwa_helio_find(soc[0] ? soc : NULL, d->gpu_id);
+	const struct panfrost_model *model = panfrost_get_model(d->gpu_id, 0);
 	if (pan_arch(d->gpu_id) != 7) {
-		say(why, why_size, "the GPU is product %#x, not a Bifrost v7 one: these are v7 descriptors", d->gpu_id);
+		say(why, why_size, "%s%s%s: the GPU is product %#x (%s), %s", h ? h->name : (soc[0] ? soc : "this board"),
+		    h ? ", " : "", h ? h->gpu : "", d->gpu_id, model ? model->name : "not in Panfrost's table",
+		    rwa_arch_status(pan_arch(d->gpu_id), d->gpu_id));
 		free(d);
 		return NULL;
 	}
@@ -349,7 +355,8 @@ rwa_device_open(char *why, size_t why_size)
 	if (km_param(39, &v) == 0)                            /* THREAD_TLS_ALLOC */
 		thread_tls_alloc = (unsigned)v;
 	snprintf(d->name, sizeof(d->name), "Mali-G52 r1 (hakios-mali, native)");
-	d->tile_budget = 8192;                               /* the G52's 16 KB tile buffer, halved (panfrost_query_optimal_tib_size) */
+	/* the model's tile buffer, halved (panfrost_query_optimal_tib_size): the G52's and G76's 16 KB */
+	d->tile_budget = model && model->tilebuffer_size ? model->tilebuffer_size / 2 : 8192;
 	d->tiler_heap = km_bo_new(HEAP_BYTES, why, why_size);
 	d->sample_positions = d->tiler_heap ? km_bo_new(4096, why, why_size) : NULL;
 	d->dummy = d->sample_positions ? km_bo_new(65536, why, why_size) : NULL;
@@ -382,8 +389,10 @@ rwa_device_open(char *why, size_t why_size)
 	the_device = d;
 	Dl_info dl = { 0 };
 	dladdr((const void *)rwa_device_open, &dl);
-	keep("native Mali library up at %p: gpu %#x, %u tiler levels, %u core ids, TLS %u", dl.dli_fbase, d->gpu_id,
-	     tiler_levels, core_id_range, thread_tls_alloc);
+	keep("native Mali library up at %p: gpu %#x (%s), %u tiler levels, %u core ids, TLS %u, tile budget %u; %s%s%s%s",
+	     dl.dli_fbase, d->gpu_id, model ? model->name : "?", tiler_levels, core_id_range, thread_tls_alloc,
+	     d->tile_budget, soc[0] ? soc : "no hw.board.soc", h ? " = " : "", h ? h->name : "",
+	     h && !h->run ? " (not run on a phone before)" : "");
 	memory_bench(d->dummy->cpu + 32768);
 	return d;
 }
