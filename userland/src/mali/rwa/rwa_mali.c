@@ -1043,6 +1043,10 @@ struct batch {
 	uint32_t fill[512];
 	unsigned nchunks;
 	uint64_t chunk_used;
+	/* what only the GPU writes -- the vertex jobs' positions, varyings and point sizes -- in chunks of its own with
+	 * no shadow (pool_gpu), not copied at the submit */
+	uint8_t *gpu_cpu;
+	uint64_t gpu_gpu, gpu_used;
 	struct km_bo **bos;
 	unsigned nbos, bos_room;
 	uint32_t mark;
@@ -1426,6 +1430,38 @@ pool_big(struct batch *b, size_t size, char *why, size_t why_size)
 	b->nchunks++;
 	p.cpu = big->cpu;
 	p.gpu = big->gpu;
+	return p;
+}
+
+/*
+ * Memory only the GPU writes: the vertex jobs' positions, varyings and point sizes. Until run 576 they came from the
+ * shadowed chunks and were copied, garbage as they are, to the GPU's memory at every submit -- with the path
+ * rasterizer's ~19000 instances of 4 vertices a frame, most of the 500 to 800 KB copied a pass (run 573). Chunks of
+ * their own now (pool_big's, written in place). Boot-arg rwn_gpupool=0: from the shadowed chunks as before.
+ */
+static struct ptr pool_alloc(struct batch *b, size_t size, size_t align, char *why, size_t why_size);
+
+static struct ptr
+pool_gpu(struct batch *b, size_t size, size_t align, char *why, size_t why_size)
+{
+	static int off = -1;
+	if (off < 0)
+		off = boot_arg("rwn_gpupool=0");
+	if (off)
+		return pool_alloc(b, size, align, why, why_size);
+	if (size > CHUNK)
+		return pool_big(b, size, why, why_size);
+	uint64_t at = ALIGN_POT(b->gpu_used, align);
+	if (b->gpu_cpu == NULL || at + size > CHUNK) {
+		struct ptr c = pool_big(b, CHUNK, why, why_size);
+		if (c.cpu == NULL)
+			return c;
+		b->gpu_cpu = c.cpu;
+		b->gpu_gpu = c.gpu;
+		at = 0;
+	}
+	b->gpu_used = at + size;
+	struct ptr p = { b->gpu_cpu + at, b->gpu_gpu + at };
 	return p;
 }
 
@@ -3129,7 +3165,7 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	/* the varyings: records of both stages and their buffers -- general, position, point size, the end */
 	struct ptr vrec = pool_alloc(b, (r->vs_out_count + r->fs_in_count + 1) * pan_size(ATTRIBUTE), 64, why, why_size);
 	struct ptr vbuf = pool_alloc(b, 4 * pan_size(ATTRIBUTE_BUFFER), 64, why, why_size);
-	struct ptr general = { NULL, 0 }, pos = pool_alloc(b, 16 * alloc, 64, why, why_size), psiz = { NULL, 0 };
+	struct ptr general = { NULL, 0 }, pos = pool_gpu(b, 16 * alloc, 64, why, why_size), psiz = { NULL, 0 };
 	const bool small_say = b->width <= 800 && b->height <= 800 && b->color_count && b->color[0] && b->clear[0] &&
 			       !b->color[0]->store->surface_id && !boot_arg("rwn_smalllog=0");
 	if (pos.cpu && ((b->width >= 700 && b->color_count > 1 && boot_arg("rwn_profile=2")) || small_say) &&
@@ -3154,9 +3190,9 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 		}
 	}
 	if (r->general_stride)
-		general = pool_alloc(b, (size_t)r->general_stride * alloc, 64, why, why_size);
+		general = pool_gpu(b, (size_t)r->general_stride * alloc, 64, why, why_size);
 	if (r->writes_psiz)
-		psiz = pool_alloc(b, 2 * alloc, 64, why, why_size);
+		psiz = pool_gpu(b, 2 * alloc, 64, why, why_size);
 	if (!vrec.cpu || !vbuf.cpu || !pos.cpu || (r->general_stride && !general.cpu) || (r->writes_psiz && !psiz.cpu))
 		return -1;
 	for (unsigned i = 0; i < r->vs_out_count + r->fs_in_count; i++) {
