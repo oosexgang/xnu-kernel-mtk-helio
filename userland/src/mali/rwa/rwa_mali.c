@@ -1218,6 +1218,8 @@ static uint64_t prof_passes[4], prof_draws[4], prof_ns[4];   /* rwn_profile=1: b
 static uint64_t tl_begin, tl_begin_idle;   /* the first draw's time; 0 or how long the GPU had been idle then */
 static bool tl_begin_busy;
 static uint64_t tl_frames, tl_busy, tl_idle, tl_idle_ns, tl_span_ns;
+/* the time between one command buffer committed and the next, in 60 Hz refreshes: 1, 2, 3, 4, 5, 6 and more */
+static uint64_t frame_gap[7];
 static bool gq_running;
 
 static void *
@@ -3498,31 +3500,17 @@ rwa_flush_seq(struct rwa_device *device)
 	(void)device;
 	commits++;
 	flush_batch("the command buffer is committed");
-	return km_last_seq();
-}
-
-int
-rwa_wait_seq(uint64_t seq, int64_t timeout_ns)
-{
-	return km_wait(seq, timeout_ns);
-}
-
-
-/* the time between one frame handed to the display and the next, in 60 Hz refreshes: <= 1, 2, 3, 4, 5, 6 and longer */
-static uint64_t frame_gap[7];
-
-int
-rwa_surface_seq(uint32_t surface, uint64_t seq)
-{
-	if (seq != ~0ull) {
+	/* a command buffer is a frame of the window server's (one a frame, run at -commit on its own thread without
+	 * rwm_async=1, and rwa_surface_seq not called then): the time since the one before, and its first draw's */
+	{
 		static uint64_t last;
-		uint64_t now = now_ns(), was = __atomic_exchange_n(&last, now, __ATOMIC_RELAXED);
-		surface_frames++;
+		uint64_t now = now_ns(), was = last;
+		last = now;
+		pthread_mutex_lock(&gq_lock);
 		if (was) {
 			uint64_t gap = (now - was + 8333333) / 16666667;   /* refreshes, rounded */
-			__atomic_fetch_add(&frame_gap[MIN2(MAX2(gap, 1), 7) - 1], 1, __ATOMIC_RELAXED);
+			frame_gap[MIN2(MAX2(gap, 1), 7) - 1]++;
 		}
-		pthread_mutex_lock(&gq_lock);
 		if (was && now - was < 80000000ull && tl_begin && tl_begin < now) {
 			tl_frames++;
 			tl_span_ns += now - tl_begin;
@@ -3536,6 +3524,22 @@ rwa_surface_seq(uint32_t surface, uint64_t seq)
 		tl_begin = 0;
 		pthread_mutex_unlock(&gq_lock);
 	}
+	return km_last_seq();
+}
+
+int
+rwa_wait_seq(uint64_t seq, int64_t timeout_ns)
+{
+	return km_wait(seq, timeout_ns);
+}
+
+
+
+int
+rwa_surface_seq(uint32_t surface, uint64_t seq)
+{
+	if (seq != ~0ull)
+		surface_frames++;
 	return km_surface_seq(surface, seq);
 }
 
@@ -3661,11 +3665,13 @@ report(void)
 			keep("%s", line);
 			{
 				uint64_t g[7];
-				for (unsigned i = 0; i < 7; i++)
-					g[i] = __atomic_exchange_n(&frame_gap[i], 0, __ATOMIC_RELAXED);
+				for (unsigned i = 0; i < 7; i++) {   /* (gq_lock held) */
+					g[i] = frame_gap[i];
+					frame_gap[i] = 0;
+				}
 				/* swipes: how many frames came after 2 refreshes (30 a second), 3 (20), ... -- the idle 10 a second
 				 * is 6 */
-				keep("30s: frames to the display by the refreshes since the one before: 1 %llu, 2 %llu, 3 %llu, "
+				keep("30s: command buffers by the refreshes since the one before: 1 %llu, 2 %llu, 3 %llu, "
 				     "4 %llu, 5 %llu, 6 %llu, more %llu", (unsigned long long)g[0], (unsigned long long)g[1],
 				     (unsigned long long)g[2], (unsigned long long)g[3], (unsigned long long)g[4],
 				     (unsigned long long)g[5], (unsigned long long)g[6]);
@@ -3673,7 +3679,7 @@ report(void)
 			/* (gq_lock held) */
 			if (tl_frames)
 				keep("30s: %llu frames in motion: the first draw with the GPU at the frame before %llu, after it went "
-				     "idle %llu (%.1f ms after); first draw to the display %.1f ms", (unsigned long long)tl_frames,
+				     "idle %llu (%.1f ms after); first draw to commit %.1f ms", (unsigned long long)tl_frames,
 				     (unsigned long long)tl_busy, (unsigned long long)tl_idle, tl_idle_ns / 1e6 / MAX2(tl_idle, 1),
 				     tl_span_ns / 1e6 / tl_frames);
 			tl_frames = tl_busy = tl_idle = tl_idle_ns = tl_span_ns = 0;
