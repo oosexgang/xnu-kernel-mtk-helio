@@ -981,6 +981,10 @@ rw_warm_start(id metal_device, struct rwa_device *device)
 
 		pthread_attr_init(&attr);
 		pthread_attr_setstacksize(&attr, 16 << 20);    /* the library's recursion, as rw_on_big_stack */
+		if (rwm_bgprio()) {
+			/* below the frames (src/metal/pipeline.cpp, rwm_bgprio) */
+			pthread_attr_set_qos_class_np(&attr, QOS_CLASS_UTILITY, 0);
+		}
 		if (pthread_create(&thread, &attr, rw_warm_main, device) == 0) {
 			pthread_detach(thread);
 		}

@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/qos.h>
 #include <sys/sysctl.h>
 
 namespace {
@@ -399,6 +400,26 @@ async_variant_main(void *context)
 	return nullptr;
 }
 
+/*
+ * Boot-arg rwm_bgprio=0: the builds ahead as before. Otherwise the variants built ahead go one at a time, whichever
+ * generic pipeline they are of, at QOS_CLASS_UTILITY, and those a draw started at QOS_CLASS_USER_INITIATED: with a
+ * thread a generic pipeline, all building at once at the window server's own priority on its four cores, the
+ * warm-up of runs 581 to 583 took the whole processor for minutes, and the frames of applications opening meanwhile
+ * came 0 to 3 a second.
+ */
+static pthread_mutex_t prebuild_one = PTHREAD_MUTEX_INITIALIZER;
+
+bool
+bgprio_on(void)
+{
+	static int on = -1;
+
+	if (on < 0) {
+		on = !boot_arg("rwm_bgprio=0");
+	}
+	return on;
+}
+
 void *
 prebuild_main(void *context)
 {
@@ -415,6 +436,9 @@ prebuild_main(void *context)
 		if (strcmp(c->label, label) != 0) {
 			continue;
 		}
+		if (bgprio_on()) {
+			pthread_mutex_lock(&prebuild_one);
+		}
 		pthread_mutex_lock(&generic_lock);
 		for (unsigned i = 0; i < g->nvariants && !known; i++) {
 			known = memcmp(g->variants[i].vertex, c->vertex, sizeof(c->vertex)) == 0 &&
@@ -429,6 +453,9 @@ prebuild_main(void *context)
 		}
 		pthread_mutex_unlock(&generic_lock);
 		if (v == nullptr) {
+			if (bgprio_on()) {
+				pthread_mutex_unlock(&prebuild_one);
+			}
 			continue;
 		}
 
@@ -445,6 +472,9 @@ prebuild_main(void *context)
 		v->building = false;
 		pthread_cond_broadcast(&generic_cond);
 		pthread_mutex_unlock(&generic_lock);
+		if (bgprio_on()) {
+			pthread_mutex_unlock(&prebuild_one);
+		}
 		built += call.render != nullptr;
 	}
 	if (built != 0) {
@@ -474,6 +504,9 @@ prebuild_start(struct generic_record *g)
 	pthread_attr_init(&attr);
 	pthread_attr_setstacksize(&attr, 1u << 20);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	if (bgprio_on()) {
+		pthread_attr_set_qos_class_np(&attr, QOS_CLASS_UTILITY, 0);
+	}
 	if (pthread_create(&thread, &attr, prebuild_main, g) != 0) {
 		rwm_print("no thread to build %s's variants ahead\n", g->label);
 	}
@@ -502,6 +535,12 @@ config_of(struct rwa_buffer *buffer, size_t offset, unsigned size, uint8_t *out)
 }
 
 } // namespace
+
+extern "C" bool
+rwm_bgprio(void)
+{
+	return bgprio_on();
+}
 
 extern "C" bool
 rwm_render_prepare(const char *label, struct rwa_render_shape *shape, bool has_vertex_descriptor,
@@ -748,6 +787,9 @@ rwm_generic_variant(struct rwa_render *base, struct rwa_buffer *vertex, size_t v
 			pthread_attr_init(&attr);
 			pthread_attr_setstacksize(&attr, 1u << 20);
 			pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+			if (bgprio_on()) {
+				pthread_attr_set_qos_class_np(&attr, QOS_CLASS_USER_INITIATED, 0);
+			}
 			started = pthread_create(&thread, &attr, async_variant_main, a) == 0;
 			pthread_attr_destroy(&attr);
 			if (!started) {

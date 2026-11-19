@@ -718,6 +718,8 @@ bool rwm_plib_modules_for(const char *label, bool allow_near, const void **verte
  */
 void rwm_compile_lock(void);
 void rwm_compile_unlock(void);
+/* the builds ahead below the frames, one variant at a time (src/metal/pipeline.cpp; boot-arg rwm_bgprio=0: not) */
+bool rwm_bgprio(void);
 /* CoreAnimation's draw.PBGRAXm_ pipelines given the fixed function's premultiplied source-over (the Mali reads
  * [[color(0)]] as 0); boot-arg rwm_xm_blend=0 leaves them */
 void rwm_xm_blend_apply(const char *label, struct rwa_render_shape *shape);

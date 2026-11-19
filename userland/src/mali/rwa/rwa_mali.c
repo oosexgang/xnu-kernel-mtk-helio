@@ -2097,7 +2097,8 @@ tls_pack(struct batch *b, char *why, size_t why_size)
 }
 
 /*
- * Boot-arg rwn_vtsplit=N: a full-screen pass of several targets sends its vertex and tiler jobs every N draws, while
+ * Boot-arg rwn_vtsplit=N (24 when not given; 0: all at the submit, as before run 578): a full-screen pass of several
+ * targets sends its vertex and tiler jobs every N draws, while
  * the rest is still being recorded, instead of all at its submit. The window server's frame is recorded at -commit
  * (6.6 ms, run 575) and its full pass is the last, so its ~3 ms of vertex and tiler work came after all of that; run
  * 575 also showed every frame in motion begins only once the GPU is done with the one before, so what the GPU does
@@ -3446,7 +3447,7 @@ draw(struct rwa_render *r, const struct rwa_draw *dr, char *why, size_t why_size
 	{
 		static unsigned every = ~0u;
 		if (every == ~0u)
-			every = boot_arg_uint("rwn_vtsplit=", 0);
+			every = boot_arg_uint("rwn_vtsplit=", 24);   /* run 578: on; rwn_vtsplit=0 off */
 		if (every && b->width >= 700 && b->color_count > 1 && b->job_index >= 2 * every &&
 		    vt_flush(b, why, why_size) != 0)
 			return -1;
