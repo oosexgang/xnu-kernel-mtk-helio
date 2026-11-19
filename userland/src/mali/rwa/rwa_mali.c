@@ -1209,6 +1209,15 @@ static uint64_t kind_passes[16], kind_draws[16], kind_vt_ns[16], kind_frag_ns[16
 /* the passes that clear nothing and so are bounded by their draws (submit_batch): how many, their tiles, of how many */
 static uint64_t bound_passes, bound_tiles, bound_of;
 static uint64_t prof_passes[4], prof_draws[4], prof_ns[4];   /* rwn_profile=1: by group skipped */
+/*
+ * Whether the window server draws a frame while the GPU is still at the one before, or only once it is done: the
+ * first draw after a frame handed to the display (under gq_lock), and over the frames in motion (under 80 ms after
+ * the one before) how many began with passes still on the GPU, how many after it went idle and how long after, and
+ * the time from the first draw to the display
+ */
+static uint64_t tl_begin, tl_begin_idle;   /* the first draw's time; 0 or how long the GPU had been idle then */
+static bool tl_begin_busy;
+static uint64_t tl_frames, tl_busy, tl_idle, tl_idle_ns, tl_span_ns;
 static bool gq_running;
 
 static void *
@@ -3300,6 +3309,15 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *dr, char *why,
 {
 	GUARD();
 	uint64_t began = now_ns();
+	if (tl_begin == 0) {
+		pthread_mutex_lock(&gq_lock);
+		if (tl_begin == 0) {
+			tl_begin = began;
+			tl_begin_busy = gq_head != gq_tail;
+			tl_begin_idle = tl_begin_busy || began < gpu_last_done ? 0 : began - gpu_last_done;
+		}
+		pthread_mutex_unlock(&gq_lock);
+	}
 	if (render == NULL || dr == NULL) {
 		say(why, why_size, "a draw with no pipeline");
 		return -1;
@@ -3502,6 +3520,19 @@ rwa_surface_seq(uint32_t surface, uint64_t seq)
 			uint64_t gap = (now - was + 8333333) / 16666667;   /* refreshes, rounded */
 			__atomic_fetch_add(&frame_gap[MIN2(MAX2(gap, 1), 7) - 1], 1, __ATOMIC_RELAXED);
 		}
+		pthread_mutex_lock(&gq_lock);
+		if (was && now - was < 80000000ull && tl_begin && tl_begin < now) {
+			tl_frames++;
+			tl_span_ns += now - tl_begin;
+			if (tl_begin_busy) {
+				tl_busy++;
+			} else {
+				tl_idle++;
+				tl_idle_ns += tl_begin_idle;
+			}
+		}
+		tl_begin = 0;
+		pthread_mutex_unlock(&gq_lock);
 	}
 	return km_surface_seq(surface, seq);
 }
@@ -3637,6 +3668,13 @@ report(void)
 				     (unsigned long long)g[2], (unsigned long long)g[3], (unsigned long long)g[4],
 				     (unsigned long long)g[5], (unsigned long long)g[6]);
 			}
+			/* (gq_lock held) */
+			if (tl_frames)
+				keep("30s: %llu frames in motion: the first draw with the GPU at the frame before %llu, after it went "
+				     "idle %llu (%.1f ms after); first draw to the display %.1f ms", (unsigned long long)tl_frames,
+				     (unsigned long long)tl_busy, (unsigned long long)tl_idle, tl_idle_ns / 1e6 / MAX2(tl_idle, 1),
+				     tl_span_ns / 1e6 / tl_frames);
+			tl_frames = tl_busy = tl_idle = tl_idle_ns = tl_span_ns = 0;
 			uint64_t bp = __atomic_exchange_n(&bound_passes, 0, __ATOMIC_RELAXED);
 			uint64_t bt = __atomic_exchange_n(&bound_tiles, 0, __ATOMIC_RELAXED);
 			uint64_t bo = __atomic_exchange_n(&bound_of, 0, __ATOMIC_RELAXED);
