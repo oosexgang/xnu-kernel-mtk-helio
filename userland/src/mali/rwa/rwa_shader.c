@@ -38,6 +38,8 @@
 
 #include "rwa_priv.h"
 
+static bool boot_arg_set(const char *text);
+
 _Thread_local uint32_t rwa_next_noperspective;
 
 /* the patched pan_blend.c counts the blend shaders it compiles (for the Gallium library's lines); this library compiles
@@ -131,9 +133,26 @@ static const struct {
 	{ 260, "Depth32Float_Stencil8", PIPE_FORMAT_Z32_FLOAT_S8X24_UINT },
 };
 
+/*
+ * Boot-arg rwn_f16as8=1: RGBA16Float held as RGBA8 (textures, views and render targets alike) -- half the tile buffer
+ * of the window server's full passes (BGRA8, RGBA16Float, R32Float: 16 bytes a pixel, 12 so) and blended by the fixed
+ * function instead of a blend shader, at the price of what RGBA16Float holds past [0, 1]. The processor's writes and
+ * reads of such a texture are converted (rwa_texture_write, rwa_texture_read). For measuring what it is worth.
+ */
+bool
+rwa_f16as8(void)
+{
+	static int on = -1;
+	if (on < 0)
+		on = boot_arg_set("rwn_f16as8=1");
+	return on == 1;
+}
+
 enum pipe_format
 rwa_pipe_format(unsigned mtl)
 {
+	if (mtl == 115 && rwa_f16as8())
+		return PIPE_FORMAT_R8G8B8A8_UNORM;
 	for (unsigned i = 0; i < ARRAY_SIZE(pixel_formats); i++)
 		if (pixel_formats[i].mtl == mtl)
 			return pixel_formats[i].pipe;

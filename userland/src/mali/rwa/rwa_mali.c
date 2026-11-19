@@ -33,6 +33,7 @@
 #include "pan_props.h"
 #include "util/format/u_format.h"
 #include "util/u_math.h"
+#include "util/half_float.h"
 
 #include "rwa_priv.h"
 
@@ -686,9 +687,22 @@ rwa_texture_write(struct rwa_texture *t, unsigned level, unsigned layer, const u
 	store_sync(t->store);
 	unsigned bx = DIV_ROUND_UP(size[0], t->bw), by = DIV_ROUND_UP(size[1], t->bh);
 	size_t row = (size_t)bx * t->blocksize;
+	unsigned depth = MAX2(size[2], 1);
+	if (t->shape.pixel_format == 115 && t->format == PIPE_FORMAT_R8G8B8A8_UNORM) {
+		/* rwn_f16as8=1: the caller's RGBA16Float, 8 bytes a texel, into RGBA8 */
+		if (stride == 0)
+			stride = (size_t)bx * 8;
+		for (unsigned z = 0; z < depth; z++)
+			for (unsigned y = 0; y < by; y++) {
+				const uint16_t *from = (const uint16_t *)((const uint8_t *)bytes + ((size_t)z * by + y) * stride);
+				uint8_t *to = texel_at(t, level, layer, origin[0], origin[1] + y, origin[2] + z);
+				for (unsigned k = 0; k < bx * 4; k++)
+					to[k] = (uint8_t)(CLAMP(_mesa_half_to_float(from[k]), 0.0f, 1.0f) * 255.0f + 0.5f);
+			}
+		return 0;
+	}
 	if (stride == 0)
 		stride = row;
-	unsigned depth = MAX2(size[2], 1);
 	for (unsigned z = 0; z < depth; z++)
 		for (unsigned y = 0; y < by; y++)
 			memcpy(texel_at(t, level, layer, origin[0], origin[1] + y * t->bh, origin[2] + z),
@@ -706,9 +720,22 @@ rwa_texture_read(struct rwa_texture *t, unsigned level, unsigned layer, const un
 	store_sync(t->store);
 	unsigned bx = DIV_ROUND_UP(size[0], t->bw), by = DIV_ROUND_UP(size[1], t->bh);
 	size_t row = (size_t)bx * t->blocksize;
+	unsigned depth = MAX2(size[2], 1);
+	if (t->shape.pixel_format == 115 && t->format == PIPE_FORMAT_R8G8B8A8_UNORM) {
+		/* rwn_f16as8=1: RGBA8 back to the caller's RGBA16Float */
+		if (stride == 0)
+			stride = (size_t)bx * 8;
+		for (unsigned z = 0; z < depth; z++)
+			for (unsigned y = 0; y < by; y++) {
+				uint16_t *to = (uint16_t *)((uint8_t *)bytes + ((size_t)z * by + y) * stride);
+				const uint8_t *from = texel_at(t, level, layer, origin[0], origin[1] + y, origin[2] + z);
+				for (unsigned k = 0; k < bx * 4; k++)
+					to[k] = _mesa_float_to_half(from[k] / 255.0f);
+			}
+		return 0;
+	}
 	if (stride == 0)
 		stride = row;
-	unsigned depth = MAX2(size[2], 1);
 	for (unsigned z = 0; z < depth; z++)
 		for (unsigned y = 0; y < by; y++)
 			memcpy((uint8_t *)bytes + ((size_t)z * by + y) * stride,

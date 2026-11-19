@@ -63,6 +63,7 @@ struct rwa_helio {
 };
 const struct rwa_helio *rwa_helio_find(const char *soc, unsigned gpu_id);
 const char *rwa_board_soc(void);
+bool rwa_f16as8(void);
 const char *rwa_arch_status(unsigned arch, unsigned gpu_id);
 
 struct rwa_stage {
