@@ -668,6 +668,47 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 	 * before. */
 	if (want == MESA_SHADER_VERTEX && !boot_arg_set("rwn_rawvid=1"))
 		NIR_PASS(_, nir, pan_nir_lower_vertex_id);
+	/* one output variable a varying slot: CoreAnimation's generic vertex stage (fixed_vert_lph_gen) declares
+	 * point_size_per and point_size_lin, both [[point_size]], and air_to_nir makes a variable of each; Panfrost's
+	 * varying layout takes a slot to be one output (pan_collect_varyings asserts it), and on the phone, built without
+	 * assertions, the layout slid -- every vertex of those draws came out at (1, 0, 0, 0), the point size where the
+	 * position goes (run 566), and the glass's backdrops were never drawn. The others' derefs are made the first's:
+	 * the last store that runs wins, as in Metal. Boot-arg rwn_dupout=1: as before. */
+	if (want == MESA_SHADER_VERTEX && !boot_arg_set("rwn_dupout=1")) {
+		nir_variable *first[VARYING_SLOT_MAX] = { 0 };
+		bool merged = false;
+		nir_foreach_variable_with_modes(var, nir, nir_var_shader_out) {
+			if (var->data.location < 0 || var->data.location >= VARYING_SLOT_MAX)
+				continue;
+			if (first[var->data.location] == NULL)
+				first[var->data.location] = var;
+			else if (glsl_get_bare_type(first[var->data.location]->type) == glsl_get_bare_type(var->type))
+				merged = true;
+		}
+		if (merged) {
+			nir_foreach_function_impl(impl, nir) {
+				nir_foreach_block(block, impl) {
+					nir_foreach_instr(instr, block) {
+						if (instr->type != nir_instr_type_deref)
+							continue;
+						nir_deref_instr *d = nir_instr_as_deref(instr);
+						if (d->deref_type != nir_deref_type_var || d->var->data.mode != nir_var_shader_out ||
+						    d->var->data.location < 0 || d->var->data.location >= VARYING_SLOT_MAX)
+							continue;
+						nir_variable *keep = first[d->var->data.location];
+						if (keep && keep != d->var && glsl_get_bare_type(keep->type) == glsl_get_bare_type(d->var->type))
+							d->var = keep;
+					}
+				}
+			}
+			nir_foreach_variable_with_modes_safe(var, nir, nir_var_shader_out) {
+				if (var->data.location >= 0 && var->data.location < VARYING_SLOT_MAX &&
+				    first[var->data.location] != var &&
+				    glsl_get_bare_type(first[var->data.location]->type) == glsl_get_bare_type(var->type))
+					exec_node_remove(&var->node);
+			}
+		}
+	}
 	/* colour outputs past the pass's attachments are not written (Panfrost keeps only the framebuffer's nr_cbufs):
 	 * CoreAnimation's uber shader writes [[color(0..2)]], and drawn into two attachments its third output's BLEND took
 	 * a descriptor past the pipeline's two -- the passes of two attachments it drew (the glass's backdrops, run 557)
