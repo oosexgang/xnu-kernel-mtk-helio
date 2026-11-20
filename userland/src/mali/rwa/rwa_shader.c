@@ -677,6 +677,10 @@ fnv64(uint64_t h, const void *data, size_t size)
 	return h;
 }
 
+/* the key's parts of the last stage keyed on this thread: a miss said with them shows which part the Mac's differs in */
+static __thread uint64_t key_part[5];   /* head, module, constants, config, shape */
+static __thread unsigned key_nconst;
+
 static uint64_t
 stage_key(unsigned gpu_id, const void *bitcode, size_t size, const char *entry, gl_shader_stage want,
 	  const struct rwa_constant *constants, unsigned nconst, const void *config, unsigned config_size,
@@ -692,6 +696,7 @@ stage_key(unsigned gpu_id, const void *bitcode, size_t size, const char *entry, 
 	for (unsigned i = 0; i < ARRAY_SIZE(flags); i++)
 		head[5] |= boot_arg_set(flags[i]) ? 1u << i : 0;
 	h = fnv64(h, head, sizeof(head));
+	key_part[0] = fnv64(0xcbf29ce484222325ull, head, sizeof(head));
 	h = fnv64(h, entry ? entry : "", entry ? strlen(entry) + 1 : 1);
 	/* the LLVM module inside the bitcode wrapper (0x0B17C0DE: offset at 8, size at 12): what -[_MTLFunction
 	 * bitcodeData] hands the plug-in on the phone and what the Mac reads out of the same AIR slice need not agree
@@ -709,6 +714,9 @@ stage_key(unsigned gpu_id, const void *bitcode, size_t size, const char *entry, 
 	}
 	h = fnv64(h, &inner, sizeof(inner));
 	h = fnv64(h, b8 + inner_at, inner);
+	key_part[1] = fnv64(0xcbf29ce484222325ull, b8 + inner_at, inner);
+	key_part[2] = 0xcbf29ce484222325ull;
+	key_nconst = nconst;
 #ifndef RWA_HOST_FAKE
 	{
 		/* the first few stages' module, said: whether the phone's bytes are the Mac's */
@@ -735,13 +743,17 @@ stage_key(unsigned gpu_id, const void *bitcode, size_t size, const char *entry, 
 		done[best] = true;
 		h = fnv64(h, &constants[best].index, sizeof(constants[best].index));
 		h = fnv64(h, &constants[best].bits, sizeof(constants[best].bits));
+		key_part[2] = fnv64(key_part[2], &constants[best].index, sizeof(constants[best].index));
+		key_part[2] = fnv64(key_part[2], &constants[best].bits, sizeof(constants[best].bits));
 	}
 	free(done);
 	h = fnv64(h, &config_size, sizeof(config_size));
 	if (config_size)
 		h = fnv64(h, config, config_size);
+	key_part[3] = config_size ? fnv64(0xcbf29ce484222325ull, config, config_size) : 0;
 	if (shape)
 		h = fnv64(h, shape, sizeof(*shape));
+	key_part[4] = shape ? fnv64(0xcbf29ce484222325ull, shape, sizeof(*shape)) : 0;
 	return h;
 }
 
@@ -1079,6 +1091,28 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 	snprintf(st->name, sizeof(st->name), "%s", st->air.entry_point ? st->air.entry_point : (entry ? entry : "?"));
 	if (getenv("RWA_CACHE_OUT") == NULL && ncache)
 		miss_note(st->name, want, config_size != 0);   /* named here: the caller gives no entry for a library of one */
+	{
+		/* "keyparts NAME/S nconst N head H module M const C config F shape P": each miss on the phone (the first 60,
+		 * boot-arg rwn_keylog=1), every stage on the Mac (RWA_KEYLOG=1) -- the same stage's parts side by side */
+		static unsigned said;
+		bool on_phone = getenv("RWA_CACHE_OUT") == NULL && ncache && boot_arg_set("rwn_keylog=1") && said < 60;
+		if (on_phone || getenv("RWA_KEYLOG")) {
+			char line[256];
+			snprintf(line, sizeof(line), "%skeyparts %s/%c nconst %u head %08llx module %08llx const %08llx config %08llx "
+				 "shape %08llx", on_phone ? "!!rwn " : "", st->name, want == MESA_SHADER_VERTEX ? 'v' : want == MESA_SHADER_FRAGMENT ? 'f' : 'c',
+				 key_nconst, (unsigned long long)(key_part[0] & 0xffffffff), (unsigned long long)(key_part[1] & 0xffffffff),
+				 (unsigned long long)(key_part[2] & 0xffffffff), (unsigned long long)(key_part[3] & 0xffffffff),
+				 (unsigned long long)(key_part[4] & 0xffffffff));
+			if (on_phone) {
+				said++;
+#ifndef RWA_HOST_FAKE
+				sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+#endif
+			} else {
+				fprintf(stderr, "%s\n", line);
+			}
+		}
+	}
 	/* [[vertex_id]] is the vertex's own number: Bifrost's is counted from the draw's first vertex (offset_start, the
 	 * lowest index of an indexed draw), and pan_nir_lower_vertex_id adds it back (RWA_SV_VERTEX_OFFSETS). Without it a
 	 * vertex stage that reads its vertices out of a buffer by their number -- CoreAnimation's generic fixed_vert_lph_gen
