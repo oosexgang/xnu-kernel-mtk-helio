@@ -3,7 +3,9 @@
  * rwm-variants27.txt, "LABEL vHEX fHEX") built on this Mac through the native library (RWA_HOST=1) the way the plug-in
  * builds it on the phone (src/metal/pipeline.cpp, variant_main): the generic pipeline's constants, the configuration
  * folded in -- 4 bytes of the vertex stage's buffer 0 for fixed_vert_*, 49 of the fragment stage's --, its functions
- * out of LIBRARY and its shape, as a run with boot-arg rwm_capture_gen=1 said them ("!!gen LABEL ..." in LOG). With
+ * out of LIBRARY and its shape, as a run with boot-arg rwm_capture_gen=1 said them ("!!gen LABEL ..." in LOG); and
+ * first each generic pipeline's BASE, as pipeline.cpp builds it at start (without_generic: constant 0, fc_generic,
+ * made 0; no configuration) -- 34 stages run 594 still compiled on the phone while it started. With
  * RWA_CACHE_OUT=FILE every stage compiled goes into the stage cache (tools/rwacache.sh). Built by mk-rwa-host.sh.
  */
 #include <stdbool.h>
@@ -211,7 +213,38 @@ main(int argc, char **argv)
 		nlines++;
 	fclose(f);
 	fflush(NULL);
-	unsigned built = 0, refused = 0, crashed = 0, unknown = 0;
+	unsigned built = 0, refused = 0, crashed = 0, unknown = 0, bases = 0;
+	for (unsigned gi = 0; gi < ngens; gi++) {
+		struct gen *g = &gens[gi];
+		const struct air_metallib_function *vf = function(&ml, g->vname), *ff = function(&ml, g->fname);
+		if (ff == NULL || g->shape_size < sizeof(struct rwa_render_shape))
+			continue;
+		pid_t pid = fork();
+		if (pid == 0) {
+			struct rwa_render_shape sh;
+			struct rwa_constant vc[128], fc[128];
+			memcpy(&sh, g->shape, sizeof(sh));
+			memcpy(vc, g->vc, sizeof(vc));
+			memcpy(fc, g->fc, sizeof(fc));
+			for (unsigned k = 0; k < g->nv; k++)
+				if (vc[k].index == 0)
+					vc[k].bits = 0;
+			for (unsigned k = 0; k < g->nf; k++)
+				if (fc[k].index == 0)
+					fc[k].bits = 0;
+			rwa_render_constants(vc, g->nv, fc, g->nf);
+			rwa_render_config(NULL, 0, NULL, 0);
+			struct rwa_render_info info;
+			struct rwa_render *r = rwa_render_create(dev, vf ? vf->bitcode : NULL, vf ? vf->bitcode_size : 0, NULL,
+								 ff->bitcode, ff->bitcode_size, NULL, &sh, &info, why,
+								 sizeof(why));
+			_exit(r ? 0 : 1);
+		}
+		int st = 0;
+		waitpid(pid, &st, 0);
+		if (WIFEXITED(st) && WEXITSTATUS(st) == 0)
+			bases++;
+	}
 	for (unsigned li = 0; li < nlines; li++) {
 		const char *line = lines[li];
 		char label[96], vh[64], fh[256];
@@ -250,7 +283,7 @@ main(int argc, char **argv)
 		else
 			crashed++;
 	}
-	printf("rwagen: %u generic pipelines; %u variants built, %u refused, %u stopped the Mac's compiler, %u of no "
-	       "generic pipeline said\n", ngens, built, refused, crashed, unknown);
+	printf("rwagen: %u generic pipelines, %u bases built; %u variants built, %u refused, %u stopped the Mac's compiler, "
+	       "%u of no generic pipeline said\n", ngens, bases, built, refused, crashed, unknown);
 	return 0;
 }
