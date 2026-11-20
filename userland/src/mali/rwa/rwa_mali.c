@@ -121,6 +121,7 @@ say(char *why, size_t why_size, const char *fmt, ...)
 	va_end(ap);
 }
 
+static bool boot_arg(const char *text);
 static void
 keep(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void
@@ -133,6 +134,20 @@ keep(const char *fmt, ...)
 	int n = snprintf(line, sizeof(line), "!!rwn %s: ", getprogname());
 	vsnprintf(line + n, sizeof(line) - n, fmt, ap);
 	va_end(ap);
+	/*
+	 * Boot-arg rwn_keepfps=1: of the 30-second report only what says the frame rate is kept (frames each second, the
+	 * gaps, the GPU's load, the library's time) -- the rest is said to the log without "!!" -- so that a long run
+	 * driven by hand fits its whole timeline into the host's 64 KB of kept lines.
+	 */
+	static int fps_only = -1;
+	if (fps_only < 0)
+		fps_only = boot_arg("rwn_keepfps=1");
+	if (fps_only && strncmp(line + n, "30s: ", 5) == 0) {
+		const char *what = line + n + 5;
+		if (strncmp(what, "from ", 5) != 0 && strncmp(what, "command buffers by the refreshes", 32) != 0 &&
+		    strncmp(what, "GPU busy", 8) != 0 && strncmp(what, "at ", 3) != 0)
+			memmove(line, line + 2, strlen(line + 2) + 1);   /* (not kept: without the "!!") */
+	}
 #ifndef RWA_HOST_FAKE
 	sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
 #endif
@@ -2771,6 +2786,47 @@ mipmaps_gpu(struct rwa_texture *t, unsigned levels, char *why, size_t why_size)
 		flush_batch("a mipmap level");
 		mips_gpu++;
 	}
+	/*
+	 * The first four checked against the processor's box filter (boot-arg rwn_mipcheck=0: not): the GPU waited for,
+	 * then 16 texels of level 1 against the average of their four in level 0, kept -- run 627: an application's icon
+	 * drawn as a white square while it zooms open or closed, which samples these levels.
+	 */
+	static unsigned checked;
+	if (checked < 4 && !boot_arg("rwn_mipcheck=0")) {
+		checked++;
+		store_sync(t->store);
+		const unsigned bs = t->blocksize, w0 = t->shape.width, h0 = t->shape.height;
+		const unsigned w1 = u_minify(w0, 1), h1 = u_minify(h0, 1);
+		unsigned worst = 0, wx = 0, wy = 0;
+		uint8_t got[16] = { 0 }, want[16] = { 0 };
+		for (unsigned i = 0; i < 16; i++) {
+			const unsigned x = (2 * (i % 4) + 1) * w1 / 8, y = (2 * (i / 4) + 1) * h1 / 8;
+			const unsigned x0 = MIN2(2 * x, w0 - 1), x1 = MIN2(2 * x + 1, w0 - 1);
+			const unsigned y0 = MIN2(2 * y, h0 - 1), y1 = MIN2(2 * y + 1, h0 - 1);
+			uint8_t g[16], a[16], b[16], c[16], e[16];
+			memcpy(g, texel_at(t, 1, 0, x, y, 0), bs);
+			memcpy(a, texel_at(t, 0, 0, x0, y0, 0), bs);
+			memcpy(b, texel_at(t, 0, 0, x1, y0, 0), bs);
+			memcpy(c, texel_at(t, 0, 0, x0, y1, 0), bs);
+			memcpy(e, texel_at(t, 0, 0, x1, y1, 0), bs);
+			for (unsigned k = 0; k < bs && k < 16; k++) {
+				const unsigned want_k = (a[k] + b[k] + c[k] + e[k] + 2) / 4;
+				const unsigned diff = g[k] > want_k ? g[k] - want_k : want_k - g[k];
+				if (diff > worst || (i == 0 && k == 0)) {
+					worst = diff;
+					wx = x;
+					wy = y;
+					memcpy(got, g, bs);
+					for (unsigned j = 0; j < bs && j < 16; j++)
+						want[j] = (uint8_t)((a[j] + b[j] + c[j] + e[j] + 2) / 4);
+				}
+			}
+		}
+		keep("mip check %s %ux%u, %u levels%s: level 1 off by %u at most (at %u,%u: %02x%02x%02x%02x, the box filter "
+		     "%02x%02x%02x%02x)", util_format_short_name(t->format), w0, h0, levels,
+		     util_format_is_srgb(t->format) ? " (sRGB: averaged in linear, a few off is right)" : "", worst, wx, wy,
+		     got[0], got[1], got[2], got[3], want[0], want[1], want[2], want[3]);
+	}
 	return 1;
 }
 
@@ -3939,7 +3995,10 @@ rwa_dispatch_buffers(struct rwa_compute *c, const struct rwa_bindings *bindings,
 	for (unsigned i = 0; i < c->cs.air.num_resources; i++)
 		dynamic_tg |= c->cs.air.resources[i].kind == AIR_RESOURCE_THREADGROUP_BUFFER;
 	unsigned static_wls = MAX2(c->cs.info.wls_size, c->cs.air.threadgroup_bytes);
-	if (dynamic_tg && (static_wls != 0 || tg_bytes == 0)) {
+	static int tg_off = -1;
+	if (tg_off < 0)
+		tg_off = boot_arg("rwn_tgmem=0");   /* boot-arg rwn_tgmem=0: such kernels refused, as before run 609 */
+	if (dynamic_tg && (static_wls != 0 || tg_bytes == 0 || tg_off)) {
 		static unsigned said;
 		if (said++ < 4)
 			keep("%s: a threadgroup buffer sized at the dispatch (%u bytes given) with %u bytes of its own, "
