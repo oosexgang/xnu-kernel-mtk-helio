@@ -5,7 +5,9 @@
  */
 #include "rwm.h"
 
+#include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
 
@@ -104,6 +106,130 @@ say_first_drawn(struct rwm_work *const *works, unsigned count, const char *(*lab
 	}
 }
 
+/*
+ * boot-arg rwm_cbsum=S[,N]: from S s after boot, once five command buffers in a row came 90 to 115 ms apart (the 10 Hz
+ * pace), the next 150 (N), one kept line each -- the time since the one before, the committing thread, what it holds
+ * (draws, into which surfaces, clears, dispatches, copies) and its commonest pipeline. The question it answers: what
+ * CoreAnimation draws when it paces at 10 Hz (runs 605 to 608: seconds on end of command buffers exactly 6 refreshes
+ * apart, from the moment Photos is tapped and crashes, with nothing else moving). rwm_cbsum=S,N,0: from S at once.
+ */
+void
+cb_summary(struct rwm_work *const *works, unsigned count, const char *(*label_of)(void *))
+{
+	static long from = -2;
+	static long left = 150;
+	static int paced;               /* command buffers in a row at the 10 Hz pace; 5: logging */
+	static uint64_t last;
+	const uint64_t now = rwm_ns();
+	const uint64_t was = __atomic_exchange_n(&last, now, __ATOMIC_RELAXED);
+
+	if (from == -2) {
+		const char *at = strstr(rwm_boot_args(), "rwm_cbsum=");
+
+		from = at != nullptr ? atol(at + 10) : -1;
+		const char *comma = at != nullptr ? strpbrk(at + 10, ", ") : nullptr;
+
+		if (comma != nullptr && *comma == ',') {
+			left = atol(comma + 1);
+			comma = strpbrk(comma + 1, ", ");
+			if (comma != nullptr && *comma == ',' && atol(comma + 1) == 0) {
+				paced = 5;
+			}
+		}
+	}
+	if (from < 0 || now / 1000000000ull < (uint64_t)from) {
+		return;
+	}
+	if (paced < 5) {
+		const uint64_t gap = was != 0 ? now - was : 0;
+
+		paced = gap >= 90000000ull && gap <= 115000000ull ? paced + 1 : 0;
+		if (paced < 5) {
+			return;
+		}
+	}
+	if (__atomic_sub_fetch(&left, 1, __ATOMIC_RELAXED) < 0) {
+		return;
+	}
+	unsigned draws = 0, into_surface = 0, clears = 0, dispatches = 0, copies = 0, nsid = 0, nlab = 0;
+	uint32_t sids[4] = { 0, 0, 0, 0 };
+	const char *labels[8];
+	unsigned label_n[8];
+	const char *first = nullptr;
+
+	for (unsigned n = 0; n < count; n++) {
+		const struct rwm_work *w = works[n];
+
+		if (w->kind == RWM_WORK_DISPATCH) {
+			dispatches++;
+			continue;
+		}
+		if (w->kind == RWM_WORK_BLIT) {
+			copies++;
+			continue;
+		}
+		if (w->kind != RWM_WORK_DRAW) {
+			continue;
+		}
+		if (w->draw.clear_color != nullptr) {
+			clears++;
+		}
+		const char *l = label_of != nullptr && w->pipeline != nullptr ? label_of(w->pipeline) : nullptr;
+
+		if (l == nullptr) {
+			continue;       /* a pass's clear, no draw */
+		}
+		draws++;
+		if (strncmp(l, "com.apple.coreanimation.", 24) == 0) {
+			l += 24;
+		}
+		if (first == nullptr) {
+			first = l;
+		}
+		const uint32_t sid = w->target_surface_count != 0 ? w->target_surface[0] : 0;
+
+		if (sid != 0) {
+			unsigned k;
+
+			into_surface++;
+			for (k = 0; k < nsid && sids[k] != sid; k++) {
+			}
+			if (k == nsid && nsid < 4) {
+				sids[nsid++] = sid;
+			}
+		}
+		unsigned k;
+
+		for (k = 0; k < nlab && strcmp(labels[k], l) != 0; k++) {
+		}
+		if (k == nlab && nlab < 8) {
+			labels[nlab] = l;
+			label_n[nlab++] = 0;
+		}
+		if (k < nlab) {
+			label_n[k]++;
+		}
+	}
+	unsigned most = 0;
+
+	for (unsigned k = 1; k < nlab; k++) {
+		if (label_n[k] > label_n[most]) {
+			most = k;
+		}
+	}
+	char thread[48] = "";
+	char line[420];
+
+	pthread_getname_np(pthread_self(), thread, sizeof(thread));
+	snprintf(line, sizeof(line), "!!rwm cb %llu.%03llu +%llu ms %s: %u works, %u draws (%u into surfaces %u %u %u), "
+		 "%u clears, %u dispatches, %u copies; %u pipelines, most %s (%u), first %s",
+		 (unsigned long long)(now / 1000000000ull), (unsigned long long)(now / 1000000ull % 1000),
+		 (unsigned long long)(was != 0 ? (now - was) / 1000000ull : 0), thread[0] ? thread : "?", count, draws,
+		 into_surface, sids[0], sids[1], sids[2], clears, dispatches, copies, nlab, nlab ? labels[most] : "-",
+		 nlab ? label_n[most] : 0, first != nullptr ? first : "-");
+	sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+}
+
 } // namespace
 
 extern "C" bool
@@ -132,6 +258,7 @@ rwm_command_commit(struct rwm_command *c, struct rwm_work *const *works, unsigne
 {
 	static __thread bool bound;
 
+	cb_summary(works, count, label);
 	if (!rwm_worker_on()) {
 		rwm_perf.made_cbs++;
 		rwm_perf.made_ns += rwm_ns() - c->born;
