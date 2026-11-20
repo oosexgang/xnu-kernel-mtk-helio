@@ -1,0 +1,17 @@
+# rc.jobs.nativeui with the home screen left alone for two minutes first: after the first unlock the widget
+# extensions reload their timelines (WeatherWidget, StocksWidget, WorldClockWidget... 80 to 96 % of a core each for
+# 30 s and more, runs 595 and 596) and iconservicesagent draws icons; openings measured inside that are measured against
+# it. Needs a longer run (build/mali-run2.sh MALI_SECS=600).
+/hakios/bin/rwtouch wait 170 swipe 0.705 0.586 0.707 0.587 150
+/hakios/bin/rwtouch wait 40
+/hakios/bin/rwtouch wait 120
+/hakios/bin/cputop 3 100 keep
+/hakios/bin/fbgrab -log home 750 0.7
+/hakios/bin/rwtouch tap 0.375 0.47 wait 4 button home wait 3 tap 0.375 0.47 wait 4 button home wait 3
+/hakios/bin/rwtouch tap 0.375 0.355 wait 4 swipe 0.5 0.8 0.5 0.3 150 wait 2 button home wait 3 tap 0.375 0.355 wait 4 button home wait 3
+/hakios/bin/rwtouch tap 0.625 0.355 wait 4 swipe 0.5 0.8 0.5 0.3 150 wait 2 button home wait 3 tap 0.625 0.355 wait 4 button home wait 3
+/hakios/bin/rwtouch tap 0.375 0.585 wait 4 swipe 0.5 0.8 0.5 0.3 150 wait 2 button home wait 3 tap 0.375 0.585 wait 4 button home wait 3
+/hakios/bin/rwtouch swipe 0.3 0.005 0.3 0.6 300 wait 3 swipe 0.5 0.95 0.5 0.3 300 wait 3 swipe 0.3 0.005 0.3 0.6 300 wait 3 swipe 0.5 0.95 0.5 0.3 300 wait 3
+/hakios/bin/rwtouch swipe 0.9 0.005 0.9 0.6 300 wait 3 swipe 0.5 0.95 0.5 0.2 300 wait 3 swipe 0.9 0.005 0.9 0.6 300 wait 3 swipe 0.5 0.95 0.5 0.2 300 wait 3
+/hakios/bin/rwtouch swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 2 swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 2
+/hakios/bin/rwtouch wait 10 notify com.hakios.rwm_recipes wait 60 notify com.hakios.rwm_recipes wait 20

@@ -11,6 +11,7 @@
 #include <mach/mach_time.h>
 #include <mach/thread_act.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <sys/sysctl.h>
@@ -158,14 +159,27 @@ rwm_perf_report(uint64_t now)
 	if (span < 5000000000ull) {
 		return;
 	}
-	snprintf(line, sizeof(line), "rwm perf %llus: %llu cb (%.1f/s), %llu draws, cpu %.1f ms/cb, "
+	/* boot-arg rwm_perfkeep=S: "rwm perf" and "rwm waits" into the host's kept lines for the 150 s from S s after boot
+	 * (a line said only to the kernel's log is lost with the log's middle; all of them would fill the 64 KB) */
+	static long keep_from = -2;
+
+	if (keep_from == -2) {
+		const char *at = strstr(rwm_boot_args(), "rwm_perfkeep=");
+
+		keep_from = at != nullptr ? atol(at + 13) : -1;
+	}
+	const bool keep = keep_from >= 0 && now / 1000000000ull >= (uint64_t)keep_from &&
+			  now / 1000000000ull < (uint64_t)keep_from + 150;
+	const int mark = keep ? 2 : 0;
+
+	snprintf(line, sizeof(line), "!!rwm perf %llus: %llu cb (%.1f/s), %llu draws, cpu %.1f ms/cb, "
 		 "gpu wait %.1f ms/cb, worst cb %.1f ms, %llu pipelines in %.0f ms; recording %.1f, between %.1f ms/cb; "
 		 "%llu copied in, %llu KB, %.1f ms",
 		 span / 1000000000ull, p.cbs, p.cbs * 1e9 / span, p.draws, p.encode / 1e6 / cbs, p.wait / 1e6 / cbs,
 		 p.worst / 1e6, p.pipes, p.compile / 1e6, p.recording / 1e6 / cbs, p.between / 1e6 / cbs, p.copyins,
 		 p.copyin_bytes >> 10, p.copyin_ns / 1e6);
-	say(line);
-	snprintf(line, sizeof(line), "rwm waits: queue full x%llu %.0f ms, until processed x%llu %.0f ms, "
+	say(line + 2 - mark);
+	snprintf(line, sizeof(line), "!!rwm waits: queue full x%llu %.0f ms, until processed x%llu %.0f ms, "
 		 "until completed x%llu %.0f ms; the worker %.1f ms a buffer", p.queue_waits, p.queue_ns / 1e6,
 		 p.processed_waits, p.processed_ns / 1e6, p.completed_waits, p.completed_ns / 1e6,
 		 p.worker_cbs ? p.worker_ns / 1e6 / p.worker_cbs : 0.0);
@@ -175,7 +189,7 @@ rwm_perf_report(uint64_t now)
 		snprintf(line + at, sizeof(line) - at, " (running %.1f of them)",
 			 p.worker_cbs ? p.worker_cpu / 1e6 / p.worker_cbs : 0.0);
 	}
-	say(line);
+	say(line + 2 - mark);
 	snprintf(line, sizeof(line), "rwm making: %llu buffers, %.1f ms each from made to committed, the maker running %.1f of them",
 		 p.made_cbs, p.made_cbs ? p.made_ns / 1e6 / p.made_cbs : 0.0, p.made_cbs ? p.made_cpu / 1e6 / p.made_cbs : 0.0);
 	say(line);

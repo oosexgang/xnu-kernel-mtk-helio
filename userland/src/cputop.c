@@ -6,6 +6,8 @@
  * usage: cputop SECONDS COUNT [keep]
  * keep: each line into the host's kept lines ("!!"), which the log keeps whole however long the run -- a line said
  * only to the kernel's log is lost with the log's middle (it keeps its first and last minutes).
+ * Each line also says what the eMMC read in the interval (kern.hakios.emmc: the root is read in PIO mode, one
+ * request at a time -- a page fault of an opening application waits for it where no processor is busy).
  * Goes into the background at once (a job of com.hakios.demo runs its lines one after another),
  * then every SECONDS for COUNT times: "cputop: NAME[PID] P% ..." for the six that used the most,
  * in percent of one core over the interval.
@@ -67,6 +69,19 @@ take(struct sample *out)
 	return k;
 }
 
+/* the eMMC's reads so far, in MB and requests (kern.hakios.emmc: "emmc: N reads, M MB, ..."); 0 without it */
+static void
+emmc_read(unsigned long long *reads, unsigned long long *mb)
+{
+	char text[160] = { 0 };
+	size_t size = sizeof(text) - 1;
+
+	*reads = *mb = 0;
+	if (sysctlbyname("kern.hakios.emmc", text, &size, NULL, 0) == 0) {
+		sscanf(text, "emmc: %llu reads, %llu MB", reads, mb);
+	}
+}
+
 static void
 say(const char *line)
 {
@@ -86,6 +101,8 @@ main(int argc, char **argv)
 		return 0;               /* the job goes on to its next line */
 	}
 	nb = take(before);
+	unsigned long long reads0, mb0;
+	emmc_read(&reads0, &mb0);
 	for (unsigned round = 0; round < count; round++) {
 		struct { int index; uint64_t used; } top[6];
 		char line[400];
@@ -116,7 +133,12 @@ main(int argc, char **argv)
 				}
 			}
 		}
-		length = snprintf(line, sizeof(line), "%scputop:", keep ? "!!" : "");
+		unsigned long long reads1, mb1;
+		emmc_read(&reads1, &mb1);
+		length = snprintf(line, sizeof(line), "%scputop: emmc +%llu MB +%llu reads;", keep ? "!!" : "", mb1 - mb0,
+				  reads1 - reads0);
+		reads0 = reads1;
+		mb0 = mb1;
 		for (int t = 0; t < 6 && top[t].index >= 0; t++) {
 			length += snprintf(line + length, sizeof(line) - length, " %s[%d] %llu%%", after[top[t].index].name,
 			                   after[top[t].index].pid,
