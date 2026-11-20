@@ -3595,23 +3595,40 @@ hakios_clear_semaphore_debt(id commandBuffer)
 	 * Back-pressure, as a GPU driver's own: each command buffer holds what it draws with until it goes, and the 27
 	 * release's window server makes two new textures of 4 and 8 MB a frame. While this driver compiled its first
 	 * pipelines (73 in 12.7 s) it kept making command buffers at 24 a second: 91 alive, 300 textures, 1.7 GB, and
-	 * jetsam ended it for want of pages (run 52). So a new one waits while more than eight are alive -- half a second
-	 * at most, in case the caller is the one holding them.
+	 * jetsam ended it for want of pages (run 52). So a new one waits while more than rwm_cblimit are alive -- half a
+	 * second at most, in case the caller is the one holding them.
+	 *
+	 * 32 by default (boot-arg rwm_cblimit=N), not eight: the 27 release's window server draws on three threads at once
+	 * (display.primary, asynchronous, render-server), each holding its buffers until they complete and its autorelease
+	 * pool drains, and while an application opened it went past eight all the time -- run 607's stacks of those
+	 * threads: 27 and 39 of 65 samples in this usleep, under CA::OGL::MetalContext::start_command_buffer, the frames at
+	 * 2 to 4 a second with the GPU and the processors mostly idle. The pipelines its first buffers waited for now come
+	 * out of the stage cache.
 	 */
 	{
-		static unsigned long throttled;
+		static unsigned long throttled, waited_total;
+		static long limit = -1;
 		unsigned waited = 0;
 
-		while (__atomic_load_n(&rwm_live_command_buffers, __ATOMIC_RELAXED) > 8 && waited < 500) {
+		if (limit < 0) {
+			const char *at = strstr(rwm_boot_args(), "rwm_cblimit=");
+
+			limit = at != NULL ? atol(at + 12) : 32;
+			limit = limit < 2 ? 2 : limit;
+		}
+		while (__atomic_load_n(&rwm_live_command_buffers, __ATOMIC_RELAXED) > limit && waited < 500) {
 			usleep(1000);
 			waited++;
 		}
-		if (waited != 0 && ((++throttled & (throttled - 1)) == 0)) {
-			char line[160];
+		if (waited != 0) {
+			waited_total += waited;
+			if ((++throttled & (throttled - 1)) == 0) {
+				char line[200];
 
-			snprintf(line, sizeof(line), "rwm throttle: a command buffer waited %u ms for older ones to go (%lu times)",
-				 waited, throttled);
-			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+				snprintf(line, sizeof(line), "!!rwm throttle: a command buffer waited %u ms for older ones to go (%lu "
+					 "times, %lu ms in all; more than %ld alive)", waited, throttled, waited_total, limit);
+				sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+			}
 		}
 	}
 	id made = [[[HakiosMetalCommandBuffer alloc] initWithHakiosQueue:self] autorelease];
