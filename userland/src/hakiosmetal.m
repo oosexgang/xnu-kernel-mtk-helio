@@ -1507,8 +1507,12 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 	struct rwa_render_info info = { 0 };
 	struct rwa_constant vc[128], fc[128];
 	char why[512] = { 0 };
+	/* the constants before the warm-up is asked: a recipe of the same label built with others is not this pipeline
+	 * (run 591: 26 of the 99 built at the draws were such) */
+	const unsigned nv = from_plib ? 0 : rw_function_constants(vertex, vc, 128);
+	const unsigned nf = from_plib ? 0 : rw_function_constants(fragment, fc, 128);
 
-	if (!rwm_render_prepare(label, &shape, vd != nil, &render, &info)) {
+	if (!rwm_render_prepare(label, &shape, vd != nil, vc, nv, fc, nf, &render, &info)) {
 		struct rwm_render_request request = {
 			.vertex = vertex_air != nil ? [vertex_air bytes] : NULL,
 			.vertex_size = vertex_air != nil ? [vertex_air length] : 0,
@@ -1518,8 +1522,8 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 			.fragment_name = !from_plib && fragment != nil ? [[fragment name] UTF8String] : NULL,
 			.vertex_constants = vc,
 			.fragment_constants = fc,
-			.vertex_constant_count = from_plib ? 0 : rw_function_constants(vertex, vc, 128),
-			.fragment_constant_count = from_plib ? 0 : rw_function_constants(fragment, fc, 128),
+			.vertex_constant_count = nv,
+			.fragment_constant_count = nf,
 		};
 
 		render = rwm_render_compile(_mesa, label, &request, &shape, &info, why, sizeof(why));

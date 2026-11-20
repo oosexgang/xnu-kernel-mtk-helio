@@ -63,17 +63,41 @@ struct text {
 	}
 };
 
+/* a recipe's whole text (label, shape and constants) already among this process's: the same label is built with other
+ * constants too, and each is a pipeline of its own (run 591) */
 bool
-recorded(const char *label)
+recorded(const char *text)
 {
-	const size_t n = strlen(label);
-
 	for (size_t i = 0; i < nrecipes; i++) {
-		if (strncmp(recipes[i], label, n) == 0 && recipes[i][n] == ' ') {
+		if (strcmp(recipes[i], text) == 0) {
 			return true;
 		}
 	}
 	return false;
+}
+
+/* the same constants, whatever their order (a recipe's from the file, against those the caller asks with) */
+bool
+same_constants(const struct rwa_constant *a, unsigned na, const struct rwa_constant *b, unsigned nb)
+{
+	if (na > 128 || nb > 128) {
+		na = na > 128 ? 128 : na;
+		nb = nb > 128 ? 128 : nb;
+	}
+	if (na != nb) {
+		return false;
+	}
+	for (unsigned i = 0; i < na; i++) {
+		bool found = false;
+
+		for (unsigned k = 0; k < nb && !found; k++) {
+			found = a[i].index == b[k].index && a[i].bits == b[k].bits;
+		}
+		if (!found) {
+			return false;
+		}
+	}
+	return true;
 }
 
 constexpr unsigned warm_max = 512;
@@ -278,7 +302,7 @@ rwm_recipe_record(const char *label, const struct rwa_render_shape *shape, const
 		return;
 	}
 	pthread_mutex_lock(&compile_lock);
-	if (!recorded(label)) {
+	{
 		text recipe;
 		char part[48];
 		bool whole = recipe_of(recipe, label, shape);
@@ -296,6 +320,9 @@ rwm_recipe_record(const char *label, const struct rwa_render_shape *shape, const
 				snprintf(part, sizeof(part), "%x:%llx;", fc[i].index, (unsigned long long)fc[i].bits);
 				whole = recipe.add(part);
 			}
+		}
+		if (whole && recorded(recipe.at)) {
+			whole = false;
 		}
 		if (whole && nrecipes == recipes_room) {
 			size_t room = recipes_room != 0 ? recipes_room * 2 : 64;
@@ -503,8 +530,8 @@ rwm_warm_report(uint64_t elapsed_ns)
 
 /* a built recipe for this request, if one is ready: its render and info, and it is the caller's */
 extern "C" bool
-rwm_warm_take(const char *label, const struct rwa_render_shape *shape, struct rwa_render **render,
-	      struct rwa_render_info *info)
+rwm_warm_take(const char *label, const struct rwa_render_shape *shape, const struct rwa_constant *vc, unsigned nv,
+	      const struct rwa_constant *fc, unsigned nf, struct rwa_render **render, struct rwa_render_info *info)
 {
 	bool taken = false;
 
@@ -515,7 +542,8 @@ rwm_warm_take(const char *label, const struct rwa_render_shape *shape, struct rw
 	for (unsigned i = 0; i < nwarm; i++) {
 		warm *w = &warms[i];
 
-		if (strcmp(w->label, label) != 0 || memcmp(&w->shape, shape, sizeof(*shape)) != 0) {
+		if (strcmp(w->label, label) != 0 || memcmp(&w->shape, shape, sizeof(*shape)) != 0 ||
+		    !same_constants(w->vc, w->nv, vc, nv) || !same_constants(w->fc, w->nf, fc, nf)) {
 			continue;
 		}
 		if (w->state == 1) {

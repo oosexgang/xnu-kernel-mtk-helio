@@ -686,6 +686,7 @@ struct rwm_render_request {
 };
 
 bool rwm_render_prepare(const char *label, struct rwa_render_shape *shape, bool has_vertex_descriptor,
+			const struct rwa_constant *vc, unsigned nv, const struct rwa_constant *fc, unsigned nf,
 			struct rwa_render **render, struct rwa_render_info *info);
 struct rwa_render *rwm_render_compile(struct rwa_device *device, const char *label,
 				      const struct rwm_render_request *request, struct rwa_render_shape *shape,
@@ -743,9 +744,10 @@ bool rwm_warm_item(unsigned index, struct rwm_warm_item *item);
 void rwm_warm_build(unsigned index, struct rwa_device *device, const void *vertex, size_t vertex_size,
 		    const void *fragment, size_t fragment_size, bool found);
 void rwm_warm_report(uint64_t elapsed_ns);
-/* a built recipe for this label and shape, if one is ready: its render and info, and it is the caller's */
-bool rwm_warm_take(const char *label, const struct rwa_render_shape *shape, struct rwa_render **render,
-		   struct rwa_render_info *info);
+/* a built recipe for this label, shape and these function constants (none for the pipeline library's), if one is
+ * ready: its render and info, and it is the caller's */
+bool rwm_warm_take(const char *label, const struct rwa_render_shape *shape, const struct rwa_constant *vc, unsigned nv,
+		   const struct rwa_constant *fc, unsigned nf, struct rwa_render **render, struct rwa_render_info *info);
 
 #ifdef __cplusplus
 }

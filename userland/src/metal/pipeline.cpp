@@ -545,13 +545,14 @@ rwm_bgprio(void)
 
 extern "C" bool
 rwm_render_prepare(const char *label, struct rwa_render_shape *shape, bool has_vertex_descriptor,
+		   const struct rwa_constant *vc, unsigned nv, const struct rwa_constant *fc, unsigned nf,
 		   struct rwa_render **render, struct rwa_render_info *info)
 {
 	/* what it asks for, said before the source-over that CoreAnimation's in-shader blends are given, so that the
 	 * lines say what was asked (src/metal/shape.cpp) */
 	rwm_shape_say(label, shape, has_vertex_descriptor);
 	rwm_xm_blend_apply(label, shape);
-	if (coreanimation_draw(label) && rwm_warm_take(label, shape, render, info)) {
+	if (coreanimation_draw(label) && rwm_warm_take(label, shape, vc, nv, fc, nf, render, info)) {
 		rwm_area_label(*render, label);
 		if (shape->color_count > 0) {
 			rwm_blend_result(info->blend_enabled_mask, info->color_write_masks);
@@ -559,6 +560,29 @@ rwm_render_prepare(const char *label, struct rwa_render_shape *shape, bool has_v
 		return true;
 	}
 	return false;
+}
+
+static uint32_t
+const_hash(const struct rwa_constant *c, unsigned n)
+{
+	uint32_t h = 0x811c9dc5u;
+	bool used[128] = { false };
+
+	for (unsigned left = n < 128 ? n : 128; left; left--) {
+		unsigned best = ~0u;
+		for (unsigned k = 0; k < n && k < 128; k++) {
+			if (!used[k] && (best == ~0u || c[k].index < c[best].index)) {
+				best = k;
+			}
+		}
+		used[best] = true;
+		char part[48];
+		int len = snprintf(part, sizeof(part), "%x:%llx;", c[best].index, (unsigned long long)c[best].bits);
+		for (int i = 0; i < len; i++) {
+			h = (h ^ (uint8_t)part[i]) * 0x01000193u;
+		}
+	}
+	return h;
 }
 
 extern "C" struct rwa_render *
@@ -689,6 +713,23 @@ rwm_render_compile(struct rwa_device *device, const char *label, const struct rw
 	rwm_area_label(call.render, label);
 	rwm_capture_pipeline(label, r, shape, call.render);
 	pipelog(label, r, shape, call.render, info);
+	/* boot-arg rwm_buildlog=1: "rwb LABEL vN:HASH fN:HASH" kept for the host for each pipeline built here and not taken
+	 * from the warm-up (the first 150) -- against userland/share/rwm-recipes27.txt, whether its label or only its
+	 * constants are new (HASH: FNV-1a of "i:bits;" in hex, the constants sorted by index, as tools/rwm-buildlog.py) */
+	if (coreanimation_draw(label) && boot_arg("rwm_buildlog=1")) {
+		static unsigned said;
+
+		if (said < 150) {
+			said++;
+			uint32_t hv = const_hash(r->vertex_constants, r->vertex_constant_count);
+			uint32_t hf = const_hash(r->fragment_constants, r->fragment_constant_count);
+			char line[240];
+
+			snprintf(line, sizeof(line), "rwb %s v%u:%08x f%u:%08x%s", label, r->vertex_constant_count, hv,
+				 r->fragment_constant_count, hf, generic ? " generic" : "");
+			sysctlbyname("kern.hakios.host_keep", NULL, NULL, line, strlen(line));
+		}
+	}
 	if (generic && !boot_arg("rwm_specialize=0") && rwm_air()->render_config != nullptr) {
 		generic_keep(device, label, r, shape, call.render);
 	}
