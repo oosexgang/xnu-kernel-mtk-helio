@@ -16,6 +16,16 @@
  *
  * Read only, by construction: the strategy routine refuses writes and opening for writing is
  * refused. One request at a time, under a mutex, in pieces of EMMC_MAX_BLOCKS.
+ *
+ * DMA (boot-arg emmc_dma=0: PIO only). In PIO every 32-bit word of the card's data is a register read of the
+ * controller's FIFO -- about 11 MB/s, and the processor busy for all of it: an application opening read 15 to 40 MB of
+ * the system (page faults of ~28 KB), and the window server's own faults waited behind them (run 599: 6 to 25 MB in
+ * 3 s while the frames came at 2 to 4 a second, the processors and the GPU mostly idle). The controller's descriptor
+ * DMA, as Linux's drivers/mmc/host/mtk-sd.c drives it: one GPD (a second, empty, as the end of the chain) pointing at
+ * a chain of BDs, each a piece of a bounce buffer below 4 GB, descriptors checksummed (MSDC_DMA_CFG DECSEN); the
+ * command sent, DMA started at its response, the transfer's end waited for, DMA stopped. The bounce buffer is cleaned
+ * and invalidated around it and copied out. At the mount the first 128 KB of the partition are read both ways and
+ * compared: a difference, or three failed DMA reads later, and the driver says so and stays with PIO.
  */
 #include <kern/clock.h>
 #include <kern/kalloc.h>
@@ -33,6 +43,13 @@
 #include "hakios_board.h"
 #include <sys/sysctl.h>
 #include <sys/systm.h>
+#include <mach/vm_param.h>
+#include <vm/vm_kern.h>
+#include <vm/vm_kern_xnu.h>
+
+extern uint64_t kvtophys(vm_offset_t va);
+extern void FlushPoC_DcacheRegion(vm_offset_t va, size_t length);
+extern void hakios_host_keep_add(const char *format, ...) __printflike(1, 2);
 
 extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 
@@ -58,6 +75,27 @@ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
 #define INT_XFER_COMPL   (1u << 12)
 #define INT_DATTMO       (1u << 14)
 #define INT_DATCRCERR    (1u << 15)
+#define INT_BDCSERR      (1u << 17)
+#define INT_GPDCSERR     (1u << 18)
+#define INT_DMAPROTECT   (1u << 19)
+
+#define DMA_SA_H4BIT     0x8c
+#define MSDC_DMA_SA      0x90
+#define MSDC_DMA_CTRL    0x98
+#define DMA_CTRL_START   (1u << 0)
+#define DMA_CTRL_STOP    (1u << 1)
+#define DMA_CTRL_MODE    (1u << 8)          /* descriptor DMA */
+#define DMA_CTRL_BURST   (7u << 12)
+#define DMA_BURST_64B    (6u << 12)
+#define MSDC_DMA_CFG     0x9c
+#define DMA_CFG_STS      (1u << 0)          /* running */
+#define DMA_CFG_DECSEN   (1u << 1)          /* descriptors checksummed */
+
+#define GPD_HWO          (1u << 0)
+#define GPD_BDP          (1u << 1)
+#define BD_EOL           (1u << 0)
+#define BD_PIECE         (32u * 1024)       /* a BD's length is 16 bits (the 24-bit form only on some chips) */
+#define BOUNCE_SIZE      (EMMC_MAX_BLOCKS * 512u)
 
 #define CMD_RSP_R1       (1u << 7)
 #define CMD_RSP_R1B      (6u << 7)
@@ -73,6 +111,9 @@ static uint32_t emmc_int_seen;              /* MSDC_INT bits read (reading clear
 static const char *emmc_failed;
 static uint32_t emmc_failed_status;
 static uint64_t emmc_reads, emmc_read_blocks, emmc_errors;
+static bool emmc_dma;                       /* the DMA path checked at the mount and in use */
+static unsigned emmc_dma_failures;
+static uint64_t emmc_dma_reads;
 static LCK_GRP_DECLARE(emmc_lck_grp, "hakios-emmc");
 static LCK_MTX_DECLARE(emmc_lock, &emmc_lck_grp);
 
@@ -194,10 +235,156 @@ read_blocks(uint64_t lba, uint32_t blocks, uint32_t *dst)
 	return blocks == 1 || stop();
 }
 
+/* ---- DMA ---- */
+
+struct gpd {
+	uint32_t info, next, ptr, len, arg, blknum, cmd;
+};
+
+struct bd {
+	uint32_t info, next, ptr, len;
+};
+
+static vm_offset_t dma_desc, dma_bounce;    /* a page of descriptors (two GPDs, then the BDs); the bounce buffer */
+static uint64_t dma_desc_phys, dma_bounce_phys;
+
+static uint32_t
+desc_checksum(const void *desc)
+{
+	const uint8_t *b = desc;
+	uint32_t sum = 0;
+
+	for (unsigned i = 0; i < 16; i++) {
+		sum += b[i];
+	}
+	return (0xffu - (sum & 0xffu)) & 0xffu;
+}
+
+/* below 4 GB (the descriptors' addresses are 32 bits; DMA_SA_H4BIT and the descriptors' high nibbles left 0) */
+static bool
+dma_alloc(void)
+{
+	const ppnum_t below_4g = (ppnum_t)(atop(0x100000000ull) - 1);
+
+	if (kmem_alloc_contig(kernel_map, &dma_desc, PAGE_SIZE, PAGE_MASK, below_4g, 0, KMA_KOBJECT | KMA_ZERO | KMA_DATA,
+	    VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS ||
+	    kmem_alloc_contig(kernel_map, &dma_bounce, BOUNCE_SIZE, PAGE_MASK, below_4g, 0, KMA_KOBJECT | KMA_ZERO | KMA_DATA,
+	    VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+		return false;
+	}
+	dma_desc_phys = kvtophys(dma_desc);
+	dma_bounce_phys = kvtophys(dma_bounce);
+	return dma_desc_phys != 0 && dma_bounce_phys != 0 && dma_desc_phys + PAGE_SIZE <= 0x100000000ull &&
+	       dma_bounce_phys + BOUNCE_SIZE <= 0x100000000ull;
+}
+
+/* the chain for `bytes` into the bounce buffer: GPD 0 (HWO, BD pointer) -> its BDs, GPD 1 the empty end */
+static void
+dma_chain(uint32_t bytes)
+{
+	struct gpd *gpd = (struct gpd *)dma_desc;
+	struct bd *bd = (struct bd *)(dma_desc + 128);   /* (the GPDs take 56 bytes; the BDs on 16 bytes after them) */
+	const uint64_t bd_phys = dma_desc_phys + 128;
+	unsigned n = (bytes + BD_PIECE - 1) / BD_PIECE;
+
+	bzero((void *)dma_desc, PAGE_SIZE);
+	for (unsigned i = 0; i < n; i++) {
+		uint32_t len = bytes - i * BD_PIECE < BD_PIECE ? bytes - i * BD_PIECE : BD_PIECE;
+
+		bd[i].ptr = (uint32_t)(dma_bounce_phys + (uint64_t)i * BD_PIECE);
+		bd[i].len = len;
+		bd[i].next = i + 1 < n ? (uint32_t)(bd_phys + (i + 1) * sizeof(struct bd)) : 0;
+		bd[i].info = i + 1 == n ? BD_EOL : 0;
+		bd[i].info |= desc_checksum(&bd[i]) << 8;
+	}
+	gpd[0].next = (uint32_t)(dma_desc_phys + sizeof(struct gpd));
+	gpd[0].ptr = (uint32_t)bd_phys;
+	gpd[0].info = GPD_HWO | GPD_BDP;
+	gpd[0].info |= desc_checksum(&gpd[0]) << 8;
+	FlushPoC_DcacheRegion(dma_desc, PAGE_SIZE);
+	FlushPoC_DcacheRegion(dma_bounce, BOUNCE_SIZE);
+}
+
+static bool
+dma_stop(void)
+{
+	wr(MSDC_DMA_CTRL, rd(MSDC_DMA_CTRL) | DMA_CTRL_STOP);
+	for (uint32_t i = 0; i < 2000000; i++) {
+		if (!(rd(MSDC_DMA_CFG) & DMA_CFG_STS)) {
+			return true;
+		}
+	}
+	return fail("DMA would not stop", rd(MSDC_DMA_CFG));
+}
+
+/* blocks of 512 bytes from the card's block lba into dst, by DMA through the bounce buffer (blocks <= EMMC_MAX_BLOCKS) */
+static bool
+read_blocks_dma(uint64_t lba, uint32_t blocks, void *dst)
+{
+	const uint32_t errors = INT_DATTMO | INT_DATCRCERR | INT_BDCSERR | INT_GPDCSERR | INT_DMAPROTECT;
+
+	if (!wait_idle()) {
+		return false;
+	}
+	/* the controller out of PIO, its interrupts and FIFO clear */
+	wr(MSDC_CFG, rd(MSDC_CFG) & ~MSDC_CFG_PIO);
+	wr(MSDC_INT, rd(MSDC_INT));
+	emmc_int_seen = 0;
+	wr(MSDC_FIFOCS, rd(MSDC_FIFOCS) | MSDC_FIFOCS_CLR);
+	for (uint32_t i = 0; i < 100000 && (rd(MSDC_FIFOCS) & MSDC_FIFOCS_CLR); i++) {
+	}
+	dma_chain(blocks * 512);
+	wr(MSDC_DMA_CFG, rd(MSDC_DMA_CFG) | DMA_CFG_DECSEN);
+	wr(MSDC_DMA_CTRL, (rd(MSDC_DMA_CTRL) & ~(DMA_CTRL_BURST | DMA_CTRL_MODE)) | DMA_BURST_64B | DMA_CTRL_MODE);
+	wr(DMA_SA_H4BIT, 0);
+	wr(MSDC_DMA_SA, (uint32_t)dma_desc_phys);
+	__builtin_arm_dsb(0xf);
+
+	wr(SDC_BLK_NUM, blocks);
+	wr(SDC_ARG, (uint32_t)lba);
+	wr(SDC_CMD, (blocks == 1 ? 17 : 18) | CMD_RSP_R1 | (blocks == 1 ? CMD_DTYPE_SINGLE : CMD_DTYPE_MULTI) | CMD_BLKLEN(512));
+	if (!wait_int(INT_CMDRDY, INT_CMDTMO | INT_RSPCRCERR, "command")) {
+		return false;
+	}
+	wr(MSDC_DMA_CTRL, rd(MSDC_DMA_CTRL) | DMA_CTRL_START);
+	if (!wait_int(INT_XFER_COMPL, errors, "DMA transfer")) {
+		(void)dma_stop();
+		if (blocks > 1) {
+			(void)stop();
+		}
+		return false;
+	}
+	if (!dma_stop()) {
+		return false;
+	}
+	if (blocks > 1 && !stop()) {
+		return false;
+	}
+	FlushPoC_DcacheRegion(dma_bounce, blocks * 512);
+	memcpy(dst, (const void *)dma_bounce, blocks * 512);
+	emmc_dma_reads++;
+	return true;
+}
+
 /* the same, tried again once after a failure (the controller cleared and the card told to stop) */
 static bool
 read_retrying(uint64_t lba, uint32_t blocks, uint32_t *dst)
 {
+	if (emmc_dma && blocks <= EMMC_MAX_BLOCKS) {
+		if (read_blocks_dma(lba, blocks, dst)) {
+			return true;
+		}
+		emmc_errors++;
+		printf("emmc: DMA of %u blocks at %llu: %s (%#x); by PIO\n", blocks, lba, emmc_failed, emmc_failed_status);
+		hakios_host_keep_add("emmc: DMA of %u blocks at %llu: %s (%#x); by PIO", blocks, lba, emmc_failed,
+		    emmc_failed_status);
+		if (++emmc_dma_failures >= 3) {
+			emmc_dma = false;
+			hakios_host_keep_add("emmc: DMA failed 3 times: PIO from now on");
+		}
+		pio_mode();
+		(void)stop();
+	}
 	if (read_blocks(lba, blocks, dst)) {
 		return true;
 	}
@@ -435,13 +622,48 @@ mtk_emmc_root(dev_t *root)
 	/* how fast: the first 4 MB, which the root's mount reads anyway */
 	probe = kalloc_data(EMMC_MAX_BLOCKS * 512, Z_WAITOK);
 	if (probe != NULL) {
+		uint32_t pio_ms, dma_on = 1;
+
 		for (uint32_t at = 0; at < 4 * 2048 && at + EMMC_MAX_BLOCKS <= emmc_blocks; at += EMMC_MAX_BLOCKS) {
 			if (!read_retrying(emmc_lba + at, EMMC_MAX_BLOCKS, probe)) {
 				break;
 			}
 		}
 		absolutetime_to_nanoseconds(mach_absolute_time() - t0, &ns);
-		printf("emmc: 4 MB in %llu ms\n", ns / 1000000);
+		pio_ms = (uint32_t)(ns / 1000000);
+		printf("emmc: 4 MB in %u ms by PIO\n", pio_ms);
+		/* DMA: the same 128 KB both ways, compared, then 4 MB timed */
+		PE_parse_boot_argn("emmc_dma", &dma_on, sizeof(dma_on));
+		uint8_t *by_dma = dma_on ? kalloc_data(EMMC_MAX_BLOCKS * 512, Z_WAITOK) : NULL;
+		if (by_dma != NULL && dma_alloc() && read_blocks(emmc_lba, EMMC_MAX_BLOCKS, probe) &&
+		    read_blocks_dma(emmc_lba, EMMC_MAX_BLOCKS, by_dma)) {
+			if (memcmp(probe, by_dma, EMMC_MAX_BLOCKS * 512) == 0) {
+				uint64_t t1 = mach_absolute_time();
+
+				emmc_dma = true;
+				for (uint32_t at = 0; at < 4 * 2048 && at + EMMC_MAX_BLOCKS <= emmc_blocks; at += EMMC_MAX_BLOCKS) {
+					if (!read_retrying(emmc_lba + at, EMMC_MAX_BLOCKS, probe)) {
+						break;
+					}
+				}
+				absolutetime_to_nanoseconds(mach_absolute_time() - t1, &ns);
+				hakios_host_keep_add("emmc: DMA on: 128 KB the same as by PIO; 4 MB in %llu ms (PIO %u ms); "
+				    "descriptors at %#llx, bounce at %#llx", ns / 1000000, pio_ms, dma_desc_phys, dma_bounce_phys);
+			} else {
+				hakios_host_keep_add("emmc: DMA read 128 KB other than PIO did: PIO only");
+			}
+		} else if (dma_on) {
+			pio_mode();
+			(void)stop();
+			hakios_host_keep_add("emmc: no DMA (%s, %#x): PIO, 4 MB in %u ms", emmc_failed ? emmc_failed : "no memory",
+			    emmc_failed_status, pio_ms);
+		}
+		if (!emmc_dma) {
+			pio_mode();
+		}
+		if (by_dma != NULL) {
+			kfree_data(by_dma, EMMC_MAX_BLOCKS * 512);
+		}
 		kfree_data(probe, EMMC_MAX_BLOCKS * 512);
 	}
 	emmc_bmajor = bdevsw_add(-1, &emmc_bdevsw);
@@ -472,8 +694,8 @@ emmc_sysctl SYSCTL_HANDLER_ARGS
 #pragma unused(oidp, arg1, arg2)
 	char line[160];
 
-	snprintf(line, sizeof(line), "emmc: %llu reads, %llu MB, %llu errors%s%s", emmc_reads, emmc_read_blocks >> 11,
-	    emmc_errors, emmc_failed ? "; last: " : "", emmc_failed ? emmc_failed : "");
+	snprintf(line, sizeof(line), "emmc: %llu reads, %llu MB, %llu errors, %llu by DMA%s%s", emmc_reads,
+	    emmc_read_blocks >> 11, emmc_errors, emmc_dma_reads, emmc_failed ? "; last: " : "", emmc_failed ? emmc_failed : "");
 	return SYSCTL_OUT(req, line, strlen(line) + 1);
 }
 
