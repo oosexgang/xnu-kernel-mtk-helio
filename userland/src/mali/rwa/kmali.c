@@ -53,6 +53,16 @@ static struct km_bo *surfaces;        /* imported, by surface */
 static uint64_t made_ns, made_max_ns, made_bytes, made_small, made_small_ns;   /* km_made_time */
 static struct km_bo *closing;         /* imported, let go while the GPU still had them: closed once done (reap) */
 /*
+ * Imported surfaces let go by their last texture, kept for a second (four at most) before they are closed: the window
+ * server makes a texture over the same surface again a frame or two later, and each import is a kernel call of ~10 ms
+ * under the library's lock (run 620: rwa_texture_from_surface over 5 ms 72 to 143 times in 30 s). MiniIOSurface's ids
+ * only grow, so an id found here is the same surface. The kernel holds the surface while the buffer is there.
+ */
+#define KM_LINGER_NS 1000000000ull
+#define KM_LINGER_MAX 4
+static struct km_bo *lingering;       /* newest first; ->busy_seq as ever, ->linger_since set */
+static uint64_t linger_revived;
+/*
  * The library's 256 KB chunks (descriptors, varyings: rwa_mali.c CHUNK) kept apart from the cache, oldest first: a pass
  * takes one or two and gives them back when its job is done, ~130 passes a second while an application opens. In the
  * cache with the textures, the big ones pushed them out, and each one made again is a kernel call of ~1.4 ms (wired,
@@ -228,9 +238,20 @@ close_later(struct km_bo *bo)
 	pthread_mutex_unlock(&lock);
 }
 
+static void reap(void);
+
 void
 km_close_pending(void)
 {
+	/* the lingering surfaces past their time, at most every 100 ms (an idle window server releases nothing else) */
+	if (__atomic_load_n(&lingering, __ATOMIC_RELAXED) != NULL) {
+		static uint64_t last;
+		const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+		if (now - __atomic_load_n(&last, __ATOMIC_RELAXED) > 100000000ull) {
+			__atomic_store_n(&last, now, __ATOMIC_RELAXED);
+			reap();
+		}
+	}
 	if (__atomic_load_n(&to_close, __ATOMIC_RELAXED) == NULL)
 		return;
 	pthread_mutex_lock(&lock);
@@ -412,10 +433,26 @@ km_bo_new(uint64_t size, char *why, size_t why_size)
 static void
 reap(void)
 {
-	if (__atomic_load_n(&closing, __ATOMIC_RELAXED) == NULL)
+	if (__atomic_load_n(&closing, __ATOMIC_RELAXED) == NULL && __atomic_load_n(&lingering, __ATOMIC_RELAXED) == NULL)
 		return;
 	struct km_bo *gone = NULL;
 	pthread_mutex_lock(&lock);
+	{
+		/* the lingering ones past their second or past the first four: to be closed once their last job is done */
+		const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+		unsigned kept = 0;
+		for (struct km_bo **p = &lingering; *p != NULL;) {
+			struct km_bo *b = *p;
+			if (kept < KM_LINGER_MAX && now - b->linger_since < KM_LINGER_NS) {
+				kept++;
+				p = &b->next;
+				continue;
+			}
+			*p = b->next;
+			b->next = closing;
+			closing = b;
+		}
+	}
 	for (struct km_bo **p = &closing; *p != NULL;) {
 		struct km_bo *b = *p;
 		if (done(b->busy_seq)) {
@@ -460,16 +497,13 @@ km_bo_release(struct km_bo *bo, uint64_t seq)
 					break;
 				}
 		}
-		if (last && !done(bo->busy_seq)) {
-			bo->next = closing;     /* closed by reap() once its last job is done, not waited for here */
-			closing = bo;
-			last = false;
+		if (last) {
+			bo->linger_since = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+			bo->next = lingering;   /* kept a second for a texture over it again (km_surface), then closed (reap) */
+			lingering = bo;
 		}
 		pthread_mutex_unlock(&lock);
 		reap();
-		if (!last)
-			return;
-		close_later(bo);
 		return;
 	}
 	reap();
@@ -524,6 +558,18 @@ km_surface(uint32_t surface_id, struct km_surface_info *info, char *why, size_t 
 	for (struct km_bo *b = surfaces; b != NULL; b = b->next)
 		if (b->surface_id == surface_id) {
 			b->surface_refs++;
+			*info = b->surface;
+			pthread_mutex_unlock(&lock);
+			return b;
+		}
+	for (struct km_bo **p = &lingering; *p != NULL; p = &(*p)->next)
+		if ((*p)->surface_id == surface_id) {
+			struct km_bo *b = *p;
+			*p = b->next;
+			b->surface_refs = 1;
+			b->next = surfaces;
+			surfaces = b;
+			linger_revived++;
 			*info = b->surface;
 			pthread_mutex_unlock(&lock);
 			return b;

@@ -33,6 +33,7 @@ struct km_bo {
 	uint32_t surface_id;    /* an imported one's IOSurface, and how many hold it (the kernel's handle is one a surface) */
 	unsigned surface_refs;
 	struct km_surface_info surface;
+	uint64_t linger_since;  /* an imported one let go by its last texture, kept a while (kmali.c lingering) */
 	struct km_bo *next;     /* the cache's list */
 };
 
