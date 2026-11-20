@@ -658,13 +658,16 @@ rwa_clock_ns(void)
  * the same stages from the same QuartzCore library with the same Mesa, so the recipes and variant configurations the
  * runs collected are compiled there (tools rwacache) and their results put in the small image: /hakios/share/
  * rwa-cache.bin, records of a 64-bit key -- FNV-1a of everything a compile takes: the stage, its entry, its module, the
- * function constants, the configuration folded in, the pipeline's shape, the fragment stage's noperspective set (for
- * the vertex stage), the boot-args that change a compile, and this format's version -- and the stage as it came out.
+ * function constants, the configuration folded in, of the pipeline's shape only what a compile reads (a fragment
+ * stage's colour attachment count), the fragment stage's noperspective set (for the vertex stage), the boot-args that
+ * change a compile, and this format's version -- and the stage as it came out.
  * A stage found there is loaded, its code uploaded and its Renderer State packed, in a millisecond; one not found is
  * compiled as before. RWA_CACHE_OUT=FILE (the Mac): each stage compiled is appended to FILE. Boot-arg rwn_cache=0: not
  * looked at.
  */
-#define RWA_CACHE_VERSION 1u
+/* 2: the shape's colour count alone in the key (run 593: 92 stages compiled on the phone, most of them the same
+ * function and constants as a record, in a pipeline of another vertex layout or blend) */
+#define RWA_CACHE_VERSION 2u
 
 static uint64_t
 fnv64(uint64_t h, const void *data, size_t size)
@@ -751,9 +754,13 @@ stage_key(unsigned gpu_id, const void *bitcode, size_t size, const char *entry, 
 	if (config_size)
 		h = fnv64(h, config, config_size);
 	key_part[3] = config_size ? fnv64(0xcbf29ce484222325ull, config, config_size) : 0;
-	if (shape)
-		h = fnv64(h, shape, sizeof(*shape));
-	key_part[4] = shape ? fnv64(0xcbf29ce484222325ull, shape, sizeof(*shape)) : 0;
+	/* of the shape, what rwa_stage_compile reads: whether there is one, and for a fragment stage the colour attachments'
+	 * count (its outputs past them are dropped). The formats, blends and vertex layout are the render's
+	 * (rwa_render_prepare: blend descriptors and shaders, attribute records), never the stage's code */
+	uint32_t sk[2] = { shape != NULL,
+			   want == MESA_SHADER_FRAGMENT && shape != NULL ? MAX2(shape->color_count, 1) : 0 };
+	h = fnv64(h, sk, sizeof(sk));
+	key_part[4] = fnv64(0xcbf29ce484222325ull, sk, sizeof(sk));
 	return h;
 }
 
