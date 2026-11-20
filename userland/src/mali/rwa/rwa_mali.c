@@ -3769,8 +3769,28 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *dr, char *why,
 		say(why, why_size, "a draw with no pipeline");
 		return -1;
 	}
+	uint64_t before[7];
+	memcpy(before, phase_ns, sizeof(before));
 	int e = draw(render, dr, why, why_size);
-	stats.draw_ns += now_ns() - began;
+	const uint64_t took = now_ns() - began;
+	stats.draw_ns += took;
+	/* a draw over 8 ms of its own (the lock already held), where it went, kept: the first 30 of a process. Run 624:
+	 * all of it in "batch" or "varyings+jobs", i.e. in a submit -- the kernel's queue of 64 jobs full, the processor
+	 * waiting for the GPU (mtk_mali.c mtk_mali_enqueue): an opening's first frames are the GPU's, ~40 to 50 ms of
+	 * full passes. (Not when the 30-second report emptied the counters during the draw.) */
+	bool counted = true;
+	for (unsigned i = 0; i < 7; i++)
+		counted &= phase_ns[i] >= before[i];
+	if (took > 8000000 && counted) {
+		static unsigned said;
+		if (said < 30) {
+			said++;
+			keep("slow draw %.1f ms (%s): checks %.1f, batch %.1f, index+viewport %.1f, vs %.1f, fs %.1f, attrs %.1f, "
+			     "varyings+jobs %.1f", took / 1e6, render->fs.name, (phase_ns[0] - before[0]) / 1e6,
+			     (phase_ns[1] - before[1]) / 1e6, (phase_ns[2] - before[2]) / 1e6, (phase_ns[3] - before[3]) / 1e6,
+			     (phase_ns[4] - before[4]) / 1e6, (phase_ns[5] - before[5]) / 1e6, (phase_ns[6] - before[6]) / 1e6);
+		}
+	}
 	if (e != 0) {
 		stats.refused++;
 		note_refusal(render->fs.name, why);
