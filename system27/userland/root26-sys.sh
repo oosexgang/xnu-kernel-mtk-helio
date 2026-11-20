@@ -225,6 +225,9 @@ echo "/hakios/lib/libhakios-backlight.dylib SpringBoard" >> $T/etc/inject.conf
 # hw.backlight; backboardd for CoreBrightness's own side (src: system27/userland/inject_brightness.c). It does
 # nothing where the kernel has no backlight (boot-arg backlight=0).
 echo "/hakios/lib/libhakios-brightness.dylib SpringBoard backboardd Preferences" >> $T/etc/inject.conf
+# Spotlight gets libhakios.dylib too, for one thing: its search ranked without the L3 model, which is a downloaded asset
+# and in no image here (src/inject.c spotlight_fixes; run 628: Spotlight died of it with the first results).
+sed -i '' -e 's|^\(/hakios/lib/libhakios\.dylib .*\)$|\1 Spotlight|' $T/etc/inject.conf
 # The kernel matches executable names, not the build template's @apps token.
 python3 - "$T/etc/inject.conf" "$REL/rootfs" <<'PY'
 import pathlib, plistlib, sys

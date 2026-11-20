@@ -1958,6 +1958,52 @@ container_manager_fixes(void)
 	say("hakios: container manager: no personas\n");
 }
 
+/* ---- Spotlight ------------------------------------------------------------------------------------ */
+
+/*
+ * Search without its ranking model: -[L3ModelManager loadModel] does nothing, so the model stays not loaded and the
+ * results are ranked without it. The model (spotlight_l3_ios*.mlmodelc) is a downloaded asset on a phone and is in
+ * neither image here; SSDefaultsGetAssetPath answers nil and loadModel hands that to +[NSURL fileURLWithPath:],
+ * whose exception ends Spotlight -- the search the home screen pulls down vanished with the first results (run 628,
+ * signal 6: -[SSRankingManager rankSections...] -> -[L3ModelManager loadModel] -> fileURLWithPath:).
+ */
+static void
+no_l3_model(__unused id self, __unused SEL selector)
+{
+}
+
+static bool spotlight_hooked;
+
+static void
+spotlight_fixes(void)
+{
+	Class cls = objc_getClass("L3ModelManager");
+	Method method = cls ? class_getInstanceMethod(cls, sel_registerName("loadModel")) : NULL;
+	IMP original = method ? method_getImplementation(method) : NULL;
+
+	if (spotlight_hooked || original == NULL) {
+		return;
+	}
+	spotlight_hooked = true;
+	/* the 27 release's (24B119); elsewhere the address differs and it is left alone */
+	if ((uintptr_t)original != 0x20ec4b594UL + slide) {
+		say("hakios: -[L3ModelManager loadModel]: found %#lx, not what was expected; left alone\n",
+		    (uintptr_t)original - slide);
+		return;
+	}
+	method_setImplementation(method, (IMP)no_l3_model);
+	say("hakios: Spotlight: searches ranked without the L3 model (not in the image)\n");
+}
+
+/* SpotlightServices may come in after this library starts: looked for again as each image is added */
+static void
+spotlight_image_added(__unused const struct mach_header *header, __unused intptr_t slide_of_image)
+{
+	if (!spotlight_hooked) {
+		spotlight_fixes();
+	}
+}
+
 /* ---------------------------------------------------------------------------------------------- */
 
 /*
@@ -3278,6 +3324,11 @@ hakios_init(void)
 		orientation_start();
 	} else if (strncmp(name, "containermanagerd", 17) == 0) {
 		container_manager_fixes();
+	} else if (strcmp(name, "Spotlight") == 0) {
+		spotlight_fixes();
+		if (!spotlight_hooked) {
+			_dyld_register_func_for_add_image(spotlight_image_added);
+		}
 	} else if (strcmp(name, "bluetoothd") == 0) {
 		char line[80];
 
