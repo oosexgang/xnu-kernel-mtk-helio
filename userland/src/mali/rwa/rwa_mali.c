@@ -768,6 +768,7 @@ rwa_texture_copy(struct rwa_texture *dst, unsigned dst_level, unsigned dst_slice
 		 struct rwa_texture *src, unsigned src_level, unsigned src_slice, const unsigned src_origin[3],
 		 const unsigned size[3], char *why, size_t why_size)
 {
+	const uint64_t c_lock = now_ns();
 	GUARD();
 	if (dst->blocksize != src->blocksize || dst->bw != src->bw) {
 		say(why, why_size, "a copy between formats of different texel sizes");
@@ -780,14 +781,27 @@ rwa_texture_copy(struct rwa_texture *dst, unsigned dst_level, unsigned dst_slice
 	if (region_ok(dst, dst_level, dst_slice, dst_origin, size, why, why_size) != 0 ||
 	    region_ok(src, src_level, src_slice, src_origin, size, why, why_size) != 0)
 		return -1;
+	const uint64_t c0 = now_ns();
 	store_sync(src->store);
 	store_sync(dst->store);
+	const uint64_t c1 = now_ns();
 	unsigned bx = DIV_ROUND_UP(size[0], dst->bw), by = DIV_ROUND_UP(size[1], dst->bh);
 	for (unsigned z = 0; z < MAX2(size[2], 1); z++)
 		for (unsigned y = 0; y < by; y++)
 			memmove(texel_at(dst, dst_level, dst_slice, dst_origin[0], dst_origin[1] + y * dst->bh, dst_origin[2] + z),
 				texel_at(src, src_level, src_slice, src_origin[0], src_origin[1] + y * src->bh, src_origin[2] + z),
 				(size_t)bx * dst->blocksize);
+	const uint64_t c2 = now_ns();
+	/* a copy of more than 50 ms said (the first 30): runs 598 to 603 had one blit of 425 to 935 ms in each buffer that
+	 * held an application's opening back */
+	static unsigned slow_said;
+	if (c2 - c_lock > 50000000ull && slow_said < 30) {
+		slow_said++;
+		keep("slow copy %.0f ms (the library's lock %.0f, waiting for the GPU %.0f, copying %.0f): %ux%ux%u %s level %u -> "
+		     "%s %ux%u level %u", (c2 - c_lock) / 1e6, (c0 - c_lock) / 1e6, (c1 - c0) / 1e6, (c2 - c1) / 1e6, size[0], size[1], MAX2(size[2], 1),
+		     util_format_short_name(src->format), src_level, util_format_short_name(dst->format), dst->shape.width,
+		     dst->shape.height, dst_level);
+	}
 	return 0;
 }
 
@@ -832,6 +846,52 @@ rwa_texture_mipmaps(struct rwa_texture *t, char *why, size_t why_size)
 		return -1;
 	}
 	store_sync(t->store);
+	/* the levels made in the processor's own memory: level 0 read once, row by row, out of the GPU's buffer (write-
+	 * combined -- ~3 us a KB read, and the loop below read every byte four times through it: an application's
+	 * snapshot of 750x1624, mipmapped as CoreAnimation zooms it at an opening, took 425 to 935 ms in one blit, the
+	 * frames held back that long, runs 603 and 604), each level written back by rows. The same box filter, rounded the
+	 * same way; the old loop is the fallback when there is no memory for it. */
+	const unsigned bs = t->blocksize;
+	uint8_t *prev = malloc((size_t)t->shape.width * t->shape.height * bs);
+	uint8_t *cur = prev ? malloc((size_t)u_minify(t->shape.width, 1) * u_minify(t->shape.height, 1) * bs) : NULL;
+	if (prev != NULL && cur != NULL && levels > 1) {
+		for (unsigned layer = 0; layer < t->layers; layer++) {
+			unsigned pw = t->shape.width, ph = t->shape.height;
+			for (unsigned y = 0; y < ph; y++)
+				memcpy(prev + (size_t)y * pw * bs, texel_at(t, 0, layer, 0, y, 0), (size_t)pw * bs);
+			for (unsigned l = 1; l < levels; l++) {
+				unsigned w = u_minify(t->shape.width, l), h = u_minify(t->shape.height, l);
+				for (unsigned y = 0; y < h; y++) {
+					const unsigned y0 = MIN2(2 * y, ph - 1), y1 = MIN2(2 * y + 1, ph - 1);
+					const uint8_t *r0 = prev + (size_t)y0 * pw * bs, *r1 = prev + (size_t)y1 * pw * bs;
+					uint8_t *o = cur + (size_t)y * w * bs;
+					for (unsigned x = 0; x < w; x++) {
+						const unsigned x0 = MIN2(2 * x, pw - 1), x1 = MIN2(2 * x + 1, pw - 1);
+						for (unsigned c = 0; c < bs; c++) {
+							unsigned s = r0[x0 * bs + c] + r0[x1 * bs + c] + r1[x0 * bs + c] + r1[x1 * bs + c];
+							o[x * bs + c] = (uint8_t)((s + 2) / 4);
+						}
+					}
+					memcpy(texel_at(t, l, layer, 0, y, 0), o, (size_t)w * bs);
+				}
+				uint8_t *swap = prev;   /* (cur, the smaller, becomes the source; prev's room holds any level after) */
+				prev = cur;
+				cur = swap;
+				pw = w;
+				ph = h;
+			}
+			if (prev != NULL && cur != NULL && (levels - 1) % 2 == 1) {
+				uint8_t *swap = prev;   /* back as allocated: prev the big one, for the next layer */
+				prev = cur;
+				cur = swap;
+			}
+		}
+		free(prev);
+		free(cur);
+		return 0;
+	}
+	free(prev);
+	free(cur);
 	for (unsigned layer = 0; layer < t->layers; layer++)
 		for (unsigned l = 1; l < levels; l++) {
 			unsigned w = u_minify(t->shape.width, l), h = u_minify(t->shape.height, l);

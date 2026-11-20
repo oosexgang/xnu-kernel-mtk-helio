@@ -123,14 +123,49 @@ rwm_run_works(struct rwa_device *device, struct rwm_work *const *works, unsigned
 {
 	struct rwm_texture *drawn[64];
 	unsigned ndrawn = 0;
+	/* boot-arg rwm_slowcb=MS: a command buffer that took longer, said (kept, the first 60) with where the time went --
+	 * runs 598 to 602: buffers of 450 to 970 ms while applications opened, the GPU waited for 0.2 ms of them, no
+	 * pipeline built, nothing read from the eMMC that could explain it */
+	static long slow_ms = -2;
+	if (slow_ms == -2) {
+		const char *at = strstr(rwm_boot_args(), "rwm_slowcb=");
+		slow_ms = at != nullptr ? atol(at + 11) : -1;
+	}
+	const uint64_t t_start = rwm_ns();
+	uint64_t t_kind[4] = { 0, 0, 0, 0 }, t_copyin = 0, t_draw_max = 0;   /* blit, draw, dispatch, other */
+	unsigned n_kind[4] = { 0, 0, 0, 0 }, n_copyin = 0;
+	const char *slowest = nullptr;
 
 	*waited_ns = 0;
 	for (unsigned n = 0; n < count; n++) {
 		struct rwm_work *w = works[n];
+		const uint64_t t0 = rwm_ns();
 
 		for (unsigned i = 0; copy && i < w->copy_in_count; i++) {
 			rwm_copy_in(w->copy_in[i]);
+			n_copyin++;
 		}
+		const uint64_t t1 = rwm_ns();
+		t_copyin += t1 - t0;
+		struct work_timer {
+			uint64_t t1, *kind, *draw_max;
+			unsigned *nk;
+			const char **slowest;
+			const struct rwm_work *w;
+			~work_timer()
+			{
+				const uint64_t d = rwm_ns() - t1;
+				*kind += d;
+				(*nk)++;
+				if (w->kind == RWM_WORK_DRAW && d > *draw_max) {
+					*draw_max = d;
+					*slowest = rwm_area_label_of(w->draw.render);
+				}
+			}
+		} timer = { t1, &t_kind[w->kind == RWM_WORK_BLIT ? 0 : w->kind == RWM_WORK_DRAW ? 1 : w->kind == RWM_WORK_DISPATCH ? 2 : 3],
+			    &t_draw_max, &n_kind[w->kind == RWM_WORK_BLIT ? 0 : w->kind == RWM_WORK_DRAW ? 1 : w->kind == RWM_WORK_DISPATCH ? 2 : 3],
+			    &slowest, w };
+		(void)timer;
 		switch (w->kind) {
 		case RWM_WORK_BLIT:
 			if (rwm_run_blit(&w->blit, why, why_size) != 0) {
@@ -313,6 +348,7 @@ rwm_run_works(struct rwa_device *device, struct rwm_work *const *works, unsigned
 		}
 	}
 	rwm_texshot_marked = false;
+	const uint64_t t_back0 = rwm_ns();
 	for (unsigned k = 0; k < ndrawn; k++) {
 		static unsigned long times;
 		char reason[256] = { 0 };
@@ -320,6 +356,19 @@ rwm_run_works(struct rwa_device *device, struct rwm_work *const *works, unsigned
 		if (rwm_texture_sync_surface(drawn[k], reason, sizeof(reason)) != 0) {
 			say_again(times, "copy-back", reason);
 		}
+	}
+	const uint64_t t_end = rwm_ns();
+	static unsigned slow_said;
+	if (slow_ms >= 0 && t_end - t_start > (uint64_t)slow_ms * 1000000ull && slow_said < 60) {
+		char line[400];
+
+		slow_said++;
+		snprintf(line, sizeof(line), "!!rwm slowcb %.0f ms: copy-in %.1f (%u), blits %.1f (%u), draws %.1f (%u; slowest %.1f %s), "
+			 "dispatches %.1f (%u), other %.1f, submit+wait %.1f, copy-back %.1f (%u)", (t_end - t_start) / 1e6,
+			 t_copyin / 1e6, n_copyin, t_kind[0] / 1e6, n_kind[0], t_kind[1] / 1e6, n_kind[1], t_draw_max / 1e6,
+			 slowest != nullptr ? slowest + (strncmp(slowest, "com.apple.coreanimation.", 24) == 0 ? 24 : 0) : "?",
+			 t_kind[2] / 1e6, n_kind[2], t_kind[3] / 1e6, (t_back0 - began) / 1e6, (t_end - t_back0) / 1e6, ndrawn);
+		sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
 	}
 	return 0;
 }
