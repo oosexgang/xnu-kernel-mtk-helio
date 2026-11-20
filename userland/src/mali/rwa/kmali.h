@@ -60,7 +60,7 @@ uint64_t km_last_seq(void);
 int km_surface_seq(uint32_t surface, uint64_t seq);
 /* counters for the five-second lines: buffers made by the kernel, taken from the cache, submits */
 void km_counts(uint64_t out[4]);
-void km_made_time(uint64_t out[6]);
+void km_made_time(uint64_t out[8]);
 /* the buffers let go under the library's lock, given back to the kernel now (called as the lock is let go) */
 void km_close_pending(void);
 

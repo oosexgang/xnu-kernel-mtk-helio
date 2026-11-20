@@ -50,8 +50,18 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t made, reused, submits, cached_bytes;
 static struct km_bo *cache;           /* given back, newest first */
 static struct km_bo *surfaces;        /* imported, by surface */
-static uint64_t made_ns, made_max_ns, made_bytes;   /* km_made_time */
+static uint64_t made_ns, made_max_ns, made_bytes, made_small, made_small_ns;   /* km_made_time */
 static struct km_bo *closing;         /* imported, let go while the GPU still had them: closed once done (reap) */
+/*
+ * The library's 256 KB chunks (descriptors, varyings: rwa_mali.c CHUNK) kept apart from the cache, oldest first: a pass
+ * takes one or two and gives them back when its job is done, ~130 passes a second while an application opens. In the
+ * cache with the textures, the big ones pushed them out, and each one made again is a kernel call of ~1.4 ms (wired,
+ * flushed, mapped for the GPU). Run 621: a draw's "batch" and "varyings+jobs" parts 63 + 27 us -> 38 + 7 us.
+ */
+#define KM_CHUNK_SIZE (256u << 10)
+#define KM_CHUNKS_KEPT 48
+static struct km_bo *chunk_head, *chunk_tail;   /* given back, oldest at the head */
+static unsigned chunk_count;
 /* Not more: run 618 kept 128 MB here (with the closing on a queue of its own) and the phone ran out of memory -- 30 MB
  * free, buffers made and given back in up to 3 and 6 s, surfaces imported in up to 7 s, no frame for ten seconds */
 #define KM_CACHE_MAX (48ull << 20)
@@ -279,6 +289,19 @@ km_bo_new(uint64_t size, char *why, size_t why_size)
 		return bo;
 	}
 	pthread_mutex_lock(&lock);
+	if (size == KM_CHUNK_SIZE && chunk_head != NULL && done(chunk_head->busy_seq)) {
+		/* the oldest chunk given back, its job done (the ones after it were given back later: not looked at) */
+		struct km_bo *b = chunk_head;
+		chunk_head = b->next;
+		if (chunk_head == NULL)
+			chunk_tail = NULL;
+		chunk_count--;
+		b->next = NULL;
+		b->busy_seq = 0;
+		reused++;
+		pthread_mutex_unlock(&lock);
+		return b;
+	}
 	/* the smallest free one that is big enough and not more than twice the size; one found busy, every one of its
 	 * job or later is busy too (done) */
 	struct km_bo **best = NULL;
@@ -318,6 +341,12 @@ km_bo_new(uint64_t size, char *why, size_t why_size)
 		struct km_bo *all = cache;
 		cache = NULL;
 		cached_bytes = 0;
+		if (chunk_tail != NULL) {               /* and the chunks kept */
+			chunk_tail->next = all;
+			all = chunk_head;
+			chunk_head = chunk_tail = NULL;
+			chunk_count = 0;
+		}
 		pthread_mutex_unlock(&lock);
 		while (all != NULL) {
 			struct km_bo *n = all->next;
@@ -364,6 +393,10 @@ km_bo_new(uint64_t size, char *why, size_t why_size)
 	made++;
 	made_ns += took;
 	made_bytes += mapped;
+	if (mapped <= (256u << 10)) {           /* chunks (CHUNK) and the window server's small buffers */
+		made_small++;
+		made_small_ns += took;
+	}
 	if (took > made_max_ns)
 		made_max_ns = took;
 	pthread_mutex_unlock(&lock);
@@ -443,6 +476,17 @@ km_bo_release(struct km_bo *bo, uint64_t seq)
 	pthread_mutex_lock(&lock);
 	if (seq > bo->busy_seq)
 		bo->busy_seq = seq;
+	if (bo->size == KM_CHUNK_SIZE && chunk_count < KM_CHUNKS_KEPT) {
+		bo->next = NULL;
+		if (chunk_tail != NULL)
+			chunk_tail->next = bo;
+		else
+			chunk_head = bo;
+		chunk_tail = bo;
+		chunk_count++;
+		pthread_mutex_unlock(&lock);
+		return;
+	}
 	bo->next = cache;
 	cache = bo;
 	cached_bytes += bo->size;
@@ -609,15 +653,17 @@ km_surface_seq(uint32_t surface, uint64_t seq)
 }
 
 /* the buffers made by the kernel (not from the cache) since the last call: time in all, the longest, bytes; and those
- * given back on the closing queue: how many, time in all, the longest */
+ * given back: how many, time in all, the longest; and of those made, how many were 256 KB or less, and their time */
 void
-km_made_time(uint64_t out[6])
+km_made_time(uint64_t out[8])
 {
 	pthread_mutex_lock(&lock);
 	out[0] = made_ns;
 	out[1] = made_max_ns;
 	out[2] = made_bytes;
-	made_ns = made_max_ns = made_bytes = 0;
+	out[6] = made_small;
+	out[7] = made_small_ns;
+	made_ns = made_max_ns = made_bytes = made_small = made_small_ns = 0;
 	pthread_mutex_unlock(&lock);
 	out[3] = __atomic_exchange_n(&closed_n, 0, __ATOMIC_RELAXED);
 	out[4] = __atomic_exchange_n(&closed_ns, 0, __ATOMIC_RELAXED);

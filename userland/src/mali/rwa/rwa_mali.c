@@ -2429,9 +2429,18 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 	}
 	ring_slot[slot].seq = seq;
 	use_bo(b, ring);
-	for (unsigned i = 0; i < RING; i++)
-		if (i != slot)
+	/* the slots whose job is done, checked; a job not done means none after it is (one queue, in order): those are
+	 * not asked of the kernel, a call each, at every pass */
+	{
+		uint64_t not_done = UINT64_MAX;
+		for (unsigned i = 0; i < RING; i++) {
+			if (i == slot || ring_slot[i].seq == 0 || ring_slot[i].seq >= not_done)
+				continue;
 			ring_check(i, false);
+			if (ring_slot[i].seq != 0)
+				not_done = ring_slot[i].seq;
+		}
+	}
 	stats.batches++;
 	stats.flush_ns += now_ns() - began;
 	if (boot_arg("mali_native_sync=1"))
@@ -4048,9 +4057,16 @@ rwa_dispatch_buffers(struct rwa_compute *c, const struct rwa_bindings *bindings,
 	cring_slot[slot].seq = seq;
 	batch_free(b, seq);
 	stats.dispatches++;
-	for (unsigned i = 0; i < CRING; i++)
-		if (i != slot)
+	{
+		uint64_t not_done = UINT64_MAX;   /* (as the fragment ring's) */
+		for (unsigned i = 0; i < CRING; i++) {
+			if (i == slot || cring_slot[i].seq == 0 || cring_slot[i].seq >= not_done)
+				continue;
 			cring_check(i, false);
+			if (cring_slot[i].seq != 0)
+				not_done = cring_slot[i].seq;
+		}
+	}
 	static int sync = -1;
 	if (sync < 0)
 		sync = boot_arg("rwn_syncdispatch=1");
@@ -4379,12 +4395,13 @@ report(void)
 			n += snprintf(line + n, sizeof(line) - n, " %s %ux %.0f ms (max %.1f)", long_hold[k].func, long_hold[k].n,
 				      long_hold[k].total_ns / 1e6, long_hold[k].max_ns / 1e6);
 		keep("%s", line);
-		uint64_t mt[6];
+		uint64_t mt[8];
 		km_made_time(mt);
-		keep("30s: buffers made by the kernel: %llu in %llu ms (longest %.1f ms), %llu MB; given back: %llu in %llu ms "
-		     "(longest %.1f ms)", (unsigned long long)k[0], (unsigned long long)(mt[0] / 1000000), mt[1] / 1e6,
-		     (unsigned long long)(mt[2] >> 20), (unsigned long long)mt[3], (unsigned long long)(mt[4] / 1000000),
-		     mt[5] / 1e6);
+		keep("30s: buffers made by the kernel: %llu in %llu ms (longest %.1f ms), %llu MB, %llu of 256 KB or less in %llu "
+		     "ms; given back: %llu in %llu ms (longest %.1f ms)", (unsigned long long)k[0],
+		     (unsigned long long)(mt[0] / 1000000), mt[1] / 1e6, (unsigned long long)(mt[2] >> 20),
+		     (unsigned long long)mt[6], (unsigned long long)(mt[7] / 1000000), (unsigned long long)mt[3],
+		     (unsigned long long)(mt[4] / 1000000), mt[5] / 1e6);
 		memset(long_hold, 0, sizeof(long_hold));
 		lock_wait_ns = lock_wait_max = lock_waits_long = lock_holds = 0;
 	}
