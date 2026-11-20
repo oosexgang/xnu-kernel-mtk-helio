@@ -628,6 +628,20 @@ poster_switcher_allowed(__unused id self, __unused SEL selector, id *explanation
 }
 
 /*
+ * The Clock icon's second hand stands still, as in Low Power Mode: -[SBHClockApplicationIconImageView
+ * _shouldAnimateClock] says NO, so the icon runs no display link of its own and keeps the time with its tick timer.
+ * The display link ran at the icon's __secondFrameRange, 10 a second, whenever the home screen showed the icon after
+ * an application had been opened, and CoreAnimation answered every tick by drawing the whole home screen again
+ * (93 draws, 82 into the display's surfaces; runs 605 to 610: command buffers 6 refreshes apart for seconds on end,
+ * backboardd 30 to 50 % of a core with nothing else moving). Boot-arg sb_clockhand=1: the second hand moves.
+ */
+static BOOL
+clock_should_not_animate(__unused id self, __unused SEL selector)
+{
+	return NO;
+}
+
+/*
  * What SpringBoard has put on the screen, as CoreAnimation has it: every layer of every window, a
  * line each -- class and name, place, opacity, what it shows (an image, a colour, another
  * process's layers), and what is done to it: its filters by type with their inputs, in order,
@@ -1747,6 +1761,19 @@ hakios_springboard_init(void)
 	    (IMP)lock_long_press);
 	poster_switcher = replace_method("SBMainDisplayPolicyAggregator", "_allowsCapabilityPosterSwitcherWithExplanation:",
 	    0x1c507e0fcUL, (IMP)poster_switcher_allowed);
+	{
+		char args[1024] = "";
+		size_t size = sizeof(args) - 1;
+
+		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "sb_clockhand=1") != NULL) {
+			say("hakios: SpringBoard: the Clock icon's second hand moves (sb_clockhand=1)\n");
+		} else {
+			/* the 27 release's (24B119); elsewhere the address differs and it is left alone */
+			say("hakios: SpringBoard: the Clock icon's second hand %s\n",
+			    replace_method("SBHClockApplicationIconImageView", "_shouldAnimateClock", 0x1c5ea87ccUL,
+					   (IMP)clock_should_not_animate) != NULL ? "stands still" : "NOT stopped");
+		}
+	}
 	original_switcher_wallpaper_overlay = (void (*)(id, SEL))replace_method("SBAppSwitcherPageView",
 	    "_createOrDestroyWallpaperOverlayView", 0x1c4af7860UL, (IMP)switcher_wallpaper_overlay);
 	/* the 27 release's only (24B119); elsewhere the address differs and it is left alone */
