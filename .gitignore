@@ -91,3 +91,8 @@ fw-*/
 *.ko
 *.apfs
 *.zst
+
+# the agents' handbook (agents/ and AGENTS.md, which points to it): this machine's working notes for whoever
+# continues the work -- never published
+/agents/
+/AGENTS.md
