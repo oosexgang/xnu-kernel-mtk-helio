@@ -399,6 +399,57 @@ static unsigned reports, touches;
 static uint32_t last_x, last_y;
 
 /*
+ * Boot-arg touch_log=1: every finger lifted, a line kept for the host (hakios_host_keep_add) -- when it landed, where
+ * it went in thousandths of the panel, for how long, and what that was: a tap, a hold, a swipe and which way, from
+ * which edge. For runs driven by hand: the window server's frame rate second by second can then be read against
+ * what was done (the shade is a swipe down from the top left, Control Center from the top right, home and the
+ * switcher a swipe up from the bottom). The first 300 of a run.
+ */
+extern void hakios_host_keep_add(const char *format, ...) __printflike(1, 2);
+static uint32_t touch_log = 2;                  /* 2: not yet looked up */
+static unsigned touch_logged;
+static uint64_t finger_since_ms[MAX_FINGERS];
+static uint32_t finger_x0[MAX_FINGERS], finger_y0[MAX_FINGERS], finger_x1[MAX_FINGERS], finger_y1[MAX_FINGERS];
+
+static uint64_t
+touch_now_ms(void)
+{
+	uint64_t ns;
+
+	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
+	return ns / 1000000;
+}
+
+static void
+touch_say(unsigned which)
+{
+	if (touch_log == 2) {
+		uint32_t on = 0;
+
+		touch_log = PE_parse_boot_argn("touch_log", &on, sizeof(on)) && on != 0;
+	}
+	if (!touch_log || touch_logged >= 300) {
+		return;
+	}
+	touch_logged++;
+	/* in thousandths of the panel */
+	int x0 = (int)(finger_x0[which] * 1000 / PANEL_W), y0 = (int)(finger_y0[which] * 1000 / PANEL_H);
+	int x1 = (int)(finger_x1[which] * 1000 / PANEL_W), y1 = (int)(finger_y1[which] * 1000 / PANEL_H);
+	int dx = x1 - x0, dy = y1 - y0;
+	int far = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy) ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy);
+	uint64_t now = touch_now_ms(), took = now - finger_since_ms[which];
+	const char *what = far < 30 ? (took < 500 ? "tap" : "hold") :
+	    ((dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy) ? (dx < 0 ? "swipe left" : "swipe right") :
+	    (dy < 0 ? "swipe up" : "swipe down"));
+	const char *edge = y0 < 40 ? (x0 < 500 ? " from the top left" : " from the top right") :
+	    y0 > 960 ? " from the bottom" : "";
+
+	hakios_host_keep_add("touch %llu.%03llu finger %u %d,%d -> %d,%d in %llu ms: %s%s",
+	    (unsigned long long)(finger_since_ms[which] / 1000), (unsigned long long)(finger_since_ms[which] % 1000),
+	    which, x0, y0, x1, y1, (unsigned long long)took, what, edge);
+}
+
+/*
  * A report turned into what /dev/hakios-touch wants: the position across the panel rather than
  * in the panel's own pixels, and a landing and a lifting of its own rather than a state to be
  * compared. A finger the report no longer mentions has lifted.
@@ -429,6 +480,13 @@ report(const uint8_t *buffer, uint32_t length)
 		last_y = y;
 		seen[which] = true;
 		touches++;
+		if (!down[which]) {
+			finger_since_ms[which] = touch_now_ms();
+			finger_x0[which] = x;
+			finger_y0[which] = y;
+		}
+		finger_x1[which] = x;
+		finger_y1[which] = y;
 		hakios_touch_post(down[which] ? HAKIOS_TOUCH_MOVE : HAKIOS_TOUCH_DOWN, which,
 		    picture_x(x), picture_y(y));
 		down[which] = true;
@@ -438,6 +496,7 @@ report(const uint8_t *buffer, uint32_t length)
 			hakios_touch_post(HAKIOS_TOUCH_UP, which,
 			    picture_x(last_x), picture_y(last_y));
 			down[which] = false;
+			touch_say(which);
 		}
 	}
 	reports++;
