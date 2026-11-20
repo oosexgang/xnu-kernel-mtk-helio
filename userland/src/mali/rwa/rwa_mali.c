@@ -490,7 +490,7 @@ rwa_device_name(struct rwa_device *device)
 struct rwa_buffer *
 rwa_buffer_create(struct rwa_device *device, size_t size, char *why, size_t why_size)
 {
-	GUARD();
+	/* (not under the library's lock: see rwa_texture_create) */
 	struct rwa_buffer *b = calloc(1, sizeof(*b));
 
 	if (b == NULL) {
@@ -610,10 +610,15 @@ texture_new(struct rwa_device *device, const struct rwa_texture_shape *shape)
 	return t;
 }
 
+/*
+ * Not under the library's lock, nor rwa_buffer_create: a new texture or buffer touches nothing of the library's but its
+ * own memory, and that comes from kmali.c, which has a lock of its own. When the cache has nothing of the size, the
+ * kernel makes it -- wired, flushed and mapped for the GPU, up to 25 ms for a snapshot's few MB -- and the window
+ * server's other drawing threads waited all that time (run 622: rwa_texture_create over 5 ms 24 to 50 times in 30 s).
+ */
 struct rwa_texture *
 rwa_texture_create(struct rwa_device *device, const struct rwa_texture_shape *shape, char *why, size_t why_size)
 {
-	GUARD();
 	struct rwa_texture *t = texture_new(device, shape);
 
 	if (t == NULL) {
