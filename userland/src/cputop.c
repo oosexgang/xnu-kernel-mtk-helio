@@ -3,12 +3,15 @@
  * watches, where a frame of the window server's waits for SpringBoard or an application and the
  * log says only that the cores were busy.
  *
- * usage: cputop SECONDS COUNT
+ * usage: cputop SECONDS COUNT [keep]
+ * keep: each line into the host's kept lines ("!!"), which the log keeps whole however long the run -- a line said
+ * only to the kernel's log is lost with the log's middle (it keeps its first and last minutes).
  * Goes into the background at once (a job of com.hakios.demo runs its lines one after another),
  * then every SECONDS for COUNT times: "cputop: NAME[PID] P% ..." for the six that used the most,
  * in percent of one core over the interval.
  */
 #include <mach/mach_time.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,6 +77,7 @@ int
 main(int argc, char **argv)
 {
 	unsigned seconds = argc > 1 ? (unsigned)atoi(argv[1]) : 2, count = argc > 2 ? (unsigned)atoi(argv[2]) : 100;
+	const bool keep = argc > 3 && strcmp(argv[3], "keep") == 0;
 	static struct sample before[MAX_PROCS], after[MAX_PROCS];
 	int nb, na;
 
@@ -112,7 +116,7 @@ main(int argc, char **argv)
 				}
 			}
 		}
-		length = snprintf(line, sizeof(line), "cputop:");
+		length = snprintf(line, sizeof(line), "%scputop:", keep ? "!!" : "");
 		for (int t = 0; t < 6 && top[t].index >= 0; t++) {
 			length += snprintf(line + length, sizeof(line) - length, " %s[%d] %llu%%", after[top[t].index].name,
 			                   after[top[t].index].pid,
