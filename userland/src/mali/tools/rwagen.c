@@ -17,6 +17,10 @@
 #include "nir_air.h"
 #include "rwa_priv.h"
 
+#ifndef MAX2
+#define MAX2(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 struct gen {
 	char label[96], vname[96], fname[96];
 	struct rwa_constant vc[128], fc[128];
@@ -125,10 +129,19 @@ main(int argc, char **argv)
 	}
 	char line[8192];
 	while (fgets(line, sizeof(line), f)) {
-		const char *l = strstr(line, "!!gen ");
-		if (l == NULL)
-			continue;
-		l += 6;
+		/* "!!gen ..." as said, "gen ..." as the log has it (the host's copy drops the marks) */
+		/* "gen LABEL ..." and the shape's "cap gen-LABEL-shape K: ..." (say_bytes), "!!" before each as said */
+		const char *l = strstr(line, "cap gen-");
+		if (l != NULL) {
+			l += 4;
+		} else {
+			l = strstr(line, "gen ");
+			while (l != NULL && l[4] != 'P')
+				l = strstr(l + 1, "gen ");
+			if (l == NULL || (l != line && l[-1] != ' ' && l[-1] != '!'))
+				continue;
+			l += 4;
+		}
 		char label[96], what[32];
 		if (sscanf(l, "%95s %31s", label, what) != 2)
 			continue;
@@ -140,8 +153,11 @@ main(int argc, char **argv)
 			*dash = 0;
 			struct gen *g = gen_of(label + 4, true);
 			const char *colon = strchr(l, ':');
-			if (g && colon)
-				g->shape_size += b64(colon + 2, g->shape + g->shape_size, sizeof(g->shape) - g->shape_size);
+			unsigned part = (unsigned)atoi(what);   /* "K:", 120 bytes a part (say_bytes); a line may come twice */
+			if (g && colon && part * 120 < sizeof(g->shape)) {
+				size_t got = b64(colon + 2, g->shape + part * 120, sizeof(g->shape) - part * 120);
+				g->shape_size = MAX2(g->shape_size, part * 120 + got);
+			}
 			continue;
 		}
 		struct gen *g = gen_of(label, true);
@@ -152,11 +168,21 @@ main(int argc, char **argv)
 		if (strcmp(what, "functions") == 0) {
 			sscanf(l, "%*s %*s %95s %*s %*s %95s", g->vname, g->fname);
 		} else if (strcmp(what, "vconst") == 0 && sscanf(l, "%*s %*s %u %llx", &idx, &bits) == 2 && g->nv < 128) {
-			g->vc[g->nv].index = idx;
-			g->vc[g->nv++].bits = bits;
+			bool seen = false;
+			for (unsigned k = 0; k < g->nv; k++)
+				seen |= g->vc[k].index == idx;
+			if (!seen) {
+				g->vc[g->nv].index = idx;
+				g->vc[g->nv++].bits = bits;
+			}
 		} else if (strcmp(what, "fconst") == 0 && sscanf(l, "%*s %*s %u %llx", &idx, &bits) == 2 && g->nf < 128) {
-			g->fc[g->nf].index = idx;
-			g->fc[g->nf++].bits = bits;
+			bool seen = false;
+			for (unsigned k = 0; k < g->nf; k++)
+				seen |= g->fc[k].index == idx;
+			if (!seen) {
+				g->fc[g->nf].index = idx;
+				g->fc[g->nf++].bits = bits;
+			}
 		}
 	}
 	fclose(f);
@@ -171,13 +197,23 @@ main(int argc, char **argv)
 		fprintf(stderr, "rwagen: %s\n", why);
 		return 1;
 	}
+	/* the whole list read before the first fork: a child that leaves through exit() closes the parent's stream with
+	 * it, and the descriptor's offset the two share goes back to where the stream had buffered -- the list read again
+	 * and again (a night's 100 000 stages) */
 	f = fopen(argv[3], "r");
 	if (f == NULL) {
 		perror(argv[3]);
 		return 1;
 	}
+	static char lines[1024][384];
+	unsigned nlines = 0;
+	while (nlines < 1024 && fgets(lines[nlines], sizeof(lines[0]), f))
+		nlines++;
+	fclose(f);
+	fflush(NULL);
 	unsigned built = 0, refused = 0, crashed = 0, unknown = 0;
-	while (fgets(line, sizeof(line), f)) {
+	for (unsigned li = 0; li < nlines; li++) {
+		const char *line = lines[li];
 		char label[96], vh[64], fh[256];
 		if (line[0] == '#' || sscanf(line, "%95s %63s %255s", label, vh, fh) != 3)
 			continue;
@@ -214,7 +250,6 @@ main(int argc, char **argv)
 		else
 			crashed++;
 	}
-	fclose(f);
 	printf("rwagen: %u generic pipelines; %u variants built, %u refused, %u stopped the Mac's compiler, %u of no "
 	       "generic pipeline said\n", ngens, built, refused, crashed, unknown);
 	return 0;

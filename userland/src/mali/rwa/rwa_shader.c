@@ -678,11 +678,12 @@ fnv64(uint64_t h, const void *data, size_t size)
 }
 
 static uint64_t
-stage_key(const void *bitcode, size_t size, const char *entry, gl_shader_stage want,
+stage_key(unsigned gpu_id, const void *bitcode, size_t size, const char *entry, gl_shader_stage want,
 	  const struct rwa_constant *constants, unsigned nconst, const void *config, unsigned config_size,
 	  const struct rwa_render_shape *shape)
 {
 	uint64_t h = 0xcbf29ce484222325ull;
+	h = fnv64(h, &gpu_id, sizeof(gpu_id));
 	uint32_t head[6] = { RWA_CACHE_VERSION, (uint32_t)want, (uint32_t)sizeof(struct rwa_stage),
 			     (uint32_t)sizeof(struct pan_shader_info), want == MESA_SHADER_VERTEX ? rwa_next_noperspective : 0,
 			     0 };
@@ -996,7 +997,7 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 		  gl_shader_stage want, const struct rwa_constant *constants, unsigned nconst, const void *config,
 		  unsigned config_size, const struct rwa_render_shape *shape, char *why, size_t why_size)
 {
-	uint64_t key = stage_key(bitcode, size, entry, want, constants, nconst, config, config_size, shape);
+	uint64_t key = stage_key(device->gpu_id, bitcode, size, entry, want, constants, nconst, config, config_size, shape);
 	memset(st, 0, sizeof(*st));
 	if (getenv("RWA_CACHE_OUT") == NULL && cache_take(key, st) == 0) {
 		if (want == MESA_SHADER_FRAGMENT)

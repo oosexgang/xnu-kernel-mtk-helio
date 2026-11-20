@@ -95,7 +95,7 @@ km_open(char *why, size_t why_size)
 {
 	if (getenv("RWA_HOST") != NULL) {
 		fake = true;
-		gpu_id = 0x7212;
+		gpu_id = 0x7402;   /* the phone's (Mali-G52 r1): the stage cache is compiled here for it */
 #ifdef RWA_PANDECODE
 		if (getenv("RWA_PANDECODE") != NULL)
 			decode = pandecode_create_context(true);
