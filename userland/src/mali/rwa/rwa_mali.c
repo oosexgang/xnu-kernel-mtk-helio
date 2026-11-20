@@ -43,14 +43,68 @@ void rwa_preload_blend(const struct rwa_device *device, enum pipe_format format,
 
 static pthread_mutex_t rwa_lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
 
+/*
+ * The lock's own accounting, for the 30-second "lock" line: how long callers waited for it, and which entry points
+ * held it longest. The window server draws from three threads (display.primary, asynchronous, render-server), and run
+ * 615 had single draws of 10 to 35 ms whose own work is ~65 us. Counted under the lock; the outermost hold only.
+ */
+static uint64_t now_ns(void);
+static _Thread_local unsigned guard_depth;
+static _Thread_local uint64_t guard_since;
+static _Thread_local const char *guard_func;
+static uint64_t lock_wait_ns, lock_wait_max, lock_waits_long, lock_holds;
+static struct {
+	const char *func;
+	uint64_t max_ns, total_ns;
+	unsigned n;
+} long_hold[8];
+
+static inline void
+note_lock(uint64_t want, const char *func)
+{
+	if (guard_depth++ != 0)
+		return;
+	uint64_t now = now_ns(), w = now - want;
+	guard_since = now;
+	guard_func = func;
+	lock_wait_ns += w;
+	lock_holds++;
+	if (w > lock_wait_max)
+		lock_wait_max = w;
+	if (w > 2000000)
+		lock_waits_long++;
+}
+
+void km_close_pending(void);
+
 static inline void
 unlock_at_return(int *held)
 {
 	(void)held;
+	const bool outermost = guard_depth == 1;
+	if (--guard_depth == 0) {
+		uint64_t h = now_ns() - guard_since;
+		if (h > 5000000) {
+			unsigned k;
+			for (k = 0; k < 8 && long_hold[k].func != NULL && long_hold[k].func != guard_func; k++)
+				;
+			if (k < 8) {
+				long_hold[k].func = guard_func;
+				long_hold[k].n++;
+				long_hold[k].total_ns += h;
+				if (h > long_hold[k].max_ns)
+					long_hold[k].max_ns = h;
+			}
+		}
+	}
 	pthread_mutex_unlock(&rwa_lock);
+	if (outermost)
+		km_close_pending();   /* buffers let go inside, given back to the kernel outside (kmali.c close_later) */
 }
 #define GUARD()                                                                                                        \
+	uint64_t rwa_guard_want_ = now_ns();                                                                           \
 	pthread_mutex_lock(&rwa_lock);                                                                                 \
+	note_lock(rwa_guard_want_, __func__);                                                                          \
 	int rwa_guard_ __attribute__((cleanup(unlock_at_return), unused)) = 1
 
 static void
@@ -834,7 +888,10 @@ rwa_buffer_fill(struct rwa_buffer *buffer, size_t offset, size_t size, uint8_t v
 	return 0;
 }
 
-/* -generateMipmapsForTexture: on the processor, a box filter of 8-bit-per-channel unsigned formats */
+static int mipmaps_gpu(struct rwa_texture *t, unsigned levels, char *why, size_t why_size);
+static uint64_t mips_gpu, mips_cpu;   /* mipmap levels made by the GPU (emit_mip_draw), textures by the processor */
+
+/* -generateMipmapsForTexture: a box filter of 8-bit-per-channel unsigned formats, on the GPU (mipmaps_gpu) or here */
 int
 rwa_texture_mipmaps(struct rwa_texture *t, char *why, size_t why_size)
 {
@@ -846,6 +903,16 @@ rwa_texture_mipmaps(struct rwa_texture *t, char *why, size_t why_size)
 		say(why, why_size, "mipmaps of %s are not made here yet", util_format_short_name(t->format));
 		return -1;
 	}
+	/*
+	 * On the GPU (boot-arg rwn_gpumips=0: on the processor, below): a pass a level, each drawn from the one before
+	 * (emit_mip_draw), in order with everything else, nothing waited for. Run 614: the processor's way still took 20 to
+	 * 75 ms of most frames of an opening -- the wait for the GPU to finish the texture first (CoreAnimation mipmaps
+	 * what it has just drawn), then 4.9 MB read back out of write-combined memory and filtered.
+	 */
+	int made = mipmaps_gpu(t, levels, why, why_size);
+	if (made != 0)
+		return made > 0 ? 0 : -1;
+	mips_cpu++;
 	store_sync(t->store);
 	/* the levels made in the processor's own memory: level 0 read once, row by row, out of the GPU's buffer (write-
 	 * combined -- ~3 us a KB read, and the loop below read every byte four times through it: an application's
@@ -2443,6 +2510,120 @@ emit_preload_draw(struct batch *b, unsigned mask, char *why, size_t why_size)
 	return 0;
 }
 
+/*
+ * One mipmap level made by the GPU: the pass B draws level SRC + 1 of T, and this is its one draw -- a rectangle over
+ * the whole level, drawn by the frame shader of one target (rwa_preload_shader: a texture lookup at the varying,
+ * written as it is), with level SRC as its texture, a bilinear unnormalized sampler and the varying running over
+ * SRC's size while the rectangle covers the smaller level. At each pixel's centre (x + 0.5) the lookup lands at
+ * 2x + 1, between four texels of SRC, and bilinear filtering averages them: the processor's box filter, made where
+ * level SRC already is, with nothing read back (rwa_texture_mipmaps).
+ */
+static int
+emit_mip_draw(struct batch *b, struct rwa_texture *t, unsigned src, char *why, size_t why_size)
+{
+	struct rwa_device *d = the_device;
+	struct rwa_stage *ps = &d->preload[1];
+
+	if (ps->code == NULL && rwa_preload_shader(d, ps, 1, why, why_size) != 0)
+		return -1;
+	struct ptr job = pool_alloc(b, pan_size(TILER_JOB), 64, why, why_size);
+	struct ptr rsd = pool_alloc(b, pan_size(RENDERER_STATE) + pan_size(BLEND), 64, why, why_size);
+	struct ptr tex = pool_alloc(b, ALIGN_POT(pan_size(TEXTURE), 64) + 64, 64, why, why_size);
+	struct ptr smp = pool_alloc(b, pan_size(SAMPLER), 64, why, why_size);
+	struct ptr var = pool_alloc(b, pan_size(ATTRIBUTE) + 2 * pan_size(ATTRIBUTE_BUFFER), 64, why, why_size);
+	struct ptr pos = pool_alloc(b, 64, 64, why, why_size);
+	struct ptr crd = pool_alloc(b, 64, 64, why, why_size);
+	struct ptr vp = pool_alloc(b, pan_size(VIEWPORT), 64, why, why_size);
+	if (!job.cpu || !rsd.cpu || !tex.cpu || !smp.cpu || !var.cpu || !pos.cpu || !crd.cpu || !vp.cpu)
+		return -1;
+	memset(job.cpu, 0, pan_size(TILER_JOB));
+	memcpy(rsd.cpu, ps->rsd, 64);
+	rwa_preload_blend(d, t->format, 0, rsd.cpu + pan_size(RENDERER_STATE), false);
+	const unsigned char id[4] = { PIPE_SWIZZLE_X, PIPE_SWIZZLE_Y, PIPE_SWIZZLE_Z, PIPE_SWIZZLE_W };
+	const unsigned sw = u_minify(t->shape.width, src), sh = u_minify(t->shape.height, src);
+	uint8_t *surf = tex.cpu + ALIGN_POT(pan_size(TEXTURE), 64);
+	const uint64_t surf_gpu = tex.gpu + ALIGN_POT(pan_size(TEXTURE), 64);
+	rwa_surface_desc(surf, t->store->bo->gpu + t->offset + t->level_offset[src], (int32_t)t->row_bytes[src], 0);
+	rwa_texture_desc(tex.cpu, t->format, id, MALI_TEXTURE_DIMENSION_2D, sw, sh, 1, 1, 1, 1, surf_gpu);
+	pan_cast_and_pack((smp.cpu), SAMPLER, cfg) {
+		cfg.seamless_cube_map = false;
+		cfg.normalized_coordinates = false;
+		cfg.minify_nearest = false;
+		cfg.magnify_nearest = false;
+		cfg.wrap_mode_s = MALI_WRAP_MODE_CLAMP_TO_EDGE;
+		cfg.wrap_mode_t = MALI_WRAP_MODE_CLAMP_TO_EDGE;
+		cfg.wrap_mode_r = MALI_WRAP_MODE_CLAMP_TO_EDGE;
+	}
+	/* the rectangle in the level's pixels, the varying in SRC's */
+	const float w = b->width, h = b->height;
+	const float rect[16] = { 0, 0, 0, 1, w, 0, 0, 1, 0, h, 0, 1, w, h, 0, 1 };
+	const float from[16] = { 0, 0, 0, 1, (float)sw, 0, 0, 1, 0, (float)sh, 0, 1, (float)sw, (float)sh, 0, 1 };
+	memcpy(pos.cpu, rect, sizeof(rect));
+	memcpy(crd.cpu, from, sizeof(from));
+	/* (attribute buffers first, 32-byte aligned: see emit_preload_dcd) */
+	uint8_t *attr_cpu = var.cpu + 2 * pan_size(ATTRIBUTE_BUFFER);
+	const uint64_t attr_gpu = var.gpu + 2 * pan_size(ATTRIBUTE_BUFFER);
+	pan_cast_and_pack((attr_cpu), ATTRIBUTE, cfg) {
+		cfg.buffer_index = 0;
+		cfg.offset_enable = false;
+		cfg.format = GENX(panfrost_format_from_pipe_format)(PIPE_FORMAT_R32G32B32_FLOAT)->hw;
+	}
+	pan_cast_and_pack((var.cpu), ATTRIBUTE_BUFFER, cfg) {
+		cfg.pointer = crd.gpu;
+		cfg.stride = 4 * sizeof(float);
+		cfg.size = cfg.stride * 4;
+	}
+	pan_cast_and_pack((var.cpu + pan_size(ATTRIBUTE_BUFFER)), ATTRIBUTE_BUFFER, cfg);
+	pan_cast_and_pack((vp.cpu), VIEWPORT, cfg) {
+		cfg.scissor_minimum_x = 0;
+		cfg.scissor_minimum_y = 0;
+		cfg.scissor_maximum_x = b->width - 1;
+		cfg.scissor_maximum_y = b->height - 1;
+		cfg.minimum_z = 0.0f;
+		cfg.maximum_z = 1.0f;
+	}
+	pan_section_pack(job.cpu, TILER_JOB, DRAW, cfg) {
+		cfg.thread_storage = b->tls.gpu;
+		cfg.state = rsd.gpu;
+		cfg.position = pos.gpu;
+		cfg.viewport = vp.gpu;
+		cfg.varyings = attr_gpu;
+		cfg.varying_buffers = var.gpu;
+		cfg.textures = tex.gpu;
+		cfg.samplers = smp.gpu;
+		cfg.clean_fragment_write = true;
+	}
+	pack_invocation(pan_section_ptr(job.cpu, TILER_JOB, INVOCATION), 4, 1);
+	pan_section_pack(job.cpu, TILER_JOB, PRIMITIVE, cfg) {
+		cfg.draw_mode = MALI_DRAW_MODE_TRIANGLE_STRIP;
+		cfg.first_provoking_vertex = true;
+		cfg.job_task_split = 6;
+		cfg.index_count = 4;
+		cfg.index_type = MALI_INDEX_TYPE_NONE;
+	}
+	pan_section_pack(job.cpu, TILER_JOB, PRIMITIVE_SIZE, cfg) {
+		cfg.constant = 1.0f;
+	}
+	pan_section_pack(job.cpu, TILER_JOB, TILER, cfg) {
+		cfg.address = b->tiler_ctx.gpu;
+	}
+	pan_section_pack(job.cpu, TILER_JOB, PADDING, cfg) {
+		(void)cfg;
+	}
+	unsigned index = ++b->job_index;
+	pan_section_pack(job.cpu, TILER_JOB, HEADER, cfg) {
+		cfg.type = MALI_JOB_TYPE_TILER;
+		cfg.index = index;
+		cfg.dependency_2 = b->last_tiler;
+	}
+	link_job(b, job.cpu, job.gpu);
+	b->last_tiler = index;
+	use_bo(b, ps->code);
+	use_store(b, t->store);
+	b->draws++;
+	return 0;
+}
+
 static struct batch *
 batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned color_count, struct rwa_texture *depth,
 	  const float *clear_color,
@@ -2540,6 +2721,43 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 				open_batch->discard &= ~(1u << i);
 		}
 	return open_batch;
+}
+
+/*
+ * The levels of T on the GPU, a pass each, each drawn from the one before (emit_mip_draw), in order with everything
+ * else and nothing waited for. 1 when they were made, 0 when T is not one this does (the processor makes them: an
+ * array or cube, a format the GPU does not render or sample as it is, boot-arg rwn_gpumips=0), -1 on a failure.
+ * Run 614: the processor's way still took 20 to 75 ms of most frames of an opening -- the wait for the GPU to finish
+ * the texture first (CoreAnimation mipmaps what it has just drawn), then 4.9 MB read back out of write-combined
+ * memory and filtered.
+ */
+static int
+mipmaps_gpu(struct rwa_texture *t, unsigned levels, char *why, size_t why_size)
+{
+	static int on = -1;
+	if (on < 0)
+		on = !boot_arg("rwn_gpumips=0");
+	const struct util_format_description *d = util_format_description(t->format);
+	if (!on || levels < 2 || t->layers != 1 || t->dim != MALI_TEXTURE_DIMENSION_2D || t->bw != 1 || t->bh != 1 ||
+	    !d->channel[0].normalized || !rwa_rt_blendable(t->format) || !rwa_samplable(t->format))
+		return 0;
+	for (unsigned l = 1; l < levels; l++) {
+		struct rwa_texture *color[1] = { t };
+		const unsigned level[1] = { l };
+		static const float zero[4] = { 0, 0, 0, 0 };
+		/* a pass of its own into level l, cleared (each pixel is drawn; a clear costs the tile nothing) */
+		struct batch *b = batch_for(color, level, 1, NULL, zero, NULL, NULL, NULL, why, why_size);
+		if (b == NULL)
+			return -1;
+		if (emit_mip_draw(b, t, l - 1, why, why_size) != 0) {
+			batch_free(b, 0);
+			open_batch = NULL;
+			return -1;
+		}
+		flush_batch("a mipmap level");
+		mips_gpu++;
+	}
+	return 1;
 }
 
 int
@@ -4146,11 +4364,30 @@ report(void)
 	     (unsigned long long)stats.pipelines, (unsigned long long)(stats.pipeline_ns / 1000000),
 	     (unsigned long long)stats.refused_pipelines, (unsigned long long)stats.imports, (unsigned long long)k[0],
 	     (unsigned long long)k[1], (unsigned long long)(k[3] >> 10));
-	if (stats.dispatches || comp_checked)
-		keep("30s: %llu dispatches, %llu with workgroup memory; compute jobs %llu checked, %llu failed",
+	if (stats.dispatches || comp_checked || mips_gpu || mips_cpu)
+		keep("30s: %llu dispatches, %llu with workgroup memory; compute jobs %llu checked, %llu failed; mipmaps: "
+		     "%llu levels by the GPU, %llu textures by the processor",
 		     (unsigned long long)stats.dispatches, (unsigned long long)comp_wls, (unsigned long long)comp_checked,
-		     (unsigned long long)comp_failed);
-	comp_wls = comp_checked = comp_failed = 0;
+		     (unsigned long long)comp_failed, (unsigned long long)mips_gpu, (unsigned long long)mips_cpu);
+	comp_wls = comp_checked = comp_failed = mips_gpu = mips_cpu = 0;
+	{
+		char line[400];
+		int n = snprintf(line, sizeof(line), "30s: lock: %llu holds, waited %llu ms (%llu waits over 2 ms, longest %.1f ms); "
+				 "held over 5 ms:", (unsigned long long)lock_holds, (unsigned long long)(lock_wait_ns / 1000000),
+				 (unsigned long long)lock_waits_long, lock_wait_max / 1e6);
+		for (unsigned k = 0; k < 8 && long_hold[k].func != NULL && n < (int)sizeof(line) - 60; k++)
+			n += snprintf(line + n, sizeof(line) - n, " %s %ux %.0f ms (max %.1f)", long_hold[k].func, long_hold[k].n,
+				      long_hold[k].total_ns / 1e6, long_hold[k].max_ns / 1e6);
+		keep("%s", line);
+		uint64_t mt[6];
+		km_made_time(mt);
+		keep("30s: buffers made by the kernel: %llu in %llu ms (longest %.1f ms), %llu MB; given back: %llu in %llu ms "
+		     "(longest %.1f ms)", (unsigned long long)k[0], (unsigned long long)(mt[0] / 1000000), mt[1] / 1e6,
+		     (unsigned long long)(mt[2] >> 20), (unsigned long long)mt[3], (unsigned long long)(mt[4] / 1000000),
+		     mt[5] / 1e6);
+		memset(long_hold, 0, sizeof(long_hold));
+		lock_wait_ns = lock_wait_max = lock_waits_long = lock_holds = 0;
+	}
 	memset(&stats, 0, sizeof(stats));
 	stats.since = now;
 }

@@ -50,6 +50,10 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t made, reused, submits, cached_bytes;
 static struct km_bo *cache;           /* given back, newest first */
 static struct km_bo *surfaces;        /* imported, by surface */
+static uint64_t made_ns, made_max_ns, made_bytes;   /* km_made_time */
+static struct km_bo *closing;         /* imported, let go while the GPU still had them: closed once done (reap) */
+/* Not more: run 618 kept 128 MB here (with the closing on a queue of its own) and the phone ran out of memory -- 30 MB
+ * free, buffers made and given back in up to 3 and 6 s, surfaces imported in up to 7 s, no frame for ten seconds */
 #define KM_CACHE_MAX (48ull << 20)
 
 static int
@@ -180,6 +184,56 @@ close_bo(struct km_bo *bo)
 	free(bo);
 }
 
+/* A buffer the GPU is done with given back to the kernel, timed (km_made_time). */
+static uint64_t closed_n, closed_ns, closed_max_ns;
+
+static void
+close_bo_now(struct km_bo *context)
+{
+	const uint64_t began = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+	close_bo(context);
+	const uint64_t took = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - began;
+	__atomic_fetch_add(&closed_n, 1, __ATOMIC_RELAXED);
+	__atomic_fetch_add(&closed_ns, took, __ATOMIC_RELAXED);
+	uint64_t was = __atomic_load_n(&closed_max_ns, __ATOMIC_RELAXED);
+	while (took > was && !__atomic_compare_exchange_n(&closed_max_ns, &was, took, false, __ATOMIC_RELAXED,
+							  __ATOMIC_RELAXED))
+		;
+}
+
+/*
+ * Given back by km_close_pending(), which the library calls the moment its lock is let go (rwa_mali.c GUARD), on the
+ * same thread: no longer inside the lock the window server's three drawing threads share (run 616:
+ * rwa_texture_destroy over 5 ms 63 to 251 times in 30 s, 10 to 29 ms each), and no later than that. (Run 618 gave
+ * them back on a queue of its own: late, under load, and with a bigger cache the phone ran out of memory.)
+ */
+static struct km_bo *to_close;
+
+static void
+close_later(struct km_bo *bo)
+{
+	pthread_mutex_lock(&lock);
+	bo->next = to_close;
+	to_close = bo;
+	pthread_mutex_unlock(&lock);
+}
+
+void
+km_close_pending(void)
+{
+	if (__atomic_load_n(&to_close, __ATOMIC_RELAXED) == NULL)
+		return;
+	pthread_mutex_lock(&lock);
+	struct km_bo *all = to_close;
+	to_close = NULL;
+	pthread_mutex_unlock(&lock);
+	while (all != NULL) {
+		struct km_bo *n = all->next;
+		close_bo_now(all);
+		all = n;
+	}
+}
+
 /*
  * Whether job SEQ is done. The kernel runs every process's jobs one after another in the order given (mtk_mali.c's
  * one queue), so a job done means every job before it done: the highest seen done is kept and what is at or below it
@@ -255,6 +309,7 @@ km_bo_new(uint64_t size, char *why, size_t why_size)
 	}
 	pthread_mutex_unlock(&lock);
 
+	const uint64_t create_began = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 	struct km_create_req create = { (uint32_t)size, 0, 0, 0, 0 };
 	int error = call(KM_CREATE_BO, &create, sizeof(create));
 	if (error != 0) {
@@ -304,10 +359,46 @@ km_bo_new(uint64_t size, char *why, size_t why_size)
 	bo->size = mapped;
 	bo->gpu = create.offset;
 	bo->cpu = cpu;
+	const uint64_t took = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - create_began;
 	pthread_mutex_lock(&lock);
 	made++;
+	made_ns += took;
+	made_bytes += mapped;
+	if (took > made_max_ns)
+		made_max_ns = took;
 	pthread_mutex_unlock(&lock);
 	return bo;
+}
+
+/*
+ * The imported buffers let go while a job still used them, closed now that it is done. Until run 617 their last
+ * release waited for that job (KM_WAIT, up to 2 s) -- under the library's lock, which the window server's three
+ * drawing threads share: run 616 counted rwa_texture_destroy holding it over 5 ms 63 to 251 times in 30 s (up to
+ * 29 ms each, 2.4 s in all), and draws that freed a batch waited the same way.
+ */
+static void
+reap(void)
+{
+	if (__atomic_load_n(&closing, __ATOMIC_RELAXED) == NULL)
+		return;
+	struct km_bo *gone = NULL;
+	pthread_mutex_lock(&lock);
+	for (struct km_bo **p = &closing; *p != NULL;) {
+		struct km_bo *b = *p;
+		if (done(b->busy_seq)) {
+			*p = b->next;
+			b->next = gone;
+			gone = b;
+		} else {
+			p = &b->next;
+		}
+	}
+	pthread_mutex_unlock(&lock);
+	while (gone != NULL) {
+		struct km_bo *n = gone->next;
+		close_later(gone);
+		gone = n;
+	}
 }
 
 void
@@ -336,16 +427,19 @@ km_bo_release(struct km_bo *bo, uint64_t seq)
 					break;
 				}
 		}
+		if (last && !done(bo->busy_seq)) {
+			bo->next = closing;     /* closed by reap() once its last job is done, not waited for here */
+			closing = bo;
+			last = false;
+		}
 		pthread_mutex_unlock(&lock);
+		reap();
 		if (!last)
 			return;
-		if (bo->busy_seq != 0) {
-			struct km_wait_req w = { bo->busy_seq, 2000000000 };
-			(void)call(KM_WAIT, &w, sizeof(w));
-		}
-		close_bo(bo);
+		close_later(bo);
 		return;
 	}
+	reap();
 	pthread_mutex_lock(&lock);
 	if (seq > bo->busy_seq)
 		bo->busy_seq = seq;
@@ -370,7 +464,7 @@ km_bo_release(struct km_bo *bo, uint64_t seq)
 	pthread_mutex_unlock(&lock);
 	while (drop != NULL) {
 		struct km_bo *n = drop->next;
-		close_bo(drop);
+		close_later(drop);
 		drop = n;
 	}
 }
@@ -512,6 +606,22 @@ km_surface_seq(uint32_t surface, uint64_t seq)
 	struct { uint32_t surface, pad; uint64_t seq; } r = { surface, 0, seq };
 
 	return call(KM_SURFACE_SEQ, &r, sizeof(r));
+}
+
+/* the buffers made by the kernel (not from the cache) since the last call: time in all, the longest, bytes; and those
+ * given back on the closing queue: how many, time in all, the longest */
+void
+km_made_time(uint64_t out[6])
+{
+	pthread_mutex_lock(&lock);
+	out[0] = made_ns;
+	out[1] = made_max_ns;
+	out[2] = made_bytes;
+	made_ns = made_max_ns = made_bytes = 0;
+	pthread_mutex_unlock(&lock);
+	out[3] = __atomic_exchange_n(&closed_n, 0, __ATOMIC_RELAXED);
+	out[4] = __atomic_exchange_n(&closed_ns, 0, __ATOMIC_RELAXED);
+	out[5] = __atomic_exchange_n(&closed_max_ns, 0, __ATOMIC_RELAXED);
 }
 
 void
