@@ -299,6 +299,53 @@ main(int argc, char **argv)
 		fflush(stdout);
 		_exit(code);
 	}
+	/*
+	 * Every kernel of the library too, each in a child as above: a kernel is compiled once a process, without
+	 * constants or a shape, so its cache record is whole without a recipe -- CoreAnimation's compute_average_luma and
+	 * compute_sum_luma took ~2.5 s of the window server's first app opening on the phone (run 608) before this.
+	 * RWACHECK_KERNELS=0: none.
+	 */
+	unsigned kbuilt = 0, krefused = 0, kcrashed = 0;
+	const char *kenv = getenv("RWACHECK_KERNELS");
+	for (unsigned i = 0; i < ml.num_functions && !(kenv && strcmp(kenv, "0") == 0); i++) {
+		const struct air_metallib_function *kf = &ml.functions[i];
+		if (kf->type != 2)
+			continue;
+		fflush(stdout);
+		pid_t child = fork();
+		if (child > 0) {
+			int st = 0;
+			waitpid(child, &st, 0);
+			if (WIFSIGNALED(st) || WEXITSTATUS(st) >= 128) {
+				printf("! kernel %s: stopped (signal %d)\n", kf->name,
+				       WIFSIGNALED(st) ? WTERMSIG(st) : WEXITSTATUS(st) - 128);
+				kcrashed++;
+			} else if (WEXITSTATUS(st) == 0) {
+				kbuilt++;
+			} else {
+				krefused++;
+			}
+			continue;
+		}
+		signal(SIGABRT, quiet_exit);
+		signal(SIGSEGV, quiet_exit);
+		signal(SIGBUS, quiet_exit);
+		signal(SIGTRAP, quiet_exit);
+		signal(SIGILL, quiet_exit);
+		struct rwa_compute_info ci;
+		struct rwa_compute *k = rwa_compute_create(dev, kf->bitcode, kf->bitcode_size, kf->name, &ci, why,
+							   sizeof(why));
+		if (k == NULL) {
+			printf("x kernel %s: %s\n", kf->name, why);
+			fflush(stdout);
+			_exit(1);
+		}
+		printf("+ kernel %s: %u buffers %u textures %u samplers, %u bytes of threadgroup memory of its own\n",
+		       kf->name, ci.buffers, ci.textures, ci.samplers, ci.static_shared_bytes);
+		fflush(stdout);
+		_exit(0);
+	}
+	printf("%s: %u kernels built, %u refused, %u stopped the host's compiler\n", want, kbuilt, krefused, kcrashed);
 	printf("%s: %u pipelines built, %u refused, %u stopped the host's compiler, %u without their functions", want, built,
 	       refused, crashed, missing);
 	if (do_draw)
