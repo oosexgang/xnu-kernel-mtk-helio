@@ -1,0 +1,21 @@
+--- a/src/panfrost/compiler/bi_lower_swizzle.c
++++ b/src/panfrost/compiler/bi_lower_swizzle.c
+@@ -173,9 +173,15 @@
+    /* Lower it away */
+    bi_builder b = bi_init_builder(ctx, bi_before_instr(ins));
+ 
+-   bool is_8 = (bi_opcode_props[ins->op].size == BI_SIZE_8) ||
+-               (bi_opcode_props[ins->op].size == BI_SIZE_32 &&
+-                ins->src[src].swizzle >= BI_SWIZZLE_B0000);
++   /*
++    * A halfword swizzle (H00, H10, H11) of an 8-bit instruction's source is a permutation of halves, which SWZ.v4i8
++    * has no encoding for (bi_pack_add_swz_v4i8's table: ~0, shifted into the instruction's other fields on a build
++    * without assertions) -- SWZ.v2i16 makes the same bytes. The 27 release's CoreAnimation generic fragment shaders
++    * hit it in 89 of 246 configurations.
++    */
++   bool is_8 = (bi_opcode_props[ins->op].size == BI_SIZE_8 ||
++                bi_opcode_props[ins->op].size == BI_SIZE_32) &&
++               ins->src[src].swizzle >= BI_SWIZZLE_B0000;
+ 
+    bi_index orig = ins->src[src];
+    bi_index stripped = bi_replace_index(bi_null(), orig);
