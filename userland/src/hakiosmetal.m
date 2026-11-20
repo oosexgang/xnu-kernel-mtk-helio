@@ -5652,7 +5652,7 @@ controlPointIndexBufferOffset:(NSUInteger)controlPointOffset
 - (void)memoryBarrierWithScope:(NSUInteger)scope { (void)scope; }
 - (void)setThreadgroupMemoryLength:(NSUInteger)length atIndex:(NSUInteger)index
 {
-	(void)length; (void)index;   /* only what the shader declares is given, for now */
+	rwm_compute_threadgroup_memory(&_state, index, length);   /* src/metal/compute.cpp */
 }
 
 /*

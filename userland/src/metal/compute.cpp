@@ -87,6 +87,17 @@ rwm_compute_lod_clamp(struct rwm_compute_state *s, float lod_min, float lod_max)
 	}
 }
 
+extern "C" void
+rwm_compute_threadgroup_memory(struct rwm_compute_state *s, size_t index, unsigned long length)
+{
+	if (index != 0) {
+		rwm_print("threadgroup memory at index %lu (%lu bytes) is not served, only at index 0\n",
+			  (unsigned long)index, length);
+		return;
+	}
+	s->threadgroup_bytes = length;
+}
+
 extern "C" bool
 rwm_compute_dispatch(struct rwm_compute_state *s, const unsigned long groups[3], const unsigned long size[3],
 		     struct rwm_work *w)
@@ -124,6 +135,7 @@ rwm_compute_dispatch(struct rwm_compute_state *s, const unsigned long groups[3],
 		d->groups[i] = (unsigned)groups[i];
 		d->size[i] = (unsigned)size[i];
 	}
+	d->threadgroup_bytes = (unsigned)s->threadgroup_bytes;
 	return true;
 }
 

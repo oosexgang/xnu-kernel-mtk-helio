@@ -112,6 +112,7 @@ struct rwm_air {
 	__typeof__(&rwa_sampler_destroy) sampler_destroy;
 	__typeof__(&rwa_dispatch) dispatch;
 	__typeof__(&rwa_dispatch_buffers) dispatch_buffers;
+	__typeof__(&rwa_dispatch_threadgroup_memory) dispatch_threadgroup_memory;   /* optional */
 	__typeof__(&rwa_module_argbufs) module_argbufs;
 	__typeof__(&rwa_argbuf_encode_buffer) argbuf_encode_buffer;
 	__typeof__(&rwa_argbuf_encode_texture) argbuf_encode_texture;
@@ -316,6 +317,7 @@ struct rwm_dispatch {
 	unsigned sampler_count;
 	struct rwa_sampler *samplers[RWM_MAX_BUFFERS];
 	unsigned groups[3], size[3];
+	unsigned threadgroup_bytes;     /* -setThreadgroupMemoryLength: at index 0 */
 };
 
 int rwm_run_dispatch(const struct rwm_dispatch *dispatch, char *why, size_t why_size);
@@ -461,6 +463,7 @@ struct rwm_compute_state {
 	void *sampler_object[RWM_MAX_BUFFERS];
 	struct rwa_sampler *samplers[RWM_MAX_BUFFERS];
 	unsigned sampler_count;
+	unsigned long threadgroup_bytes;        /* -setThreadgroupMemoryLength:atIndex:0 */
 	bool complained;
 };
 
@@ -471,6 +474,9 @@ void rwm_compute_set_buffer_offset(struct rwm_compute_state *state, size_t index
 void rwm_compute_set_texture(struct rwm_compute_state *state, size_t index, void *object, struct rwm_texture *core);
 void rwm_compute_set_sampler(struct rwm_compute_state *state, size_t index, void *object, struct rwa_sampler *sampler);
 void rwm_compute_lod_clamp(struct rwm_compute_state *state, float lod_min, float lod_max);
+/* Metal's threadgroup memory for a kernel's [[threadgroup(n)]] argument; only index 0 is served (the front end refuses
+ * a kernel with a second), another index is said */
+void rwm_compute_threadgroup_memory(struct rwm_compute_state *state, size_t index, unsigned long length);
 /* the dispatch recorded into `work` (zeroed); false when it is dropped, said why -- by threads, a grid that does not
  * divide into the groups is refused rather than rounded */
 bool rwm_compute_dispatch(struct rwm_compute_state *state, const unsigned long groups[3], const unsigned long size[3],

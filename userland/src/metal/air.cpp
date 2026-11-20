@@ -78,6 +78,7 @@ load()
 		/* argument buffers, drawing and depth: looked up, not required -- the plug-in checks
 		 * for them before it answers an encoder, a pipeline or a depth state */
 		call("rwa_dispatch_buffers", &c.dispatch_buffers, false),
+		call("rwa_dispatch_threadgroup_memory", &c.dispatch_threadgroup_memory, false),
 		call("rwa_module_argbufs", &c.module_argbufs, false),
 		call("rwa_argbuf_encode_buffer", &c.argbuf_encode_buffer, false),
 		call("rwa_argbuf_encode_texture", &c.argbuf_encode_texture, false),

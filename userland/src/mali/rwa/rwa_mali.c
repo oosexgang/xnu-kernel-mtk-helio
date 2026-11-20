@@ -116,6 +116,7 @@ static struct {
 	uint64_t refused_pipelines, imports, multiload_cleared;
 	uint64_t att_loaded, att_cleared, att_dontcare_load, att_stored, att_discarded;
 	uint64_t vt_parts;   /* rwn_vtsplit: vertex and tiler parts sent before their pass's submit */
+	uint64_t dispatches;
 } stats;
 
 static void report(void);
@@ -3565,7 +3566,7 @@ rwa_render_destroy(struct rwa_render *render)
 	free(render);
 }
 
-/* --- compute: one dispatch, waited for -------------------------------------------------------------------------------- */
+/* --- compute: one dispatch, sent off in order with the draws (rwn_syncdispatch=1: waited for) ---------------------- */
 
 struct rwa_compute *
 rwa_compute_create(struct rwa_device *device, const void *bitcode, size_t size, const char *entry,
@@ -3603,51 +3604,148 @@ rwa_compute_destroy(struct rwa_compute *compute)
 	free(compute);
 }
 
+/* the threadgroup memory the next dispatch on this thread gives a [[threadgroup(0)]] argument (Metal's
+ * -setThreadgroupMemoryLength:atIndex:0), consumed by that dispatch */
+static _Thread_local unsigned next_tg_bytes;
+
+/* Panfrost's pan_wls_adjust_size (pan_desc.h): a power of two, at least 128 */
+static unsigned
+wls_adjust(unsigned size)
+{
+	return util_next_power_of_two(MAX2(size, 128));
+}
+
+void
+rwa_dispatch_threadgroup_memory(unsigned bytes)
+{
+	next_tg_bytes = bytes;
+}
+
+/*
+ * The compute jobs' own ring, as the fragment jobs' (ring_check): a dispatch is sent off and NOT waited for -- the
+ * kernel runs the Mali's jobs in order on one queue, so what comes after it (draws, a copy, the processor's
+ * store_sync of what it wrote) is after it anyway -- and its job header stays here until the GPU is done with it, to be
+ * read then: a dispatch that faults is still said, a little later. Boot-arg rwn_syncdispatch=1: waited for, as before.
+ */
+#define CRING 32
+static struct km_bo *cring;
+static struct {
+	uint64_t seq;
+	char name[48];
+	unsigned groups[3], size[3], wls;
+} cring_slot[CRING];
+static unsigned cring_next;
+static uint64_t comp_checked, comp_failed, comp_wls;
+
+static void
+cring_check(unsigned i, bool wait)
+{
+	if (cring_slot[i].seq == 0)
+		return;
+	if (km_wait(cring_slot[i].seq, wait ? 1000000000 : 0) != 0)
+		return;
+	uint32_t status = 0;
+	memcpy(&status, cring->cpu + i * 256, 4);
+	comp_checked++;
+	if ((status & 0xff) != 1) {
+		static unsigned said;
+		comp_failed++;
+		if (said++ < 8) {
+			uint32_t task = 0;
+			uint64_t fault = 0;
+			memcpy(&task, cring->cpu + i * 256 + 4, 4);
+			memcpy(&fault, cring->cpu + i * 256 + 8, 8);
+			keep("compute job %s (%#x) task %#x fault %#llx: %s, %ux%ux%u groups of %ux%ux%u, workgroup memory %u",
+			     job_status_name(status), status, task, (unsigned long long)fault, cring_slot[i].name,
+			     cring_slot[i].groups[0], cring_slot[i].groups[1], cring_slot[i].groups[2], cring_slot[i].size[0],
+			     cring_slot[i].size[1], cring_slot[i].size[2], cring_slot[i].wls);
+		}
+	}
+	cring_slot[i].seq = 0;
+}
+
 int
 rwa_dispatch_buffers(struct rwa_compute *c, const struct rwa_bindings *bindings, const struct rwa_buffer_bind *table,
 		     unsigned table_count, const unsigned groups[3], const unsigned group_size[3], char *why,
 		     size_t why_size)
 {
 	GUARD();
+	unsigned tg_bytes = next_tg_bytes;
+	next_tg_bytes = 0;
 	flush_batch("a dispatch");
 	if (groups[0] == 0 || groups[1] == 0 || groups[2] == 0)
 		return 0;
 	/*
-	 * A threadgroup buffer argument ([[threadgroup(0)]]) is sized at the dispatch, -setThreadgroupMemoryLength:
-	 * atIndex:, which neither the plug-in nor rwa_dispatch carries; its shader addresses it from 0 and the
-	 * compiler counts none of it, so it went to the GPU with no workgroup memory at all -- CoreAnimation's
-	 * compute_average_luma faulted at 0x800 and 0x880 (runs 574, 578), a second's stall and a reset of the GPU each.
-	 * Refused like the static kind, as the Gallium library refuses it, until the length comes with the dispatch.
+	 * Workgroup memory (WLS): what the shader declares (a static threadgroup array, info.wls_size) plus a
+	 * [[threadgroup(0)]] argument's, which is sized at the dispatch (-setThreadgroupMemoryLength:atIndex:) -- its
+	 * shader addresses it from 0 and the compiler counts none of it. Until run 609 neither was given and such a
+	 * dispatch was refused: CoreAnimation's compute_average_luma had faulted at 0x800 and 0x880 with no workgroup
+	 * memory at all (runs 574, 578), a second's stall and a reset of the GPU each. The front end puts the argument at
+	 * 0 as well as the static arrays, so a kernel with both is still refused rather than given overlapping memory.
 	 */
 	bool dynamic_tg = false;
 	for (unsigned i = 0; i < c->cs.air.num_resources; i++)
 		dynamic_tg |= c->cs.air.resources[i].kind == AIR_RESOURCE_THREADGROUP_BUFFER;
-	if (c->cs.info.wls_size || c->cs.air.threadgroup_bytes || dynamic_tg) {
+	unsigned static_wls = MAX2(c->cs.info.wls_size, c->cs.air.threadgroup_bytes);
+	if (dynamic_tg && (static_wls != 0 || tg_bytes == 0)) {
 		static unsigned said;
-		if (dynamic_tg && said < 4) {
-			said++;
-			keep("%s: a threadgroup buffer sized at the dispatch, %ux%ux%u groups of %ux%ux%u: refused (%u so far)",
-			     c->cs.name, groups[0], groups[1], groups[2], group_size[0], group_size[1], group_size[2], said);
-		}
-		say(why, why_size, "%s uses threadgroup memory%s (not served yet by the native library)", c->cs.name,
-		    dynamic_tg ? " sized at the dispatch" : "");
+		if (said++ < 4)
+			keep("%s: a threadgroup buffer sized at the dispatch (%u bytes given) with %u bytes of its own, "
+			     "%ux%ux%u groups of %ux%ux%u: refused",
+			     c->cs.name, tg_bytes, static_wls, groups[0], groups[1], groups[2], group_size[0], group_size[1],
+			     group_size[2]);
+		say(why, why_size, "%s uses threadgroup memory sized at the dispatch %s", c->cs.name,
+		    tg_bytes == 0 ? "and was given none" : "beside its own (they would overlap)");
 		return -1;
+	}
+	unsigned wls = dynamic_tg ? tg_bytes : static_wls;
+	unsigned wls_instances = 0;
+	uint64_t wls_total = 0;
+	if (wls) {
+		/* as Panfrost's panfrost_emit_shared_memory: an instance per group, each dimension rounded up to a power of
+		 * two, the size rounded up to one too (at least 128), times the cores' id range */
+		wls_instances = util_next_power_of_two(groups[0]) * util_next_power_of_two(groups[1]) *
+				util_next_power_of_two(groups[2]);
+		wls_total = (uint64_t)wls_adjust(wls) * wls_instances * core_id_range;
+		if (wls > 32768 || wls_total > (64u << 20)) {
+			say(why, why_size, "%s: %u bytes of threadgroup memory for %u groups (%llu bytes in all) is more than "
+			    "this library gives", c->cs.name, wls, wls_instances, (unsigned long long)wls_total);
+			return -1;
+		}
 	}
 	struct batch *b = calloc(1, sizeof(*b));
 	if (b == NULL) {
 		say(why, why_size, "out of memory");
 		return -1;
 	}
+	if (cring == NULL) {
+		cring = km_bo_new(CRING * 256, why, why_size);
+		if (cring == NULL) {
+			free(b);
+			return -1;
+		}
+	}
 	b->mark = ++batch_marks;
 	b->tls = pool_alloc(b, pan_size(LOCAL_STORAGE), 64, why, why_size);
-	struct ptr job = pool_alloc(b, pan_size(COMPUTE_JOB), 64, why, why_size);
 	struct ptr rsd = pool_alloc(b, pan_size(RENDERER_STATE), 64, why, why_size);
-	if (!b->tls.cpu || !job.cpu || !rsd.cpu) {
+	if (!b->tls.cpu || !rsd.cpu) {
 		batch_free(b, 0);
 		return -1;
 	}
+	_Static_assert(pan_size(COMPUTE_JOB) <= 256, "a compute job fits its ring slot");
+	unsigned slot = cring_next++ % CRING;
+	cring_check(slot, true);
+	if (cring_slot[slot].seq != 0) {
+		say(why, why_size, "%s: the GPU has not finished a compute job of a second ago", c->cs.name);
+		batch_free(b, 0);
+		return -1;
+	}
+	struct ptr job = { cring->cpu + slot * 256, cring->gpu + slot * 256 };
+	uint8_t job_local[256];         /* packed here and copied once: the ring is the GPU's write-combined memory */
+	memset(job_local, 0, sizeof(job_local));
 	use_bo(b, the_device->dummy);
 	use_bo(b, c->cs.code);
+	use_bo(b, cring);
 	memcpy(rsd.cpu, c->cs.rsd, 64);
 	struct bound cb;
 	struct sv_input svi = { .groups = { groups[0], groups[1], groups[2] },
@@ -3667,20 +3765,41 @@ rwa_dispatch_buffers(struct rwa_compute *c, const struct rwa_bindings *bindings,
 			return -1;
 		}
 	}
+	struct ptr shared = { NULL, 0 };
+	if (wls) {
+		shared = pool_big(b, wls_total, why, why_size);   /* only the GPU touches it */
+		if (shared.cpu == NULL) {
+			batch_free(b, 0);
+			return -1;
+		}
+		if ((shared.gpu & 4095) || (shared.gpu >> 32) != ((shared.gpu + wls_total - 1) >> 32)) {
+			say(why, why_size, "%s: the workgroup memory at %#llx is not where the GPU can take it", c->cs.name,
+			    (unsigned long long)shared.gpu);
+			batch_free(b, 0);
+			return -1;
+		}
+		comp_wls++;
+	}
 	pan_cast_and_pack((b->tls.cpu), LOCAL_STORAGE, cfg) {
 		if (scratch_size) {
 			cfg.tls_size = panfrost_get_stack_shift(scratch_size);
 			cfg.tls_base_pointer = scratch.gpu;
 		}
-		cfg.wls_instances = MALI_LOCAL_STORAGE_NO_WORKGROUP_MEM;
+		if (wls) {
+			cfg.wls_base_pointer = shared.gpu;
+			cfg.wls_instances = wls_instances;
+			cfg.wls_size_scale = util_logbase2(wls_adjust(wls)) + 1;
+		} else {
+			cfg.wls_instances = MALI_LOCAL_STORAGE_NO_WORKGROUP_MEM;
+		}
 	}
-	panfrost_pack_work_groups_compute(pan_section_ptr(job.cpu, COMPUTE_JOB, INVOCATION), groups[0], groups[1],
+	panfrost_pack_work_groups_compute(pan_section_ptr(job_local, COMPUTE_JOB, INVOCATION), groups[0], groups[1],
 					  groups[2], group_size[0], group_size[1], group_size[2], false, false);
-	pan_section_pack(job.cpu, COMPUTE_JOB, PARAMETERS, cfg) {
+	pan_section_pack(job_local, COMPUTE_JOB, PARAMETERS, cfg) {
 		cfg.job_task_split = util_logbase2_ceil(group_size[0] + 1) + util_logbase2_ceil(group_size[1] + 1) +
 				     util_logbase2_ceil(group_size[2] + 1);
 	}
-	pan_section_pack(job.cpu, COMPUTE_JOB, DRAW, cfg) {
+	pan_section_pack(job_local, COMPUTE_JOB, DRAW, cfg) {
 		cfg.state = rsd.gpu;
 		cfg.thread_storage = b->tls.gpu;
 		cfg.uniform_buffers = cb.ubos;
@@ -3688,25 +3807,43 @@ rwa_dispatch_buffers(struct rwa_compute *c, const struct rwa_bindings *bindings,
 		cfg.textures = cb.textures;
 		cfg.samplers = cb.samplers;
 	}
-	pan_section_pack(job.cpu, COMPUTE_JOB, HEADER, cfg) {
+	pan_section_pack(job_local, COMPUTE_JOB, HEADER, cfg) {
 		cfg.type = MALI_JOB_TYPE_COMPUTE;
 		cfg.index = 1;
 		cfg.barrier = true;
 	}
+	memcpy(job.cpu, job_local, pan_size(COMPUTE_JOB));
 	for (unsigned i = 0; i < b->nchunks; i++)
 		use_bo(b, b->chunks[i]);
 	pool_upload(b);
 	uint64_t seq = 0;
 	int e = km_submit(job.gpu, false, b->bos, b->nbos, &seq);
-	if (e == 0)
-		e = km_wait(seq, 2000000000);
-	uint32_t status = 0;
-	memcpy(&status, pool_real(b, job.cpu), 4);
-	batch_free(b, seq);
-	if (e != 0 || (status & 0xff) != 1) {
-		say(why, why_size, "%s: the compute job %s (status %#x)", c->cs.name, e ? strerror(e) : "did not finish DONE",
-		    status);
+	if (e != 0) {
+		batch_free(b, km_last_seq());
+		say(why, why_size, "%s: the compute job was not taken: %s", c->cs.name, strerror(e));
 		return -1;
+	}
+	snprintf(cring_slot[slot].name, sizeof(cring_slot[slot].name), "%s", c->cs.name);
+	memcpy(cring_slot[slot].groups, groups, sizeof(cring_slot[slot].groups));
+	memcpy(cring_slot[slot].size, group_size, sizeof(cring_slot[slot].size));
+	cring_slot[slot].wls = wls;
+	cring_slot[slot].seq = seq;
+	batch_free(b, seq);
+	stats.dispatches++;
+	for (unsigned i = 0; i < CRING; i++)
+		if (i != slot)
+			cring_check(i, false);
+	static int sync = -1;
+	if (sync < 0)
+		sync = boot_arg("rwn_syncdispatch=1");
+	if (sync) {
+		cring_check(slot, true);
+		uint32_t status = 0;
+		memcpy(&status, job.cpu, 4);
+		if ((status & 0xff) != 1) {
+			say(why, why_size, "%s: the compute job did not finish DONE (status %#x)", c->cs.name, status);
+			return -1;
+		}
 	}
 	return 0;
 }
@@ -4009,6 +4146,11 @@ report(void)
 	     (unsigned long long)stats.pipelines, (unsigned long long)(stats.pipeline_ns / 1000000),
 	     (unsigned long long)stats.refused_pipelines, (unsigned long long)stats.imports, (unsigned long long)k[0],
 	     (unsigned long long)k[1], (unsigned long long)(k[3] >> 10));
+	if (stats.dispatches || comp_checked)
+		keep("30s: %llu dispatches, %llu with workgroup memory; compute jobs %llu checked, %llu failed",
+		     (unsigned long long)stats.dispatches, (unsigned long long)comp_wls, (unsigned long long)comp_checked,
+		     (unsigned long long)comp_failed);
+	comp_wls = comp_checked = comp_failed = 0;
 	memset(&stats, 0, sizeof(stats));
 	stats.since = now;
 }

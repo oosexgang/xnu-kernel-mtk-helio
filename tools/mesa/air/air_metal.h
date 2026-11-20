@@ -604,6 +604,16 @@ int rwa_dispatch_buffers(struct rwa_compute *compute, const struct rwa_bindings 
 			 const unsigned groups[3], const unsigned group_size[3],
 			 char *why, size_t why_size);
 
+/*
+ * The threadgroup memory the NEXT rwa_dispatch or rwa_dispatch_buffers on this thread gives a
+ * kernel's [[threadgroup(0)]] argument: Metal's -setThreadgroupMemoryLength:atIndex:, which a
+ * kernel such as CoreAnimation's compute_average_luma needs (its argument has no size in the
+ * shader). Consumed by that dispatch; without a call it is zero, and a kernel that declares such
+ * an argument is refused by name. A thread-local setter and not a field, for the reason
+ * rwa_dispatch_buffers gives above. Optional: an older library has no such symbol.
+ */
+void rwa_dispatch_threadgroup_memory(unsigned bytes);
+
 /* Wait for everything dispatched so far, with a real fence. 0, or -1 and a sentence. */
 int rwa_finish(struct rwa_device *device, char *why, size_t why_size);
 /* where the draws' time went since the last call, in ns: validation, binding checks, fixed
