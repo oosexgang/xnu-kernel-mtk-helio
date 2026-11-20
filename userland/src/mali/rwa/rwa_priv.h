@@ -66,6 +66,7 @@ const char *rwa_board_soc(void);
 bool rwa_f16as8(void);
 /* the stage cache (rwa_shader.c): stages taken from it, compiled for want of it, records it has */
 void rwa_cache_stats(uint64_t *hits, uint64_t *misses, unsigned *records);
+void rwa_cache_missed(char *out, size_t room);
 const char *rwa_arch_status(unsigned arch, unsigned gpu_id);
 
 struct rwa_stage {

@@ -992,6 +992,51 @@ rwa_cache_stats(uint64_t *hits, uint64_t *misses, unsigned *records)
 	*records = ncache;
 }
 
+/* the stages the cache did not have, by entry point and stage: what the next cache has to take in */
+static struct { char entry[56]; unsigned char stage, generic; unsigned n; } missed[48];
+static unsigned nmissed;
+static pthread_mutex_t missed_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+miss_note(const char *entry, gl_shader_stage want, bool generic)
+{
+	pthread_mutex_lock(&missed_lock);
+	unsigned i = 0;
+	while (i < nmissed && !(missed[i].stage == want && missed[i].generic == generic &&
+				strncmp(missed[i].entry, entry, sizeof(missed[i].entry) - 1) == 0))
+		i++;
+	if (i == nmissed && nmissed < 48) {
+		snprintf(missed[i].entry, sizeof(missed[i].entry), "%s", entry);
+		missed[i].stage = (unsigned char)want;
+		missed[i].generic = generic;
+		nmissed++;
+	}
+	if (i < nmissed)
+		missed[i].n++;
+	pthread_mutex_unlock(&missed_lock);
+}
+
+/* "ENTRY/v|f[+cfg] N ..." the most compiled first, as much as fits in OUT */
+void
+rwa_cache_missed(char *out, size_t room)
+{
+	pthread_mutex_lock(&missed_lock);
+	size_t at = 0;
+	out[0] = 0;
+	bool done[48] = { false };
+	for (unsigned k = 0; k < nmissed && at + 80 < room; k++) {
+		unsigned best = 48;
+		for (unsigned i = 0; i < nmissed; i++)
+			if (!done[i] && (best == 48 || missed[i].n > missed[best].n))
+				best = i;
+		done[best] = true;
+		at += (size_t)snprintf(out + at, room - at, " %s/%c%s %u", missed[best].entry,
+				       missed[best].stage == MESA_SHADER_VERTEX ? 'v' : missed[best].stage == MESA_SHADER_FRAGMENT ? 'f' : 'c',
+				       missed[best].generic ? "+cfg" : "", missed[best].n);
+	}
+	pthread_mutex_unlock(&missed_lock);
+}
+
 int
 rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *bitcode, size_t size, const char *entry,
 		  gl_shader_stage want, const struct rwa_constant *constants, unsigned nconst, const void *config,
@@ -1032,6 +1077,8 @@ rwa_stage_compile(struct rwa_device *device, struct rwa_stage *st, const void *b
 		return -1;
 	}
 	snprintf(st->name, sizeof(st->name), "%s", st->air.entry_point ? st->air.entry_point : (entry ? entry : "?"));
+	if (getenv("RWA_CACHE_OUT") == NULL && ncache)
+		miss_note(st->name, want, config_size != 0);   /* named here: the caller gives no entry for a library of one */
 	/* [[vertex_id]] is the vertex's own number: Bifrost's is counted from the draw's first vertex (offset_start, the
 	 * lowest index of an indexed draw), and pan_nir_lower_vertex_id adds it back (RWA_SV_VERTEX_OFFSETS). Without it a
 	 * vertex stage that reads its vertices out of a buffer by their number -- CoreAnimation's generic fixed_vert_lph_gen
