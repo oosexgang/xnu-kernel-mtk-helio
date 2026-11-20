@@ -109,9 +109,9 @@ say_first_drawn(struct rwm_work *const *works, unsigned count, const char *(*lab
 /*
  * boot-arg rwm_cbsum=S[,N]: from S s after boot, once five command buffers in a row came 90 to 115 ms apart (the 10 Hz
  * pace), the next 150 (N), one kept line each -- the time since the one before, the committing thread, what it holds
- * (draws, into which surfaces, clears, dispatches, copies) and its commonest pipeline. The question it answers: what
- * CoreAnimation draws when it paces at 10 Hz (runs 605 to 608: seconds on end of command buffers exactly 6 refreshes
- * apart, from the moment Photos is tapped and crashes, with nothing else moving). rwm_cbsum=S,N,0: from S at once.
+ * (draws, how many into the display's surface and the union of their scissors, clears, dispatches, copies) and its
+ * commonest pipeline. It found the 10 Hz of runs 605 to 610: the Clock icon's second hand, the whole home screen drawn
+ * again for each tick (inject_sb.c). rwm_cbsum=S,N,0: from S at once.
  */
 void
 cb_summary(struct rwm_work *const *works, unsigned count, const char *(*label_of)(void *))
@@ -155,7 +155,7 @@ cb_summary(struct rwm_work *const *works, unsigned count, const char *(*label_of
 	uint32_t sids[4] = { 0, 0, 0, 0 };
 	const char *labels[8];
 	unsigned label_n[8];
-	const char *first = nullptr;
+	unsigned box[4] = { ~0u, ~0u, 0, 0 }, unscissored = 0;
 
 	for (unsigned n = 0; n < count; n++) {
 		const struct rwm_work *w = works[n];
@@ -183,14 +183,22 @@ cb_summary(struct rwm_work *const *works, unsigned count, const char *(*label_of
 		if (strncmp(l, "com.apple.coreanimation.", 24) == 0) {
 			l += 24;
 		}
-		if (first == nullptr) {
-			first = l;
-		}
 		const uint32_t sid = w->target_surface_count != 0 ? w->target_surface[0] : 0;
 
 		if (sid != 0) {
 			unsigned k;
 
+			/* the area CoreAnimation repaints: the union of the surface draws' scissors (none: the whole) */
+			if (w->draw.scissor == nullptr) {
+				unscissored++;
+			} else {
+				const unsigned *r = w->draw.scissor;
+
+				box[0] = r[0] < box[0] ? r[0] : box[0];
+				box[1] = r[1] < box[1] ? r[1] : box[1];
+				box[2] = r[0] + r[2] > box[2] ? r[0] + r[2] : box[2];
+				box[3] = r[1] + r[3] > box[3] ? r[1] + r[3] : box[3];
+			}
 			into_surface++;
 			for (k = 0; k < nsid && sids[k] != sid; k++) {
 			}
@@ -218,15 +226,18 @@ cb_summary(struct rwm_work *const *works, unsigned count, const char *(*label_of
 		}
 	}
 	char thread[48] = "";
-	char line[420];
+	char line[480];
 
 	pthread_getname_np(pthread_self(), thread, sizeof(thread));
-	snprintf(line, sizeof(line), "!!rwm cb %llu.%03llu +%llu ms %s: %u works, %u draws (%u into surfaces %u %u %u), "
-		 "%u clears, %u dispatches, %u copies; %u pipelines, most %s (%u), first %s",
+	const char *tname = strncmp(thread, "com.apple.coreanimation.", 24) == 0 ? thread + 24 : thread;
+
+	/* (kern.hakios.say keeps 255 bytes of a line: the numbers first, the label last) */
+	snprintf(line, sizeof(line), "!!rwm cb %llu.%03llu +%llu ms %s: %u draws, %u into surface %u (%u unscissored, "
+		 "scissors %u,%u-%u,%u), %u clears, %u dispatches, %u copies; %u pipelines, most %s (%u)",
 		 (unsigned long long)(now / 1000000000ull), (unsigned long long)(now / 1000000ull % 1000),
-		 (unsigned long long)(was != 0 ? (now - was) / 1000000ull : 0), thread[0] ? thread : "?", count, draws,
-		 into_surface, sids[0], sids[1], sids[2], clears, dispatches, copies, nlab, nlab ? labels[most] : "-",
-		 nlab ? label_n[most] : 0, first != nullptr ? first : "-");
+		 (unsigned long long)(was != 0 ? (now - was) / 1000000ull : 0), tname[0] ? tname : "?", draws, into_surface,
+		 sids[0], unscissored, box[0] == ~0u ? 0 : box[0], box[1] == ~0u ? 0 : box[1], box[2], box[3], clears,
+		 dispatches, copies, nlab, nlab ? labels[most] : "-", nlab ? label_n[most] : 0);
 	sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
 }
 
