@@ -229,9 +229,15 @@ struct air_ctx {
    unsigned num_init_stores;
    struct {
       unsigned offset;
+      unsigned size;        /* bytes: the most any store at that offset wrote, a bad one too */
       nir_def *value;
       bool bad;
    } init_stores[256];
+   /* what keeps init_stores from being the whole story of what air.static_init wrote: a store
+    * into scratch at an offset not known while translating, one the table had no room for, and a
+    * branch decided only at run time (a store under it may not happen at all). Each turns off
+    * init_bytes_known, the fold that takes init_stores as everything the initializer wrote. */
+   bool init_not_whole;
 
    unsigned num_ptr_slots;
    struct {

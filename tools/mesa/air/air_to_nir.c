@@ -261,6 +261,23 @@ scalar_known_component(nir_def *d, unsigned component, nir_const_value *out, uns
       *out = nir_instr_as_load_const(d->parent_instr)->value[component];
       return true;
    }
+   /* a vector put together from scalars (insertelement, a <4 x i8> of function constants), or a swizzle of one */
+   if (d->parent_instr->type == nir_instr_type_alu && depth <= 24 && component < d->num_components) {
+      nir_alu_instr *alu = nir_instr_as_alu(d->parent_instr);
+      if (nir_op_is_vec(alu->op))
+         return scalar_known_component(alu->src[component].src.ssa, alu->src[component].swizzle[0], out, depth + 1);
+      if (alu->op == nir_op_mov)
+         return scalar_known_component(alu->src[0].src.ssa, alu->src[0].swizzle[component], out, depth + 1);
+      /* and a choice between two of them on a condition known now (the initializer's select of the opcodes) */
+      if (alu->op == nir_op_bcsel || alu->op == nir_op_b32csel) {
+         nir_const_value cond;
+         if (!scalar_known_component(alu->src[0].src.ssa, alu->src[0].swizzle[component], &cond, depth + 1))
+            return false;
+         bool taken = alu->src[0].src.ssa->bit_size == 1 ? cond.b : cond.u32 != 0;
+         unsigned k = taken ? 1 : 2;
+         return scalar_known_component(alu->src[k].src.ssa, alu->src[k].swizzle[component], out, depth + 1);
+      }
+   }
    return false;
 }
 
@@ -688,6 +705,56 @@ air_ptr_add(struct air_ctx *c, struct air_ptr ptr, nir_def *bytes)
 static int scratch_global_at(struct air_ctx *c, nir_def *offset);
 static int scratch_global_containing(struct air_ctx *c, uint64_t off);
 
+/*
+ * Bytes of a program-scope global that only air.static_init writes, read back at a width other than the one they
+ * were stored at: the constant they make, when every byte of the load was stored there as a constant (init_stores)
+ * and nothing else the initializer did can have changed them (init_not_whole). QuartzCore 27's uber shader copies
+ * its FragmentShaderConfig out of function constants into fc_fragment_shader_config a byte at a time and reads the
+ * colour program's opcodes back four at a time, a <4 x i8> at a time; the opcode each UberShader::apply_color_opcode
+ * call is given was a value of the run, so every call translated the opcode's whole switch -- two thirds of
+ * fixed_frag_lph_cph's NIR, and of the time it took to translate it. Little-endian, as Metal's memory is.
+ */
+static bool
+init_bytes_known(struct air_ctx *c, uint64_t at, unsigned comps, unsigned bits, nir_const_value *out)
+{
+   unsigned size = comps * bits / 8;
+   if (c->init_not_whole || bits < 8 || bits % 8 || comps > NIR_MAX_VEC_COMPONENTS || size > 64)
+      return false;
+   int g = scratch_global_containing(c, at);
+   if (g < 0 || c->global_plan[g].written_outside_init || scratch_global_containing(c, at + size - 1) != g)
+      return false;
+   uint8_t bytes[64];
+   for (unsigned b = 0; b < size; b++) {
+      bool have = false;
+      for (unsigned i = 0; i < c->num_init_stores; i++) {
+         const nir_def *v = c->init_stores[i].value;
+         unsigned off = c->init_stores[i].offset;
+         if (at + b < off || at + b >= (uint64_t)off + c->init_stores[i].size)
+            continue;
+         /* a store covering this byte that is not one constant of whole bytes: the byte is not known */
+         if (c->init_stores[i].bad || !v || v->bit_size < 8)
+            return false;
+         unsigned within = (unsigned)(at + b - off), each = v->bit_size / 8;
+         uint64_t word = nir_instr_as_load_const(v->parent_instr)->value[within / each].u64;
+         uint8_t byte = (uint8_t)(word >> (8 * (within % each)));
+         /* two stores of this byte (at different offsets, of different widths) must agree on it */
+         if (have && bytes[b] != byte)
+            return false;
+         bytes[b] = byte;
+         have = true;
+      }
+      if (!have)
+         return false;
+   }
+   for (unsigned k = 0; k < comps; k++) {
+      uint64_t word = 0;
+      for (unsigned j = 0; j < bits / 8; j++)
+         word |= (uint64_t)bytes[k * (bits / 8) + j] << (8 * j);
+      out[k] = nir_const_value_for_uint(word, bits);
+   }
+   return true;
+}
+
 static nir_def *
 ptr_offset(struct air_ctx *c, struct air_ptr ptr)
 {
@@ -792,6 +859,14 @@ air_load_ptr(struct air_ctx *c, struct air_ptr ptr, const struct air_type *type,
          }
          if (res)
             break;
+         nir_const_value bytes_value[NIR_MAX_VEC_COMPONENTS];
+         if (init_bytes_known(c, at, comps, bits, bytes_value)) {
+            res = nir_build_imm(&c->b, comps, bits, bytes_value);
+            if (getenv("RWA_PRINT_FOLD"))
+               fprintf(stderr, "fold-bytes stage %d scratch 0x%llx %ux%u\n", (int)c->nir->info.stage,
+                       (unsigned long long)at, comps, bits);
+            break;
+         }
          if (getenv("RWA_PRINT_FOLD"))
             fprintf(stderr, "nofold stage %d scratch 0x%llx\n", (int)c->nir->info.stage, (unsigned long long)at);
       }
@@ -892,22 +967,39 @@ air_store_ptr(struct air_ctx *c, struct air_ptr ptr, nir_def *value, unsigned al
          bool ok = scalar_known(value, &known, 0);
          if (ok)
             value = nir_build_imm(&c->b, 1, value->bit_size, &known);
+      } else if (c->in_static_init && value->num_components > 1 &&
+                 value->num_components <= NIR_MAX_VEC_COMPONENTS &&
+                 !nir_src_is_const(nir_src_for_ssa(value))) {
+         /* the same for a vector of them: QuartzCore 27's initializer stores the colour program's opcodes, function
+          * constants, as a <4 x i8> put together by insertelement */
+         nir_const_value known[NIR_MAX_VEC_COMPONENTS];
+         bool ok = true;
+         for (unsigned k = 0; k < value->num_components && ok; k++)
+            ok = scalar_known_component(value, k, &known[k], 0);
+         if (ok)
+            value = nir_build_imm(&c->b, value->num_components, value->bit_size, known);
       }
       uint64_t at;
+      if (c->in_static_init && (!ptr.offset || !offset_known(ptr.offset, &at, 0)))
+         c->init_not_whole = true;
       if (c->in_static_init && ptr.offset && offset_known(ptr.offset, &at, 0) &&
           scratch_global_containing(c, at) >= 0) {
          unsigned i;
          for (i = 0; i < c->num_init_stores; i++)
             if (c->init_stores[i].offset == at)
                break;
+         if (i == c->num_init_stores && c->num_init_stores == ARRAY_SIZE(c->init_stores))
+            c->init_not_whole = true;
          bool is_const = nir_src_is_const(nir_src_for_ssa(value));
          if (i == c->num_init_stores && c->num_init_stores < ARRAY_SIZE(c->init_stores)) {
             c->init_stores[i].offset = at;
+            c->init_stores[i].size = MAX2(1u, value->num_components * value->bit_size / 8);
             c->init_stores[i].value = is_const ? value : NULL;
             c->init_stores[i].bad = !is_const;
             c->num_init_stores++;
          } else if (i < c->num_init_stores) {
             nir_def *old = c->init_stores[i].value;
+            c->init_stores[i].size = MAX2(c->init_stores[i].size, MAX2(1u, value->num_components * value->bit_size / 8));
             if (!is_const || !old || old->bit_size != value->bit_size ||
                 old->num_components != value->num_components ||
                 memcmp(nir_instr_as_load_const(old->parent_instr)->value,
@@ -3719,6 +3811,30 @@ translate_callee(struct air_ctx *c, const struct air_function *f,
       specialised |= ptr;
    }
 
+   /* A callee translated for this call site alone (above) need not take as a parameter what the call site knows
+    * now: a scalar argument known while translating (scalar_known) is that constant inside it as well, so that a
+    * branch or a switch on it is decided there too (translate_body) and the side not taken is never translated.
+    * QuartzCore's UberShader::apply_color_opcode takes the colour program's textures, so each of its calls -- one
+    * for each opcode of the program -- is a callee of its own; given its opcode as a parameter, every copy was
+    * translated whole, the switch over all opcodes in it. Read in the CALLER's tables, still the live ones here. */
+   bool *known = NULL;
+   nir_const_value *known_value = NULL;
+   if (specialised && argv) {
+      for (unsigned i = 0; i < f->num_args; i++) {
+         nir_const_value v;
+         if (!is_param[i] || !argv[i] || argv[i]->kind != AIR_VAL_SSA || type_is_agg(f->args[i].type) ||
+             argv[i]->def->num_components != 1 || !scalar_known(argv[i]->def, &v, 0))
+            continue;
+         if (!known) {
+            known = rzalloc_array(c->mem_ctx, bool, f->num_args);
+            known_value = rzalloc_array(c->mem_ctx, nir_const_value, f->num_args);
+         }
+         known[i] = true;
+         known_value[i] = v;
+         is_param[i] = false;   /* and the call passes it no more (air_call_in_module) */
+      }
+   }
+
    struct hash_entry *e = specialised ? NULL : _mesa_hash_table_search(c->fns, f);
    if (e)
       return e->data;
@@ -3858,6 +3974,11 @@ translate_callee(struct air_ctx *c, const struct air_function *f,
    }
    unsigned pidx = nret;
    for (unsigned i = 0; i < f->num_args && ok; i++) {
+      if (known && known[i]) {
+         /* the constant the call site knows, built again in this impl: the caller's def is not this function's */
+         air_set(c, &f->args[i], air_val_ssa(c, nir_build_imm(&c->b, 1, argv[i]->def->bit_size, &known_value[i])));
+         continue;
+      }
       if (!is_param[i]) {
          air_set(c, &f->args[i], argv[i]);   /* the caller's own resolution */
          continue;
@@ -4502,9 +4623,11 @@ translate_body(struct air_ctx *c)
                only = nir_const_value_as_bool(known, cond->bit_size) ? 0 : 1;
                nir_goto(&c->b, nir_block_of(c, term->targets[only]));
             }
-            else
+            else {
+               c->init_not_whole |= c->in_static_init;
                nir_goto_if(&c->b, nir_block_of(c, term->targets[0]), cond,
                            nir_block_of(c, term->targets[1]));
+            }
          }
          break;
       case AIR_OP_SWITCH: {
@@ -4524,8 +4647,33 @@ translate_body(struct air_ctx *c)
          nir_def *cond = air_get_ssa(c, term->operands[0]);
          if (!cond)
             return false;
-         nir_block *deflt = nir_block_of(c, term->targets[0]);
          unsigned n = term->num_targets - 1;
+         /* a switch on a value known now (scalar_known) goes to its one case, like a decided br: the other cases are
+          * not translated (UberShader::apply_color_opcode's switch on the opcode, once the opcode folds) */
+         nir_const_value known;
+         if (cond->num_components == 1 && scalar_known(cond, &known, 0)) {
+            int taken = 0;   /* the default, unless a case matches */
+            bool cases_known = true;
+            for (unsigned k = 0; k < n && cases_known; k++) {
+               nir_def *val = air_get_ssa(c, term->operands[1 + k]);
+               nir_const_value kv;
+               if (!val || val->num_components != 1 || !scalar_known(val, &kv, 0)) {
+                  cases_known = false;
+                  break;
+               }
+               if (nir_const_value_as_uint(kv, val->bit_size) == nir_const_value_as_uint(known, cond->bit_size)) {
+                  taken = 1 + k;
+                  break;
+               }
+            }
+            if (cases_known) {
+               only = taken;
+               nir_goto(&c->b, nir_block_of(c, term->targets[taken]));
+               break;
+            }
+         }
+         c->init_not_whole |= c->in_static_init;
+         nir_block *deflt = nir_block_of(c, term->targets[0]);
          for (unsigned k = 0; k < n; k++) {
             nir_def *val = air_get_ssa(c, term->operands[1 + k]);
             if (!val)
