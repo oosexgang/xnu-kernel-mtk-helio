@@ -273,5 +273,18 @@ hakios_tweaks_init(void)
 		return;
 	}
 	done = true;
+	/*
+	 * HAKIOS_CONSOLE=1 in the environment (boot-arg exec_env=Preferences:OS_ACTIVITY_DT_MODE=1;HAKIOS_CONSOLE=1): standard
+	 * error on the console. An application's goes nowhere, and with OS_ACTIVITY_DT_MODE its os_log is written there --
+	 * the one way to see what Settings says of a pane that comes up empty (Bluetooth, run 657).
+	 */
+	if (getenv("HAKIOS_CONSOLE") != NULL) {
+		int fd = open("/dev/console", O_WRONLY | O_NOCTTY);
+
+		if (fd >= 0) {
+			dup2(fd, 2);
+			close(fd);
+		}
+	}
 	load_the_tweaks();
 }

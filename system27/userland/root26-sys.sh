@@ -183,9 +183,10 @@ PY
 # strings' keys in place of its strings: Settings > Bluetooth said PLACARD_SUBTITLE and POWER_OFF_WARNING (run 650), a
 # context menu ADD_EVENT. (The lasting fix is mkimage26.py keeping those directories; this needs no new image.)
 rm -f $T/etc/overlays
-# LPROJ=auto: Settings' panes of that kind, from the system's tree (a path the system image left out is passed over by
-# init). Only bundles that are loaded, not programs: over SpringBoard.app SpringBoard died at once, an assertion in
-# -[FBServiceFacilityServer _initWithDomain:] (run 655) -- applications wait for an image made with mkimage26.py's
+# LPROJ=auto: Settings' panes of that kind without code of their own, from the system's tree (a path the system image left
+# out is passed over by init). A bundle with code does not survive the union: over SpringBoard.app SpringBoard died at
+# once, an assertion in -[FBServiceFacilityServer _initWithDomain:] (run 655), and over BluetoothSettings.bundle the pane
+# came up empty and never asked bluetoothd anything (runs 657-660). Those wait for an image made with mkimage26.py's
 # empty_lproj.
 if [ "${LPROJ:-}" = auto ]; then
 	LPROJ=$(python3 - "$S/rootfs" <<'PY'
@@ -199,7 +200,7 @@ for base in ('System/Library/PreferenceBundles', 'System/Library/Settings'):
             info = plistlib.load(open(os.path.join(bundle, 'Info.plist'), 'rb'))
         except Exception:
             continue
-        if ' ' not in name and info.get('CFBundleDevelopmentRegion') == 'English' and \
+        if ' ' not in name and info.get('CFBundleDevelopmentRegion') == 'English' and 'CFBundleExecutable' not in info and \
            any(f.endswith('.loctable') for f in os.listdir(bundle)) and os.path.isdir(os.path.join(bundle, 'en.lproj')) and \
            not os.listdir(os.path.join(bundle, 'en.lproj')):
             print('/' + base + '/' + name)
@@ -300,6 +301,9 @@ echo "/hakios/lib/libhakios-brightness.dylib SpringBoard backboardd Preferences"
 # it), as on 16.5: the boot script it would run picks a Broadcom firmware this phone has not got. Not bluetoothd:
 # inject.c's hooks there are at 16.5's addresses.
 sed -i '' -e 's|^\(/hakios/lib/libhakios\.dylib .*\)$|\1 Spotlight BlueTool|' $T/etc/inject.conf
+# PREFS_LOG=1: and Settings, for its log lines about Bluetooth and pairing kept for the host (inject.c
+# preferences_log_watched; libhakios does nothing else there)
+[ "${PREFS_LOG:-}" = 1 ] && sed -i '' -e 's|^\(/hakios/lib/libhakios\.dylib .*\)$|\1 Preferences|' $T/etc/inject.conf
 # The kernel matches executable names, not the build template's @apps token.
 python3 - "$T/etc/inject.conf" "$REL/rootfs" <<'PY'
 import pathlib, plistlib, sys
