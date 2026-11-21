@@ -55,6 +55,16 @@ extern void delay(int usec);
 #define VM_WIMG_IO              0x7
 #define VM_WIMG_WCOMB           0x6
 
+/*
+ * osfmk/arm/pmap/pmap.c (the platform patch): VM_WIMG_WCOMB is Normal non-cacheable for the kernel's own RAM and for
+ * physical addresses in [hakios_normal_nc_lo, hakios_normal_nc_hi), Device memory (posted, combined, reordered) for
+ * any other address. CONNSYS's EMI and the Wi-Fi's DMA area are RAM the kernel does not have, and frames and
+ * firmware are memcpy()d into them: as Device memory an unaligned store is an alignment fault (run 645, the 27
+ * release's kernel: "Unaligned kernel data abort" in memmove from wf_tx, the first command after step 12). The 16.5
+ * kernel mapped them Normal non-cacheable. wf_normal_nc() makes the two areas that window before they are mapped.
+ */
+extern uint64_t hakios_normal_nc_lo, hakios_normal_nc_hi;
+
 #define WF_CSR_PHYS             ((vm_offset_t)hakios_board()->blocks.conn)
 #define WF_CSR_SIZE             0x100000u
 
@@ -429,12 +439,28 @@ wf_driver_own(void)
 	return false;
 }
 
+static void
+wf_normal_nc(void)
+{
+	const uint64_t emi = MTK_CONNSYS_EMI_PHYS, emi_end = emi + MTK_CONNSYS_EMI_SIZE;
+	const uint64_t dma = HAKIOS_WIFI_DMA_PHYS, dma_end = dma + HAKIOS_WIFI_DMA_SIZE;
+	const uint64_t lo = emi < dma ? emi : dma, hi = emi_end > dma_end ? emi_end : dma_end;
+
+	if (hakios_normal_nc_hi == 0 && lo != 0 && hi - lo <= 0x1000000) {   /* (one window; 16 MB at most: two neighbours) */
+		hakios_normal_nc_lo = lo;
+		hakios_normal_nc_hi = hi;
+		hakios_host_keep_add("connsys: step 12: 0x%llx-0x%llx (EMI, the Wi-Fi's DMA) mapped Normal non-cacheable",
+		    (unsigned long long)lo, (unsigned long long)hi);
+	}
+}
+
 static bool
 wf_step12(void)
 {
 	uint32_t began = wf_ms(), lpctl, hvr = 0, fvr = 0;
 	bool own, hv, fv;
 
+	wf_normal_nc();
 	wf_csr = ml_io_map_unmappable(WF_CSR_PHYS, WF_CSR_SIZE, VM_WIMG_IO);
 	wf_dma = ml_io_map_unmappable(HAKIOS_WIFI_DMA_PHYS, HAKIOS_WIFI_DMA_SIZE, VM_WIMG_WCOMB);
 	if (wf_csr == 0 || wf_dma == 0) {

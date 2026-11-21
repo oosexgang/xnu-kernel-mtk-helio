@@ -24,6 +24,23 @@ diff --git a/bsd/kern/sys_work_interval.c b/bsd/kern/sys_work_interval.c
  	default:
  		return ENOTSUP;
  	}
+diff --git a/libkern/c++/OSKext.cpp b/libkern/c++/OSKext.cpp
+--- a/libkern/c++/OSKext.cpp
++++ b/libkern/c++/OSKext.cpp
+@@ -15715,7 +15715,12 @@ OSKext::foreachKextInBacktrace(
+ 		IOLockLock(sKextSummariesLock);
+ 	}
+ 
+-	for (uint32_t i = 0; i < gLoadedKextSummaries->numSummaries; ++i) {
++	/*
++	 * hakios: a kernel without kernel extensions has no summary at all (gLoadedKextSummaries stays NULL), and
++	 * telemetry asks for the extensions in a backtrace all the same (telemetry_backtrace_add_kexts, from trap and
++	 * VM sanitizer telemetry): a data abort at 0x8 (the 27 release's user space on the network, run 646).
++	 */
++	for (uint32_t i = 0; gLoadedKextSummaries != NULL && i < gLoadedKextSummaries->numSummaries; ++i) {
+ 		OSKextLoadedKextSummary * summary;
+ 
+ 		summary = gLoadedKextSummaries->summaries + i;
 diff --git a/osfmk/ipc/ipc_kmsg.c b/osfmk/ipc/ipc_kmsg.c
 --- a/osfmk/ipc/ipc_kmsg.c
 +++ b/osfmk/ipc/ipc_kmsg.c
