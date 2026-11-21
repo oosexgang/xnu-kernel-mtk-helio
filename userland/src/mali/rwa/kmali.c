@@ -457,7 +457,6 @@ reap(void)
 {
 	if (__atomic_load_n(&closing, __ATOMIC_RELAXED) == NULL && __atomic_load_n(&lingering, __ATOMIC_RELAXED) == NULL)
 		return;
-	struct km_bo *gone = NULL;
 	pthread_mutex_lock(&lock);
 	{
 		/* the lingering ones past their second or past the first four: to be closed once their last job is done */
@@ -475,22 +474,23 @@ reap(void)
 			closing = b;
 		}
 	}
+	/*
+	 * Their job done: closed here, under the lock, not later outside it. The kernel hands a client the same handle
+	 * for a surface for as long as it holds that surface, so a surface imported again while its old buffer waited on
+	 * a list to be closed got the old handle -- and the close then took the buffer from the new texture: "mali fault
+	 * ... into a freed buffer ... kind 2 750x1624, freed by backboardd" (run 646, 3 job chains). km_surface looks
+	 * for its surface on these lists under the same lock, so a buffer is either on one of them or closed.
+	 */
 	for (struct km_bo **p = &closing; *p != NULL;) {
 		struct km_bo *b = *p;
 		if (done(b->busy_seq)) {
 			*p = b->next;
-			b->next = gone;
-			gone = b;
+			close_bo_now(b);
 		} else {
 			p = &b->next;
 		}
 	}
 	pthread_mutex_unlock(&lock);
-	while (gone != NULL) {
-		struct km_bo *n = gone->next;
-		close_later(gone);
-		gone = n;
-	}
 }
 
 void
@@ -584,18 +584,20 @@ km_surface(uint32_t surface_id, struct km_surface_info *info, char *why, size_t 
 			pthread_mutex_unlock(&lock);
 			return b;
 		}
-	for (struct km_bo **p = &lingering; *p != NULL; p = &(*p)->next)
-		if ((*p)->surface_id == surface_id) {
-			struct km_bo *b = *p;
-			*p = b->next;
-			b->surface_refs = 1;
-			b->next = surfaces;
-			surfaces = b;
-			linger_revived++;
-			*info = b->surface;
-			pthread_mutex_unlock(&lock);
-			return b;
-		}
+	/* let go and kept a while (lingering), or waiting for its last job to be closed (closing): still open, taken back */
+	for (struct km_bo **list = &lingering; list != NULL; list = list == &lingering ? &closing : NULL)
+		for (struct km_bo **p = list; *p != NULL; p = &(*p)->next)
+			if ((*p)->surface_id == surface_id) {
+				struct km_bo *b = *p;
+				*p = b->next;
+				b->surface_refs = 1;
+				b->next = surfaces;
+				surfaces = b;
+				linger_revived++;
+				*info = b->surface;
+				pthread_mutex_unlock(&lock);
+				return b;
+			}
 	pthread_mutex_unlock(&lock);
 
 	s.surface = surface_id;
