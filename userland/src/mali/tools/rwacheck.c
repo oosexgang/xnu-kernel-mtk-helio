@@ -227,6 +227,12 @@ main(int argc, char **argv)
 		printf("+ %s: vs %u buffers, fs %u buffers %u textures %u samplers, attrs %u\n", shortl,
 		       info.vertex_buffers, info.fragment_buffers, info.fragment_textures, info.fragment_samplers,
 		       info.vertex_attribute_count);
+		if (getenv("RWACHECK_TIMES") != NULL) {
+			/* RWACHECK_TIMES=1: where this pipeline's compile went (the child compiles only this one) */
+			extern uint64_t rwa_compile_ns[3];
+			printf("  ms: AIR to NIR %.1f, lowering %.1f, Bifrost compiler %.1f\n", rwa_compile_ns[0] / 1e6,
+			       rwa_compile_ns[1] / 1e6, rwa_compile_ns[2] / 1e6);
+		}
 		if (!do_draw) {
 			fflush(stdout);
 			_exit(0);
