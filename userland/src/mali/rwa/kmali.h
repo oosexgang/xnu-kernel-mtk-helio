@@ -47,6 +47,9 @@ int km_param(uint32_t which, uint64_t *value);
 unsigned km_gpu_id(void);
 /* a buffer of at least SIZE bytes, from the cache when one is free; NULL and a sentence */
 struct km_bo *km_bo_new(uint64_t size, char *why, size_t why_size);
+/* the two halves of km_bo_new: one from the cache (NULL when none is free), and a new one the kernel makes (slow) */
+struct km_bo *km_bo_reuse(uint64_t size);
+struct km_bo *km_bo_make(uint64_t size, char *why, size_t why_size);
 /* given back: kept for the next ask once job SEQ is done (0: now); an imported one is closed */
 void km_bo_release(struct km_bo *bo, uint64_t seq);
 /* IOSurface SURFACE_ID's memory as a buffer, and what the kernel says of it */

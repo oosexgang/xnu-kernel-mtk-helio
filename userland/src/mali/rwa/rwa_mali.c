@@ -334,7 +334,27 @@ store_new(uint64_t size, char *why, size_t why_size)
 		say(why, why_size, "out of memory");
 		return NULL;
 	}
-	s->bo = km_bo_new(size, why, why_size);
+	/*
+	 * From the cache under the library's lock, as it was until run 623; only when the kernel has to make the buffer (up
+	 * to 25 ms for a snapshot's few MB) is the lock let go for that call, and only by its outermost holder. Runs 623 to
+	 * 639 made textures and buffers wholly outside the lock (7e14793): the context menus' symbols came out as black
+	 * squares (runs 637 to 639; 642, the same library before it, drew them right), as did an application's icon while
+	 * it zoomed open or closed (white, run 627).
+	 */
+	s->bo = km_bo_reuse(size);
+	if (s->bo == NULL && guard_depth == 1) {
+		guard_depth = 0;
+		pthread_mutex_unlock(&rwa_lock);
+		s->bo = km_bo_make(size, why, why_size);
+		const uint64_t want = now_ns();
+		pthread_mutex_lock(&rwa_lock);
+		guard_depth = 1;
+		const uint64_t now = now_ns();
+		lock_wait_ns += now - want;
+		guard_since = now;
+	} else if (s->bo == NULL) {
+		s->bo = km_bo_make(size, why, why_size);
+	}
 	if (s->bo == NULL) {
 		free(s);
 		return NULL;
@@ -505,7 +525,7 @@ rwa_device_name(struct rwa_device *device)
 struct rwa_buffer *
 rwa_buffer_create(struct rwa_device *device, size_t size, char *why, size_t why_size)
 {
-	/* (not under the library's lock: see rwa_texture_create) */
+	GUARD();
 	struct rwa_buffer *b = calloc(1, sizeof(*b));
 
 	if (b == NULL) {
@@ -625,15 +645,11 @@ texture_new(struct rwa_device *device, const struct rwa_texture_shape *shape)
 	return t;
 }
 
-/*
- * Not under the library's lock, nor rwa_buffer_create: a new texture or buffer touches nothing of the library's but its
- * own memory, and that comes from kmali.c, which has a lock of its own. When the cache has nothing of the size, the
- * kernel makes it -- wired, flushed and mapped for the GPU, up to 25 ms for a snapshot's few MB -- and the window
- * server's other drawing threads waited all that time (run 622: rwa_texture_create over 5 ms 24 to 50 times in 30 s).
- */
+/* (the lock is let go while the kernel makes its memory, if it has to: store_new) */
 struct rwa_texture *
 rwa_texture_create(struct rwa_device *device, const struct rwa_texture_shape *shape, char *why, size_t why_size)
 {
+	GUARD();
 	struct rwa_texture *t = texture_new(device, shape);
 
 	if (t == NULL) {

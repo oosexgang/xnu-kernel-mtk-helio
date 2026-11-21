@@ -288,27 +288,12 @@ done(uint64_t seq)
 	return true;
 }
 
-struct km_bo *
-km_bo_new(uint64_t size, char *why, size_t why_size)
+/* a buffer of SIZE bytes (already rounded) from the chunk pool or the cache, its job done; NULL when none is */
+static struct km_bo *
+reuse(uint64_t size)
 {
-	if (size == 0 || size > (256ull << 20)) {
-		snprintf(why, why_size, "a buffer of %llu bytes (HakiosMali takes 1 byte to 256 MB)", (unsigned long long)size);
+	if (fake)
 		return NULL;
-	}
-	size = (size + 16383) & ~16383ull;
-	if (fake) {
-		struct km_bo *bo = calloc(1, sizeof(*bo));
-		bo->cpu = calloc(1, size);
-		bo->size = size;
-		bo->gpu = fake_gpu;
-		fake_gpu += size;
-		bo->handle = 1;
-#ifdef RWA_PANDECODE
-		if (decode)
-			pandecode_inject_mmap(decode, bo->gpu, bo->cpu, (unsigned)size, NULL);
-#endif
-		return bo;
-	}
 	pthread_mutex_lock(&lock);
 	if (size == KM_CHUNK_SIZE && chunk_head != NULL && done(chunk_head->busy_seq)) {
 		/* the oldest chunk given back, its job done (the ones after it were given back later: not looked at) */
@@ -352,7 +337,36 @@ km_bo_new(uint64_t size, char *why, size_t why_size)
 		return b;
 	}
 	pthread_mutex_unlock(&lock);
+	return NULL;
+}
 
+struct km_bo *
+km_bo_reuse(uint64_t size)
+{
+	return size == 0 || size > (256ull << 20) ? NULL : reuse((size + 16383) & ~16383ull);
+}
+
+struct km_bo *
+km_bo_make(uint64_t size, char *why, size_t why_size)
+{
+	if (size == 0 || size > (256ull << 20)) {
+		snprintf(why, why_size, "a buffer of %llu bytes (HakiosMali takes 1 byte to 256 MB)", (unsigned long long)size);
+		return NULL;
+	}
+	size = (size + 16383) & ~16383ull;
+	if (fake) {
+		struct km_bo *bo = calloc(1, sizeof(*bo));
+		bo->cpu = calloc(1, size);
+		bo->size = size;
+		bo->gpu = fake_gpu;
+		fake_gpu += size;
+		bo->handle = 1;
+#ifdef RWA_PANDECODE
+		if (decode)
+			pandecode_inject_mmap(decode, bo->gpu, bo->cpu, (unsigned)size, NULL);
+#endif
+		return bo;
+	}
 	const uint64_t create_began = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 	struct km_create_req create = { (uint32_t)size, 0, 0, 0, 0 };
 	int error = call(KM_CREATE_BO, &create, sizeof(create));
@@ -422,6 +436,14 @@ km_bo_new(uint64_t size, char *why, size_t why_size)
 		made_max_ns = took;
 	pthread_mutex_unlock(&lock);
 	return bo;
+}
+
+struct km_bo *
+km_bo_new(uint64_t size, char *why, size_t why_size)
+{
+	struct km_bo *bo = km_bo_reuse(size);
+
+	return bo != NULL ? bo : km_bo_make(size, why, why_size);
 }
 
 /*
