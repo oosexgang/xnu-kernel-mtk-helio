@@ -1373,6 +1373,59 @@ overlay_job_cache(void)
 	check(ok, "the small image's launchd.plist over the system volume's");
 }
 
+/*
+ * Directories of the system volume with something of the small image's over them (etc/overlays: a path a line; the
+ * small image has what goes over each at overlay/PATH), bound as a union like the job cache above: what the small image
+ * has is seen, the rest below it. For a file or two the system image lacks, without writing a new 4 GB image to the
+ * phone -- such as the empty en.lproj a bundle whose development region is "English" needs to find its strings
+ * (system27/userland/root26-sys.sh).
+ */
+static void
+overlay_dirs(void)
+{
+	static char list[4096];
+	char from[512];
+	int fd, ok, done = 0, failed = 0;
+	ssize_t n;
+
+	fd = open(in_image("/etc/overlays"), O_RDONLY, 0);
+	if (fd < 0) {
+		return;
+	}
+	n = read(fd, list, sizeof(list) - 1);
+	close(fd);
+	if (n <= 0) {
+		return;
+	}
+	list[n] = 0;
+	printf("\n-- the small image's overlays --\n");
+	for (char *line = list, *end; *line; line = end) {
+		for (end = line; *end && *end != '\n'; end++)
+			;
+		if (*end) {
+			*end++ = 0;
+		}
+		if (line[0] != '/') {
+			continue;
+		}
+		struct stat st;
+		if (stat(line, &st) != 0) {
+			continue;               /* (not in this system image: the pruned one leaves heavy applications out) */
+		}
+		strcpy(from, in_image("/overlay"));
+		strcpy(from + strlen(from), line);
+		ok = mount("bindfs", line, MNT_RDONLY | MNT_UNION, (void *)from) == 0;
+		if (!ok) {
+			printf("  bindfs %s on %s, union: %s\n", from, line, strerror(errno));
+			failed++;
+		} else {
+			done++;
+		}
+	}
+	printf("  %d overlaid, %d not\n", done, failed);
+	check(failed == 0, "the small image's overlays over the system volume's directories");
+}
+
 static void
 configure_vnodes(void)
 {
@@ -1441,6 +1494,7 @@ main(int argc, char **argv, char **envp)
 	configure_inject();
 	configure_vnodes();
 	overlay_job_cache();
+	overlay_dirs();
 	run_rc(in_image("/etc/rc"));
 	printf("\n=== init: done ===\n");
 	reboot(RB_HALT);

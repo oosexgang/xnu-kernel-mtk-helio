@@ -132,6 +132,31 @@ def trim_loctable(src, dst):
     return True
 
 
+def empty_lproj():
+    """
+    The empty en.lproj, Base.lproj and English.lproj of the bundles kept. Only files are chosen, so an .lproj directory
+    that holds nothing (the strings are in the bundle's .loctable) never came over, and a bundle whose
+    CFBundleDevelopmentRegion is "English" -- 411 in 24B119, SpringBoard.app, Calendar, Settings' Bluetooth pane among
+    them -- then showed its strings' keys (PLACARD_SUBTITLE, ADD_EVENT: runs 650, 637). The small image covers that
+    with overlays until an image made with this is on the phone (root26-sys.sh LPROJ).
+    """
+    made = 0
+    for dp, dn, fns in os.walk(ROOT):
+        for name in dn:
+            if name not in ('en.lproj', 'Base.lproj', 'English.lproj'):
+                continue
+            full = os.path.join(dp, name)
+            if os.listdir(full):
+                continue
+            rel = full[len(ROOT) + 1:]
+            if rel.startswith('private/var/staged_system_apps/'):
+                rel = 'Applications/' + rel[len('private/var/staged_system_apps/'):]
+            if os.path.isdir(os.path.dirname(os.path.join(WORK, rel))) and not os.path.lexists(os.path.join(WORK, rel)):
+                os.makedirs(os.path.join(WORK, rel))
+                made += 1
+    print(f'mkimage26: {made} empty .lproj directories of the bundles kept')
+
+
 PRUNE = False
 
 
@@ -306,6 +331,7 @@ def main():
         chosen = [(rel, src) for rel, src in chosen if not pruned(rel)]
     with ThreadPoolExecutor(os.cpu_count()) as pool:
         stripped = sum(pool.map(place, chosen))
+    empty_lproj()
     # launchd: ours first (stage0), Apple's as launchd.system
     os.replace(os.path.join(WORK, 'sbin/launchd'), os.path.join(WORK, 'sbin/launchd.system'))
     shutil.copy2(STAGE0, os.path.join(WORK, 'sbin/launchd'))

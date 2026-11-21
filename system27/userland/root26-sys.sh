@@ -177,6 +177,40 @@ plistlib.dump({'Label': 'com.hakios.nullairplay', 'ProgramArguments': ['/hakios/
                'com.apple.coremedia.endpointmanager.xpc'], 'MachServices': {'com.apple.coremedia.endpointmanager.xpc': True},
                'POSIXSpawnType': 'Adaptive'}, open(sys.argv[1], 'wb'))
 PY
+# LPROJ="BUNDLE ...": the system volume's bundles given an empty en.lproj, through init's overlays (src/init.c
+# overlay_dirs). The system image keeps only files, so every .lproj directory that held nothing is gone from it, and a
+# bundle whose CFBundleDevelopmentRegion is "English" (411 of them, SpringBoard.app among them) then shows its
+# strings' keys in place of its strings: Settings > Bluetooth said PLACARD_SUBTITLE and POWER_OFF_WARNING (run 650), a
+# context menu ADD_EVENT. (The lasting fix is mkimage26.py keeping those directories; this needs no new image.)
+rm -f $T/etc/overlays
+# LPROJ=auto: Settings' panes of that kind, from the system's tree (a path the system image left out is passed over by
+# init). Only bundles that are loaded, not programs: over SpringBoard.app SpringBoard died at once, an assertion in
+# -[FBServiceFacilityServer _initWithDomain:] (run 655) -- applications wait for an image made with mkimage26.py's
+# empty_lproj.
+if [ "${LPROJ:-}" = auto ]; then
+	LPROJ=$(python3 - "$S/rootfs" <<'PY'
+import os, plistlib, sys
+root = sys.argv[1]
+for base in ('System/Library/PreferenceBundles', 'System/Library/Settings'):
+    d = os.path.join(root, base)
+    for name in sorted(os.listdir(d)) if os.path.isdir(d) else ():
+        bundle = os.path.join(d, name)
+        try:
+            info = plistlib.load(open(os.path.join(bundle, 'Info.plist'), 'rb'))
+        except Exception:
+            continue
+        if ' ' not in name and info.get('CFBundleDevelopmentRegion') == 'English' and \
+           any(f.endswith('.loctable') for f in os.listdir(bundle)) and os.path.isdir(os.path.join(bundle, 'en.lproj')) and \
+           not os.listdir(os.path.join(bundle, 'en.lproj')):
+            print('/' + base + '/' + name)
+PY
+)
+fi
+for b in ${LPROJ:-}; do
+	mkdir -p "$T/overlay$b/en.lproj"
+	echo "$b" >> $T/etc/overlays
+done
+[ -f $T/etc/overlays ] && echo "  overlays: $(wc -l < $T/etc/overlays | tr -d ' ') bundles given an empty en.lproj"
 # JOBCACHE=1: the jobs also as launchd's job cache in the small image, etc/xpc/launchd.plist, which init binds over the
 # system volume's /System/Library/xpc (src/init.c overlay_job_cache): a change to the jobs then needs no new system
 # image. The cache is the system's own with its LaunchDaemons ours, as mkimage26.py's write_job_cache makes it.
