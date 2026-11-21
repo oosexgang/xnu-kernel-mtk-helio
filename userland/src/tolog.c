@@ -2,7 +2,7 @@
  * tolog [NAME=VALUE...] PROGRAM [ARGUMENT...]: run a program (with those in its environment) and hand every line it prints (standard output and
  * error together) to the kernel as a line to keep (kern.hakios.say, "!" first), which the kernel
  * says again every minute: a job's own output is kept nowhere, and what it printed early in a run
- * would otherwise be in the middle of the log, which is not kept. The lines are said as they come;
+ * would otherwise be in the middle of the log, which is not kept (TOLOG_KEEP=1: "!!", kept for the host as well). The lines are said as they come;
  * the last one says how the program ended.
  */
 #include <spawn.h>
@@ -16,13 +16,14 @@
 extern char **environ;
 
 static int plain;       /* TOLOG_PLAIN=1: into the log once, not kept (for output too long to keep) */
+static int host;        /* TOLOG_KEEP=1: kept for the host ("!!"): in the log that comes back whenever in a run it was said */
 
 static void
 keep(const char *text)
 {
 	char line[200];
 
-	snprintf(line, sizeof(line), "%s%s", plain ? "" : "!", text);
+	snprintf(line, sizeof(line), "%s%s", plain ? "" : host ? "!!" : "!", text);
 	sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
 }
 
@@ -42,6 +43,7 @@ main(int argc, char **argv)
 		argc--;
 	}
 	plain = getenv("TOLOG_PLAIN") != NULL;
+	host = getenv("TOLOG_KEEP") != NULL;
 	if (argc < 2 || pipe(pipes) != 0) {
 		return 1;
 	}

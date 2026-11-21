@@ -297,6 +297,11 @@ tcp(const char *host, const char *port)
 		return;
 	}
 	printf("net_test: tcp %s port %s: connected in %.2f s\n", host, port, seconds() - start);
+	{
+		/* an answer that never comes ends the read after 10 s, not the run's job list (run 648: what came after it never ran) */
+		struct timeval wait = { 10, 0 };
+		setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &wait, sizeof(wait));
+	}
 	snprintf(request, sizeof(request), "GET / HTTP/1.0\r\nHost: %s\r\nUser-Agent: net_test\r\n\r\n", host);
 	write(s, request, strlen(request));
 	answer[0] = 0;
