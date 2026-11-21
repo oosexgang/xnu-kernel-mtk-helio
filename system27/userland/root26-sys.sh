@@ -132,6 +132,18 @@ rm -f "$ENT"
 for job in "$J"/*audiomxd* "$J"/*bluetoothd*; do
 	if [ -e "$job" ]; then echo "  job $(basename "$job")"; fi
 done
+# Wi-Fi's daemon, when ALLOW lets it in ("wifi WiFi"): its job is limited to a device tree with a node named wlan,
+# marconi-wifi or centauri-alpha, and this phone's tree has none (the radio is bsd/dev/mtk_wifi.c and
+# iokit/Kernel/HakiosWLAN.cpp, connsys_step=17): launchd left the job out (run 647, com.apple.wifi-xpc not there).
+if [ -f "$J/com.apple.wifid.plist" ]; then
+	python3 - "$J/com.apple.wifid.plist" <<'PY'
+import plistlib, sys
+job = plistlib.load(open(sys.argv[1], 'rb'))
+job.pop('_LimitLoadToDeviceTree', None)
+plistlib.dump(job, open(sys.argv[1], 'wb'))
+PY
+	echo "  job com.apple.wifid.plist (any device tree)"
+fi
 # No EDR here: backboardd's job names com.apple.libEDR.Notification, whose server (EDRServerStartService)
 # CoreBrightness starts, and CoreBrightness has no display to run here. launchd kept the port and queued
 # every request: CoreAnimation in backboardd asks EDR at each display state change while holding the lock
@@ -156,6 +168,29 @@ PY
 for job in com.apple.ScreenTimeAgent com.apple.airplayd com.apple.PerfPowerServices ${NO_JOBS:-}; do
 	rm -f "$J/$job.plist" && echo "  no job $job"
 done
+# The audio server asks for airplayd's com.apple.coremedia.endpointmanager.xpc without end (the job is gone, and the
+# service is under a feature flag in its plist anyway: run 614, audiomxd a core). nullxpc stands in for it: there, and
+# answering nothing.
+python3 - "$J/com.hakios.nullairplay.plist" <<'PY'
+import plistlib, sys
+plistlib.dump({'Label': 'com.hakios.nullairplay', 'ProgramArguments': ['/hakios/bin/nullxpc',
+               'com.apple.coremedia.endpointmanager.xpc'], 'MachServices': {'com.apple.coremedia.endpointmanager.xpc': True},
+               'POSIXSpawnType': 'Adaptive'}, open(sys.argv[1], 'wb'))
+PY
+# JOBCACHE=1: the jobs also as launchd's job cache in the small image, etc/xpc/launchd.plist, which init binds over the
+# system volume's /System/Library/xpc (src/init.c overlay_job_cache): a change to the jobs then needs no new system
+# image. The cache is the system's own with its LaunchDaemons ours, as mkimage26.py's write_job_cache makes it.
+if [ "${JOBCACHE:-}" = 1 ]; then
+	mkdir -p $T/etc/xpc
+	python3 - "$S/rootfs/System/Library/xpc/launchd.plist" "$J" "$T/etc/xpc/launchd.plist" <<'PY'
+import os, plistlib, sys
+cache = plistlib.load(open(sys.argv[1], 'rb'))
+cache['LaunchDaemons'] = {'/System/Library/LaunchDaemons/' + n: plistlib.load(open(os.path.join(sys.argv[2], n), 'rb'))
+                          for n in sorted(os.listdir(sys.argv[2])) if n.endswith('.plist')}
+plistlib.dump(cache, open(sys.argv[3], 'wb'), fmt=plistlib.FMT_BINARY)
+print(f'  etc/xpc/launchd.plist: the job cache, {len(cache["LaunchDaemons"])} jobs')
+PY
+fi
 # The last migration: darwin-renoir's skeleton says 20F66 (16.5), so the 26 release took itself for just updated
 # and ran DataMigrator, a progress bar on the screen in place of the lock screen. It is this build's own.
 python3 - "$T/var/mobile/Library/Preferences/com.apple.migration.plist" "$REL/rootfs/System/Library/CoreServices/SystemVersion.plist" <<'PY'

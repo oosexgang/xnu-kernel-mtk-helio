@@ -1347,6 +1347,32 @@ configure_inject(void)
  */
 #define MAX_VNODES      32768
 
+/*
+ * The launchd job cache from the small image (system27/userland/root26-sys.sh, JOBCACHE=1): etc/xpc/launchd.plist
+ * there is bound over /System/Library/xpc, a union, so that it hides the system volume's and the rest of that
+ * directory is seen below it. launchd_cache_loader reads /System/Library/xpc/launchd.plist and no other file
+ * (launchd_unsecure_cache=1 is a switch: strtoul of the boot-arg), so without this a job changed -- Wi-Fi's
+ * wifid let in, a service stood in for -- meant a new 4 GB system image written to the phone.
+ */
+static void
+overlay_job_cache(void)
+{
+	char from[256];
+	struct stat st;
+	int ok;
+
+	strcpy(from, in_image("/etc/xpc"));
+	if (stat(join(from, "/launchd.plist", ""), &st) != 0) {
+		return;
+	}
+	printf("\n-- the job cache of the small image --\n");
+	ok = mount("bindfs", "/System/Library/xpc", MNT_RDONLY | MNT_UNION, (void *)from) == 0;
+	if (!ok) {
+		printf("  bindfs %s on /System/Library/xpc, union: %s\n", from, strerror(errno));
+	}
+	check(ok, "the small image's launchd.plist over the system volume's");
+}
+
 static void
 configure_vnodes(void)
 {
@@ -1414,6 +1440,7 @@ main(int argc, char **argv, char **envp)
 	chmod("/dev/console", 0666);
 	configure_inject();
 	configure_vnodes();
+	overlay_job_cache();
 	run_rc(in_image("/etc/rc"));
 	printf("\n=== init: done ===\n");
 	reboot(RB_HALT);
