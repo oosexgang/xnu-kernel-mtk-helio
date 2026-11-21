@@ -2787,45 +2787,59 @@ mipmaps_gpu(struct rwa_texture *t, unsigned levels, char *why, size_t why_size)
 		mips_gpu++;
 	}
 	/*
-	 * The first four checked against the processor's box filter (boot-arg rwn_mipcheck=0: not): the GPU waited for,
-	 * then 16 texels of level 1 against the average of their four in level 0, kept -- run 627: an application's icon
-	 * drawn as a white square while it zooms open or closed, which samples these levels.
+	 * Each new format and size checked (16 of them a process; boot-arg rwn_mipcheck=0: none): the GPU waited for,
+	 * then 16 texels of each of levels 1 to 6 against the average of their four in the level above, kept. Runs 628
+	 * and 629 checked only the first textures (application snapshots, BGRA8, level 1). (The green blur of runs 631
+	 * to 638 is not theirs: the same with rwn_gpumips=0, and with none made by the GPU.)
 	 */
-	static unsigned checked;
-	if (checked < 4 && !boot_arg("rwn_mipcheck=0")) {
-		checked++;
+	static struct { enum pipe_format f; unsigned w, h; } seen[16];
+	static unsigned nseen;
+	unsigned k0;
+	for (k0 = 0; k0 < nseen && !(seen[k0].f == t->format && seen[k0].w == t->shape.width && seen[k0].h == t->shape.height);
+	     k0++)
+		;
+	if (k0 == nseen && nseen < 16 && !boot_arg("rwn_mipcheck=0")) {
+		seen[nseen].f = t->format;
+		seen[nseen].w = t->shape.width;
+		seen[nseen].h = t->shape.height;
+		nseen++;
 		store_sync(t->store);
-		const unsigned bs = t->blocksize, w0 = t->shape.width, h0 = t->shape.height;
-		const unsigned w1 = u_minify(w0, 1), h1 = u_minify(h0, 1);
-		unsigned worst = 0, wx = 0, wy = 0;
-		uint8_t got[16] = { 0 }, want[16] = { 0 };
-		for (unsigned i = 0; i < 16; i++) {
-			const unsigned x = (2 * (i % 4) + 1) * w1 / 8, y = (2 * (i / 4) + 1) * h1 / 8;
-			const unsigned x0 = MIN2(2 * x, w0 - 1), x1 = MIN2(2 * x + 1, w0 - 1);
-			const unsigned y0 = MIN2(2 * y, h0 - 1), y1 = MIN2(2 * y + 1, h0 - 1);
-			uint8_t g[16], a[16], b[16], c[16], e[16];
-			memcpy(g, texel_at(t, 1, 0, x, y, 0), bs);
-			memcpy(a, texel_at(t, 0, 0, x0, y0, 0), bs);
-			memcpy(b, texel_at(t, 0, 0, x1, y0, 0), bs);
-			memcpy(c, texel_at(t, 0, 0, x0, y1, 0), bs);
-			memcpy(e, texel_at(t, 0, 0, x1, y1, 0), bs);
-			for (unsigned k = 0; k < bs && k < 16; k++) {
-				const unsigned want_k = (a[k] + b[k] + c[k] + e[k] + 2) / 4;
-				const unsigned diff = g[k] > want_k ? g[k] - want_k : want_k - g[k];
-				if (diff > worst || (i == 0 && k == 0)) {
-					worst = diff;
-					wx = x;
-					wy = y;
-					memcpy(got, g, bs);
-					for (unsigned j = 0; j < bs && j < 16; j++)
-						want[j] = (uint8_t)((a[j] + b[j] + c[j] + e[j] + 2) / 4);
+		const unsigned bs = t->blocksize;
+		char line[300];
+		int n = snprintf(line, sizeof(line), "mip check %s %ux%u, %u levels, offset %llu, view %d, surface %u, swizzle "
+				 "%u%u%u%u:", util_format_short_name(t->format), t->shape.width, t->shape.height, levels,
+				 (unsigned long long)t->offset, t->is_view, t->store->surface_id, t->swizzle[0], t->swizzle[1],
+				 t->swizzle[2], t->swizzle[3]);
+		for (unsigned l = 1; l < levels && l <= 6 && n < (int)sizeof(line) - 60; l++) {
+			const unsigned pw = u_minify(t->shape.width, l - 1), ph = u_minify(t->shape.height, l - 1);
+			const unsigned w1 = u_minify(t->shape.width, l), h1 = u_minify(t->shape.height, l);
+			unsigned worst = 0;
+			uint8_t got[16] = { 0 }, want[16] = { 0 };
+			for (unsigned i = 0; i < 16; i++) {
+				const unsigned x = (2 * (i % 4) + 1) * w1 / 8, y = (2 * (i / 4) + 1) * h1 / 8;
+				const unsigned x0 = MIN2(2 * x, pw - 1), x1 = MIN2(2 * x + 1, pw - 1);
+				const unsigned y0 = MIN2(2 * y, ph - 1), y1 = MIN2(2 * y + 1, ph - 1);
+				uint8_t g[16], a[16], b[16], c[16], e[16];
+				memcpy(g, texel_at(t, l, 0, x, y, 0), bs);
+				memcpy(a, texel_at(t, l - 1, 0, x0, y0, 0), bs);
+				memcpy(b, texel_at(t, l - 1, 0, x1, y0, 0), bs);
+				memcpy(c, texel_at(t, l - 1, 0, x0, y1, 0), bs);
+				memcpy(e, texel_at(t, l - 1, 0, x1, y1, 0), bs);
+				for (unsigned k = 0; k < bs && k < 16; k++) {
+					const unsigned want_k = (a[k] + b[k] + c[k] + e[k] + 2) / 4;
+					const unsigned diff = g[k] > want_k ? g[k] - want_k : want_k - g[k];
+					if (diff > worst || (i == 0 && k == 0)) {
+						worst = diff;
+						memcpy(got, g, bs);
+						for (unsigned j = 0; j < bs && j < 16; j++)
+							want[j] = (uint8_t)((a[j] + b[j] + c[j] + e[j] + 2) / 4);
+					}
 				}
 			}
+			n += snprintf(line + n, sizeof(line) - n, " L%u %u (%02x%02x%02x%02x/%02x%02x%02x%02x)", l, worst, got[0],
+				      got[1], got[2], got[3], want[0], want[1], want[2], want[3]);
 		}
-		keep("mip check %s %ux%u, %u levels%s: level 1 off by %u at most (at %u,%u: %02x%02x%02x%02x, the box filter "
-		     "%02x%02x%02x%02x)", util_format_short_name(t->format), w0, h0, levels,
-		     util_format_is_srgb(t->format) ? " (sRGB: averaged in linear, a few off is right)" : "", worst, wx, wy,
-		     got[0], got[1], got[2], got[3], want[0], want[1], want[2], want[3]);
+		keep("%s", line);
 	}
 	return 1;
 }

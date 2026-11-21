@@ -1,5 +1,5 @@
 /*
- * fbgrab -log NAME [WIDTH [QUALITY]]    the picture on the panel, scaled to WIDTH pixels (default 375: a point a pixel) as a JPEG
+ * fbgrab -log|-keep NAME [WIDTH [QUALITY]]    the picture on the panel, scaled to WIDTH pixels (default 375: a point a pixel) as a JPEG
  * fbgrab HOST PORT NAME                 ... or whole, as a PNG, sent to HOST:PORT (tools/fbrecv.py) as POST /NAME.png
  *
  * The kernel's side is sysctl kern.hakios.fbgrab (bsd/dev/hakios_fbgrab.c): 16 bytes -- width, height, stride, 'BGRA' -- and the rows.
@@ -46,12 +46,15 @@ main(int argc, char **argv)
 		CGImageRef image = panel(&keep);
 
 		if (image == NULL || argc < 3) {
-			printf("usage: fbgrab -log NAME [WIDTH [QUALITY]] | fbgrab HOST PORT NAME\n");
+			printf("usage: fbgrab -log|-keep NAME [WIDTH [QUALITY]] | fbgrab HOST PORT NAME\n");
 			return 2;
 		}
 		NSMutableData *data = [NSMutableData data];
 
-		if (strcmp(argv[1], "-log") == 0) {
+		/* -keep NAME ...: as -log, the lines kept for the host ("!!"), so the picture comes back whenever in a run it
+		 * was taken (the log keeps only its start and its last minutes); small ones: the kept lines are 64 KB */
+		const bool kept = strcmp(argv[1], "-keep") == 0;
+		if (strcmp(argv[1], "-log") == 0 || kept) {
 			size_t width = argc > 3 ? (size_t)atoi(argv[3]) : 375, from = CGImageGetWidth(image);
 			double quality = argc > 4 ? atof(argv[4]) : 0.6;
 			size_t height = CGImageGetHeight(image) * width / from;
@@ -70,11 +73,13 @@ main(int argc, char **argv)
 				return 1;
 			}
 			NSString *text = [data base64EncodedStringWithOptions:0];
-			size_t lines = (text.length + 199) / 200;
+			/* a kept line is cut at ~200 bytes with its name and number: 150 characters of the picture a line then */
+			const size_t chunk = kept ? 150 : 200;
+			size_t lines = (text.length + chunk - 1) / chunk;
 
 			printf("fbgrab: %zux%zu, JPEG %lu bytes, %zu lines\n", width, height, (unsigned long)data.length, lines);
 			for (size_t i = 0; i < lines; i++) {
-				NSString *line = [NSString stringWithFormat:@"fbjpg %s %zu/%zu: %@\n", argv[2], i + 1, lines, [text substringWithRange:NSMakeRange(i * 200, MIN((size_t)200, text.length - i * 200))]];
+				NSString *line = [NSString stringWithFormat:@"%sfbjpg %s %zu/%zu: %@\n", kept ? "!!" : "", argv[2], i + 1, lines, [text substringWithRange:NSMakeRange(i * chunk, MIN(chunk, text.length - i * chunk))]];
 
 				sysctlbyname("kern.hakios.say", NULL, NULL, line.UTF8String, line.length - 1);       /* the kernel's log: the console's own is a tty that drops lines (run 759: 20 of 128 came back) */
 				usleep(2000);
