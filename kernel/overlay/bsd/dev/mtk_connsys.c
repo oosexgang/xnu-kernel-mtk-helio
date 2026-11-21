@@ -1328,7 +1328,17 @@ static void
 bt_dump(const char *direction, const uint8_t *bytes, unsigned length, uint32_t *counter)
 {
 	char text[3 * 32 + 1];
+	static int quiet = -1;
 
+	/* boot-arg bt_dump=0: none of it (a scan's commands and events filled the host's 64 KB with nothing else, run 653) */
+	if (quiet < 0) {
+		uint32_t on = 1;
+
+		quiet = PE_parse_boot_argn("bt_dump", &on, sizeof(on)) && on == 0;
+	}
+	if (quiet) {
+		return;
+	}
 	if (direction[0] == 'i' && length == 7 && bytes[1] == 0x0e && bytes[2] == 4 && bytes[6] == 0 && (bytes[5] >> 2) != 0x3f && false) {
 		return;                 /* a plain Command Complete, status 0: the command above it says enough (the vendor ones are said) */
 	}

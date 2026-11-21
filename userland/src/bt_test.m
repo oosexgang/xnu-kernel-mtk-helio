@@ -8,6 +8,7 @@
 #import <CoreBluetooth/CoreBluetooth.h>
 #import <Foundation/Foundation.h>
 #include <dlfcn.h>
+#include <sys/sysctl.h>
 #include <objc/runtime.h>
 #include <mach/mach.h>
 extern mach_port_t bootstrap_port;
@@ -78,7 +79,12 @@ main(int argc, char **argv)
 		printf("bt_test: dlopen %p (%s), class %p\n", handle, handle != NULL ? "ok" : dlerror(), (__bridge void *)bmclass);
 		id bm = [bmclass performSelector:NSSelectorFromString(@"sharedInstance")];
 
-		{
+		char build[32] = "";
+		size_t build_size = sizeof(build) - 1;
+
+		(void)sysctlbyname("kern.osversion", build, &build_size, NULL, 0);
+		/* (16.5's addresses: on another system's cache this would read whatever is there -- the 27 release said "error 0") */
+		if (strcmp(build, "20F66") == 0) {
 			/* why: -[BluetoothManager _attach] keeps the error of BTSessionAttach in a variable of its own (0x1e2242c60 of the cache, unslid) */
 			IMP attach = class_getMethodImplementation(bmclass, NSSelectorFromString(@"_attach"));
 			intptr_t slide = (intptr_t)attach - 0x1d3f11cf0;
