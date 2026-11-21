@@ -262,7 +262,10 @@ echo "/hakios/lib/libhakios-backlight.dylib SpringBoard" >> $T/etc/inject.conf
 echo "/hakios/lib/libhakios-brightness.dylib SpringBoard backboardd Preferences" >> $T/etc/inject.conf
 # Spotlight gets libhakios.dylib too, for one thing: its search ranked without the L3 model, which is a downloaded asset
 # and in no image here (src/inject.c spotlight_fixes; run 628: Spotlight died of it with the first results).
-sed -i '' -e 's|^\(/hakios/lib/libhakios\.dylib .*\)$|\1 Spotlight|' $T/etc/inject.conf
+# BlueTool: its service com.apple.BlueTool answered by libhakios (inject.c bluetool_serves: no addresses of 16.5's in
+# it), as on 16.5: the boot script it would run picks a Broadcom firmware this phone has not got. Not bluetoothd:
+# inject.c's hooks there are at 16.5's addresses.
+sed -i '' -e 's|^\(/hakios/lib/libhakios\.dylib .*\)$|\1 Spotlight BlueTool|' $T/etc/inject.conf
 # The kernel matches executable names, not the build template's @apps token.
 python3 - "$T/etc/inject.conf" "$REL/rootfs" <<'PY'
 import pathlib, plistlib, sys

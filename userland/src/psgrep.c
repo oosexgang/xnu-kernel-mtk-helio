@@ -4,8 +4,11 @@
  * tolog: ps -A is longer than the kernel keeps (96 lines), and the job runner has no shell to grep.
  * psgrep -stack WORD...: and each one's threads, by the kernel (kern.hakios.ustack), with the shared cache's slide.
  * psgrep -sysctl NAME [TIMES]: a string sysctl, TIMES times a second apart (the system has no sysctl command).
+ * psgrep -kill WORD...: the same, and each sent SIGTERM.
  * psgrep -cpu SECONDS: the ten processes that used the most CPU in the next SECONDS, as % of one core.
  */
+#include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -99,6 +102,9 @@ int
 main(int argc, char **argv)
 {
 	int stacks = argc > 1 && strcmp(argv[1], "-stack") == 0;       /* -stack: and the threads of each, by the kernel */
+	/* -kill WORD...: and each one sent SIGTERM (a daemon launchd starts again when it is next asked for: bluetoothd, once the
+	 * kernel has brought Bluetooth up after it started and found no controller, run 649) */
+	int killing = argc > 1 && strcmp(argv[1], "-kill") == 0;
 
 	if (argc > 2 && strcmp(argv[1], "-cpu") == 0) {
 		return cpu_top(atoi(argv[2]) > 0 ? atoi(argv[2]) : 10);
@@ -133,6 +139,10 @@ main(int argc, char **argv)
 		return 0;
 	}
 
+	if (killing) {
+		argv++;
+		argc--;
+	}
 	if (stacks) {
 		size_t length = 0;
 
@@ -161,6 +171,9 @@ main(int argc, char **argv)
 				printf("%d (parent %d, state %d, flags %#x) %s\n", pid, procs[i].kp_eproc.e_ppid,
 				    procs[i].kp_proc.p_stat, procs[i].kp_proc.p_flag, path);
 				shown++;
+				if (killing && pid != getpid()) {
+					printf("psgrep: %d sent SIGTERM: %s\n", pid, kill(pid, SIGTERM) == 0 ? "done" : strerror(errno));
+				}
 				if (stacks) {
 					fflush(stdout);
 					if (sysctlbyname("kern.hakios.ustack", NULL, NULL, &pid, sizeof(pid)) != 0) {

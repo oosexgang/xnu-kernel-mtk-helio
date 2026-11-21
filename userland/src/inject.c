@@ -2258,7 +2258,9 @@ orientation_start(void)
 		if (ticks % 300 == 75) {      /* 15 s in, then a line a minute, so that one is near the end of the log */
 			keep_line("orientation: a minute on: class %s, last sent %lld, seen %lld, %u changes; manager %p, update method %s",
 			    cls ? "found" : "NOT FOUND", sent, seen, changes, (void *)orientation_manager,
-			    method ? method_getTypeEncoding(method) : "none");
+			    method ? method_getTypeEncoding(method) :
+			    cls && class_getInstanceMethod(cls, sel_registerName("updateDeviceOrientation:changeSource:")) ?
+			    "updateDeviceOrientation:changeSource: (the 27 release's)" : "none");
 		}
 		if (cls == NULL) {
 			orientation_hook();
@@ -2276,6 +2278,45 @@ orientation_start(void)
 		if (now == 0 || now != seen) {
 			seen = now;                     /* the same twice before it counts */
 			return;
+		}
+		/*
+		 * The 27 release: BKOrientationManager has no _queue_updateDeviceOrientationFromCoreMotion: any more, but
+		 * -updateDeviceOrientation:changeSource: (q, q; its callers in backboardd pass source 2), which applies the
+		 * orientation only while the manager's _queue_ignoreAccelerometerAndOrientationEventsForTesting is set (backboardd
+		 * +0x4e2ec: ldrb [self, #0x60], tbz -> return) -- its way for a test to stand in for the accelerometer, which is
+		 * what this is. The manager is +sharedInstance; the flag is set once, on the manager's own queue.
+		 */
+		{
+			SEL update27 = sel_registerName("updateDeviceOrientation:changeSource:");
+			Method method27 = class_getInstanceMethod(cls, update27);
+			Ivar testing = class_getInstanceVariable(cls, "_queue_ignoreAccelerometerAndOrientationEventsForTesting");
+			static id manager27;
+
+			if (method27 != NULL && testing != NULL && queue_ivar != NULL &&
+			    strcmp(method_getTypeEncoding(method27), "v32@0:8q16q24") == 0) {
+				if (manager27 == nil) {
+					manager27 = ((id (*)(id, SEL))objc_msgSend)((id)cls, sel_registerName("sharedInstance"));
+					if (manager27 == nil) {
+						return;
+					}
+					orientation_manager = manager27;
+					const ptrdiff_t offset = ivar_getOffset(testing);
+					dispatch_sync((dispatch_queue_t)object_getIvar(manager27, queue_ivar), ^{
+						*((uint8_t *)(void *)manager27 + offset) = 1;
+					});
+					keep_line("orientation: the 27 release's manager %p, its test flag set: updateDeviceOrientation:changeSource:",
+					    (void *)manager27);
+				}
+				if (now == sent) {
+					return;
+				}
+				sent = now;
+				if (changes++ < 30) {
+					keep_line("orientation: %lld from x %d y %d z %d", now, x, y, z);
+				}
+				((void (*)(id, SEL, long long, long long))objc_msgSend)(manager27, update27, now, 2);
+				return;
+			}
 		}
 		if (now == sent || orientation_manager == nil || method == NULL || queue_ivar == NULL) {
 			if (told++ == 0 && (orientation_manager == nil || method == NULL || queue_ivar == NULL)) {
