@@ -1,6 +1,7 @@
 # The files kernel/syntax-check.sh leaves out: they include what only the real build has -- headers the
 # build generates, internals that take the kernel's own compile flags -- so the machine's clang cannot
-# say whether they compile. One path of kernel/overlay a line; kernel/build.sh is their check. A file
+# say whether they compile. One file of ours a line, by its path in the tree (arch/arm64/kernel/psci_smp.c
+# is osfmk/arm64/psci_smp.c); kernel/build.sh is their check. A file
 # here that does compile fails syntax-check.sh: keep the list to what needs it.
 
 # the platform layer under osfmk: the scheduler's and the pmap's internals (MACH_KERNEL_PRIVATE)
@@ -9,7 +10,11 @@ osfmk/arm64/gic_v3_irq.c
 osfmk/arm64/loader_return.c
 osfmk/arm64/psci_smp.c
 osfmk/arm64/user_exception_trace.c
+osfmk/arm64/hakios_a64emu.c          # the saved state's setters (set_saved_state_pc, ...)
+osfmk/arm64/hakios_cpu_idle.c        # struct processor, recount_processor_usage()
+osfmk/arm64/hakios_prof.c            # osfmk/arm/pmap/pmap.h and cpu_data_internal.h: ast_t, cpumap_t
 
 # generated headers (skywalk's private headers, the MAC framework's, CONFIG_MAX_CLUSTERS)
 bsd/dev/mtk_btsk.c
 bsd/kern/kern_minimac.c
+bsd/dev/hakios_net.c                 # the packet scheduler's header (pktsched_fq_codel.h: thread_call_t)
