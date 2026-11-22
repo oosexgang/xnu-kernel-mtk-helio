@@ -23,6 +23,7 @@ struct rwm_texture {
 	IOSurfaceRef source = nullptr;    /* the copy-in road's (rwm_texture_copy_in) */
 	uint32_t source_seed = 0;         /* the source's seed when it was last copied in */
 	bool source_two_planes = false;   /* ... and it is YCbCr 4:2:0 in two planes, packed into one */
+	bool memoryless = false;          /* asked for with MTLStorageModeMemoryless: nothing of it outlives its pass */
 	uint32_t in_place = 0;            /* the surface it lies over, drawn in place (src/metal/import.cpp) */
 	/* the copy-in road from memory (-newTextureWithBytesNoCopy:...): the caller's bytes, re-copied before a use
 	 * whenever their signature has moved -- the caller fills them after it makes the texture */
@@ -1068,4 +1069,21 @@ rwm_texture_sync_surface(struct rwm_texture *texture, char *why, size_t why_size
 	}
 	rwm_surface_to_memory(surface);     /* (out of this cache into memory, where the display and the GPU read) */
 	return 0;
+}
+
+/* MTLStorageModeMemoryless: what is drawn into it is never stored, whatever the pass's store action says (17 November:
+ * the 27 release's window server asks for its passes' RGBA16Float and R32Float attachments memoryless and stores
+ * them, and the Mali wrote both back and loaded them again in every pass -- 12 ms a full-screen fragment job) */
+extern "C" void
+rwm_texture_set_memoryless(struct rwm_texture *texture, bool memoryless)
+{
+	if (texture != nullptr) {
+		texture->memoryless = memoryless;
+	}
+}
+
+extern "C" bool
+rwm_texture_memoryless(const struct rwm_texture *texture)
+{
+	return texture != nullptr && texture->memoryless;
 }

@@ -107,6 +107,10 @@ fi
 # unsigned or signed by ldid -S, which leaves the flags 0: every Mach-O here is signed again with
 # -Cadhoc, keeping the entitlements it has.
 LDID=${LDID:-$DR/build-tools/theos/toolchain/linux/iphone/bin/ldid}
+# battery_test with this repository's entitlements, not the ones the copy above was signed with: "battery_test launch
+# ID" (SBSLaunchApplicationWithIdentifier) needs com.apple.springboard.launchapplications, and the 27 release's
+# SpringBoard said 9, "security policy error", without it (run 342)
+if [ -f $T/bin/battery_test ]; then "$LDID" -S"$RN/../userland/src/battery_test.entitlements" $T/bin/battery_test; fi
 ENT=$(mktemp)
 python3 - "$T" <<'PY' | while read -r f; do
 import os, struct, sys

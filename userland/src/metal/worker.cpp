@@ -275,6 +275,7 @@ rwm_on_big_stack(void (*fn)(void *context), void *context)
 
 	pthread_attr_init(&attr);
 	pthread_attr_setstacksize(&attr, 16 << 20);
+	pthread_attr_set_qos_class_np(&attr, qos_class_self(), 0);     /* (the caller's: a draw's build or the warm-up's) */
 	if (pthread_create(&thread, &attr, big_stack_main, &call) != 0) {
 		pthread_attr_destroy(&attr);
 		fn(context);

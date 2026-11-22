@@ -22,6 +22,8 @@
 namespace {
 
 pthread_mutex_t compile_lock = PTHREAD_MUTEX_INITIALIZER;
+/* the list of recipes made in this process, apart from the compile lock: recording one does not wait for a build */
+pthread_mutex_t recipes_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* what this process built, as recipes (malloc'd text), each label once: a few hundred at most, built once
  * each, so a list searched from the start (plain arrays: the boot partition has no room for the templates
@@ -108,7 +110,7 @@ struct warm {
 	struct rwa_render_shape shape;
 	struct rwa_render *render;
 	struct rwa_render_info info;
-	int state;      /* 0 to build, 1 built, 2 taken, failed or built by a caller */
+	int state;      /* 0 to build, 1 built, 2 taken, failed or built by a caller, 3 being built (warm_lock) */
 	/* not in the pipeline library: its two functions out of QuartzCore-default.metallib, and their constants */
 	char vertex[96], fragment[96];
 	unsigned nv, nf;
@@ -118,6 +120,10 @@ struct warm {
 };
 
 warm *warms;
+/* the table's states, apart from the compile lock: a draw looking for its pipeline does not wait for the warm-up's
+ * build of another one (a second or two) to find out whether there is one; it waits only for its own (warm_cond) */
+pthread_mutex_t warm_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t warm_cond = PTHREAD_COND_INITIALIZER;
 unsigned nwarm, warm_built, warm_used, warm_nofunction, warm_refused;
 char warm_first_refusal[160];  /* the first build the compiler refused, and why */
 
@@ -248,11 +254,40 @@ compile_parallel(void)
 	return parallel == 1;
 }
 
+/*
+ * Two ways into the lock. A build a draw waits for (rwm_compile_lock) goes first: the warm-up and the builds ahead
+ * (rwm_compile_lock_background) take the lock only while no such build is waiting, and give it back if one came
+ * meanwhile. Run 260 (185 recipes, 134 variants ahead) had the window server's own builds behind theirs, a second and
+ * more each, and 2 frames in 101 s.
+ */
+static volatile int compile_urgent;
+
 extern "C" void
 rwm_compile_lock(void)
 {
-	if (!compile_parallel()) {
+	if (compile_parallel()) {
+		return;
+	}
+	__atomic_add_fetch(&compile_urgent, 1, __ATOMIC_SEQ_CST);
+	pthread_mutex_lock(&compile_lock);
+	__atomic_sub_fetch(&compile_urgent, 1, __ATOMIC_SEQ_CST);
+}
+
+extern "C" void
+rwm_compile_lock_background(void)
+{
+	if (compile_parallel()) {
+		return;
+	}
+	for (;;) {
+		while (__atomic_load_n(&compile_urgent, __ATOMIC_SEQ_CST) > 0) {
+			usleep(2000);
+		}
 		pthread_mutex_lock(&compile_lock);
+		if (__atomic_load_n(&compile_urgent, __ATOMIC_SEQ_CST) == 0) {
+			return;
+		}
+		pthread_mutex_unlock(&compile_lock);
 	}
 }
 
@@ -301,7 +336,7 @@ rwm_recipe_record(const char *label, const struct rwa_render_shape *shape, const
 	if (label == nullptr) {
 		return;
 	}
-	pthread_mutex_lock(&compile_lock);
+	pthread_mutex_lock(&recipes_lock);
 	{
 		text recipe;
 		char part[48];
@@ -346,7 +381,7 @@ rwm_recipe_record(const char *label, const struct rwa_render_shape *shape, const
 			}
 		}
 	}
-	pthread_mutex_unlock(&compile_lock);
+	pthread_mutex_unlock(&recipes_lock);
 }
 
 /* the recipes into the log, "rwr PROCESS N K/M text" -- all of them on the notification, and once a minute
@@ -360,9 +395,9 @@ recipes_say_from(size_t first)
 
 	/* (the list only grows, and a recipe's text is never changed or freed: what is counted now can be
 	 * read outside the lock) */
-	pthread_mutex_lock(&compile_lock);
+	pthread_mutex_lock(&recipes_lock);
 	all = nrecipes;
-	pthread_mutex_unlock(&compile_lock);
+	pthread_mutex_unlock(&recipes_lock);
 	if (first >= all && first != 0) {
 		return;
 	}
@@ -372,9 +407,9 @@ recipes_say_from(size_t first)
 	for (size_t n = first; n < all; n++) {
 		const char *recipe;
 
-		pthread_mutex_lock(&compile_lock);
+		pthread_mutex_lock(&recipes_lock);
 		recipe = recipes[n];    /* (the array may be moved by realloc: read under the lock) */
-		pthread_mutex_unlock(&compile_lock);
+		pthread_mutex_unlock(&recipes_lock);
 		say_recipe(recipe, n, false);
 		usleep(2000);   /* (the kernel's log is drained by a reader; a burst of hundreds outruns it) */
 	}
@@ -392,9 +427,9 @@ rwm_recipes_say_new(void)
 {
 	size_t now;
 
-	pthread_mutex_lock(&compile_lock);
+	pthread_mutex_lock(&recipes_lock);
 	now = nrecipes;
-	pthread_mutex_unlock(&compile_lock);
+	pthread_mutex_unlock(&recipes_lock);
 	if (now > recipes_said) {
 		recipes_say_from(recipes_said);
 	}
@@ -489,28 +524,89 @@ rwm_warm_build(unsigned index, struct rwa_device *device, const void *vertex, si
 		return;
 	}
 	w = &warms[index];
-	pthread_mutex_lock(&compile_lock);
-	if (w->state == 0 && found && air->render_create != nullptr) {
-		char why[256] = { 0 };
-
-		if (air->render_constants != nullptr) {
-			air->render_constants(w->vc, w->nv, w->fc, w->nf);
-		}
-		w->render = air->render_create(device, vertex, vertex_size, NULL, fragment, fragment_size, NULL,
-					       &w->shape, &w->info, why, sizeof(why));
-		w->state = w->render != nullptr ? 1 : 2;
-		warm_built += w->render != nullptr;
-		if (w->render == nullptr && warm_refused++ == 0) {
-			snprintf(warm_first_refusal, sizeof(warm_first_refusal), "%s: %s", short_label(w->label), why);
-		}
-	} else if (w->state == 0) {
+	pthread_mutex_lock(&warm_lock);
+	if (w->state != 0) {
+		pthread_mutex_unlock(&warm_lock);
+		return;
+	}
+	if (!found || air->render_create == nullptr) {
 		w->state = 2;
+		pthread_mutex_unlock(&warm_lock);
 		if (!found && warm_nofunction++ == 0) {
 			snprintf(warm_first_refusal, sizeof(warm_first_refusal), "%s: no functions %s/%s",
 				 short_label(w->label), w->vertex, w->fragment);
 		}
+		return;
 	}
-	pthread_mutex_unlock(&compile_lock);
+	w->state = 3;
+	pthread_mutex_unlock(&warm_lock);
+
+	char why[256] = { 0 };
+	struct rwa_render *render;
+	struct rwa_render_info info = {};
+
+	rwm_compile_lock_background();
+	if (air->render_constants != nullptr) {
+		air->render_constants(w->vc, w->nv, w->fc, w->nf);
+	}
+	render = air->render_create(device, vertex, vertex_size, NULL, fragment, fragment_size, NULL, &w->shape, &info,
+				    why, sizeof(why));
+	rwm_compile_unlock();
+
+	pthread_mutex_lock(&warm_lock);
+	w->info = info;
+	w->render = render;
+	w->state = render != nullptr ? 1 : 2;
+	warm_built += render != nullptr;
+	const unsigned built_now = warm_built;
+	pthread_cond_broadcast(&warm_cond);
+	pthread_mutex_unlock(&warm_lock);
+	/* what the warm-up costs in memory: run 275's backboardd had 2302 MB of the phone's 4064, and jetsam ended 127
+	 * processes */
+	if (render != nullptr && (built_now == 1 || built_now % 25 == 0)) {
+		char line[120];
+
+		snprintf(line, sizeof(line), "!!rwm warm-up memory: %u built, backboardd %u MB", built_now, rwm_footprint_mb());
+		say(line);
+	}
+	if (render == nullptr && warm_refused++ == 0) {
+		snprintf(warm_first_refusal, sizeof(warm_first_refusal), "%s: %s", short_label(w->label), why);
+	}
+}
+
+extern "C" bool
+rwm_warm_owns(const struct rwa_render *render)
+{
+	/* (the table only grows, and a built entry's render never changes: read without the lock) */
+	for (unsigned i = 0; render != nullptr && warms != nullptr && i < nwarm; i++) {
+		if (warms[i].render == render) {
+			return true;
+		}
+	}
+	return false;
+}
+
+extern "C" void
+rwm_warm_forget(const struct rwa_render *render)
+{
+	pthread_mutex_lock(&warm_lock);
+	for (unsigned i = 0; render != nullptr && warms != nullptr && i < nwarm; i++) {
+		if (warms[i].render == render) {
+			warms[i].render = nullptr;      /* (state 2 already: it was taken) */
+		}
+	}
+	pthread_mutex_unlock(&warm_lock);
+}
+
+extern "C" const char *
+rwm_warm_label(const struct rwa_render *render)
+{
+	for (unsigned i = 0; render != nullptr && warms != nullptr && i < nwarm; i++) {
+		if (warms[i].render == render) {
+			return short_label(warms[i].label);
+		}
+	}
+	return nullptr;
 }
 
 extern "C" void
@@ -538,13 +634,16 @@ rwm_warm_take(const char *label, const struct rwa_render_shape *shape, const str
 	if (warms == nullptr || label == nullptr) {
 		return false;
 	}
-	pthread_mutex_lock(&compile_lock);
+	pthread_mutex_lock(&warm_lock);
 	for (unsigned i = 0; i < nwarm; i++) {
 		warm *w = &warms[i];
 
 		if (strcmp(w->label, label) != 0 || memcmp(&w->shape, shape, sizeof(*shape)) != 0 ||
 		    !same_constants(w->vc, w->nv, vc, nv) || !same_constants(w->fc, w->nf, fc, nf)) {
 			continue;
+		}
+		while (w->state == 3) {
+			pthread_cond_wait(&warm_cond, &warm_lock);   /* the warm-up is building this one: it, not a second */
 		}
 		if (w->state == 1) {
 			*render = w->render;
@@ -555,6 +654,6 @@ rwm_warm_take(const char *label, const struct rwa_render_shape *shape, const str
 		w->state = 2;   /* taken, or the caller builds it now */
 		break;
 	}
-	pthread_mutex_unlock(&compile_lock);
+	pthread_mutex_unlock(&warm_lock);
 	return taken;
 }

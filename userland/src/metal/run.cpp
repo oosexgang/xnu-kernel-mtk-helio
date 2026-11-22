@@ -218,6 +218,9 @@ rwm_run_works(struct rwa_device *device, struct rwm_work *const *works, unsigned
 				before = draw_target_bytes(w, dtarget, &bbytes);
 			}
 			failed = rwm_run_draw(&w->draw, why, why_size);
+			if (rwm_failnames()) {
+				rwm_command_note_render(w->draw.render);
+			}
 			/* boot-arg rwm_drawfail=1: the GPU finished after every draw, and a draw whose job chain the Mali failed
 			 * (kern.hakios.mali_failed went up) named -- 20 to 40 % of the chains fail with slot status 0x51 since
 			 * the 27 release's home screen draws (runs 199 to 222), and which pipeline's shader it is is the question
@@ -227,7 +230,74 @@ rwm_run_works(struct rwa_device *device, struct rwm_work *const *works, unsigned
 				static unsigned dfails;
 
 				if (dfail < 0) {
-					dfail = strstr(rwm_boot_args(), "rwm_drawfail=1") != nullptr;
+					dfail = strstr(rwm_boot_args(), "rwm_drawfail=1") != nullptr ? 1
+						: strstr(rwm_boot_args(), "rwm_drawtime=1") != nullptr ? 2 : 0;
+				}
+				/* boot-arg rwm_drawtime=1: the same wait after every draw, and a draw whose job took more than 3 ms of
+				 * the GPU named with its time, a label once -- which draw makes the one pass of 89 ms a frame
+				 * (run 251, 17 November) */
+				if (dfail == 2) {
+					static char seen[48][64];
+					static unsigned nseen;
+					uint64_t s1 = 0, t0 = rwm_ns();
+					char r1[128];
+
+					rwm_submit(device, true, &s1, r1, sizeof(r1));
+					const uint64_t took = rwm_ns() - t0;
+					const char *lab = rwm_area_label_of(w->draw.render);
+
+					/* and every draw's time summed by its label, the 12 largest sums said once, 6000 draws on */
+					{
+						static char lab_name[96][64];
+						static uint64_t lab_ns[96], lab_n[96];
+						static unsigned nlab, total;
+						static bool told;
+						unsigned k;
+
+						for (k = 0; k < nlab && strncmp(lab_name[k], lab != nullptr ? lab : "?", 63) != 0; k++) {
+						}
+						if (k == nlab && nlab < 96) {
+							strlcpy(lab_name[nlab++], lab != nullptr ? lab : "?", 64);
+						}
+						if (k < nlab) {
+							lab_ns[k] += took;
+							lab_n[k]++;
+						}
+						if (++total == 6000 && !told) {
+							told = true;
+							for (unsigned r = 0; r < 12 && r < nlab; r++) {
+								unsigned best = 0;
+
+								for (unsigned q = 1; q < nlab; q++) {
+									best = lab_ns[q] > lab_ns[best] ? q : best;
+								}
+								char line[240];
+
+								snprintf(line, sizeof(line), "!!rwm drawsum %u: %s %llu draws, %llu ms, %llu us each",
+									 r + 1, lab_name[best], (unsigned long long)lab_n[best],
+									 (unsigned long long)(lab_ns[best] / 1000000),
+									 (unsigned long long)(lab_ns[best] / 1000 / (lab_n[best] ? lab_n[best] : 1)));
+								sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+								lab_ns[best] = 0;
+							}
+						}
+					}
+					if (took > 3000000 && nseen < 48) {
+						bool again = false;
+
+						for (unsigned k = 0; k < nseen && !again; k++) {
+							again = strncmp(seen[k], lab != nullptr ? lab : "?", 63) == 0;
+						}
+						if (!again) {
+							char line[240];
+
+							strlcpy(seen[nseen++], lab != nullptr ? lab : "?", 64);
+							snprintf(line, sizeof(line), "!!rwm drawtime %s: %llu us (%u vertices, %u instances, "
+								 "%u targets)", lab != nullptr ? lab : "?", (unsigned long long)(took / 1000),
+								 w->draw.vertex_count, w->draw.instance_count, w->draw.color_count);
+							sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+						}
+					}
 				}
 				if (dfail == 1 && dfails < 40) {
 					uint32_t before_failed = 0, after_failed = 0;

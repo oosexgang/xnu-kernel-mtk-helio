@@ -301,6 +301,118 @@ rwm_command_commit(struct rwm_command *c, struct rwm_work *const *works, unsigne
 	return true;
 }
 
+/* the buffer being run on this thread, for rwm_command_note_render */
+static thread_local struct rwm_command *running;
+
+extern "C" bool
+rwm_failnames(void)
+{
+	static int on = -1;
+
+	if (on < 0) {
+		on = rwm_boot_arg("rwm_failnames=1") ? 1 : 0;
+	}
+	return on == 1;
+}
+
+extern "C" void
+rwm_command_note_render(const struct rwa_render *render)
+{
+	struct rwm_command *c = running;
+
+	if (c == nullptr || render == nullptr) {
+		return;
+	}
+	for (unsigned i = 0; i < c->nrenders; i++) {
+		if (c->renders[i] == render) {
+			return;
+		}
+	}
+	if (c->nrenders < sizeof(c->renders) / sizeof(c->renders[0])) {
+		c->renders[c->nrenders++] = render;
+	}
+}
+
+/*
+ * After a buffer is complete: did the Mali fail a chain meanwhile? Each of its pipelines counted in buffers that
+ * failed and in buffers that did not, and at 10, 40, 160 and 640 failed buffers the pipelines most often in failed
+ * ones said, a line each, with both counts: the one in every failed buffer and in few others is the one (run 273:
+ * 691 chains failed, by buffers of 26 pipelines, most of them the warm-up's).
+ */
+struct fail_count {
+	const struct rwa_render *render;
+	unsigned failed, fine;
+};
+static fail_count fail_counts[256];
+static pthread_mutex_t fail_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+failnames_check(struct rwm_command *c)
+{
+	static unsigned last_failed, failed_buffers;
+	unsigned failed = 0, report = 0;
+	size_t size = sizeof(failed);
+
+	if (!rwm_failnames() || sysctlbyname("kern.hakios.mali_failed", &failed, &size, NULL, 0) != 0) {
+		return;
+	}
+	pthread_mutex_lock(&fail_lock);
+	const bool bad = failed > last_failed;
+
+	last_failed = failed;
+	for (unsigned i = 0; i < c->nrenders; i++) {
+		fail_count *slot = nullptr;
+
+		for (fail_count &f : fail_counts) {
+			if (f.render == c->renders[i]) {
+				slot = &f;
+				break;
+			}
+			if (f.render == nullptr && slot == nullptr) {
+				slot = &f;
+			}
+		}
+		if (slot != nullptr) {
+			slot->render = c->renders[i];
+			(bad ? slot->failed : slot->fine)++;
+		}
+	}
+	if (bad) {
+		failed_buffers++;
+		report = failed_buffers == 10 || failed_buffers == 40 || failed_buffers == 160 || failed_buffers == 640 ?
+				 failed_buffers : 0;
+	}
+	fail_count top[8] = {};
+
+	if (report != 0) {
+		for (const fail_count &f : fail_counts) {
+			if (f.render == nullptr) {
+				continue;
+			}
+			for (unsigned k = 0; k < 8; k++) {
+				/* most often in failed buffers; of those, least often in the others */
+				if (f.failed > top[k].failed || (f.failed == top[k].failed && top[k].render != nullptr &&
+								 f.fine < top[k].fine)) {
+					memmove(&top[k + 1], &top[k], (7 - k) * sizeof(top[0]));
+					top[k] = f;
+					break;
+				}
+			}
+		}
+	}
+	pthread_mutex_unlock(&fail_lock);
+	for (unsigned k = 0; report != 0 && k < 8 && top[k].render != nullptr; k++) {
+		char line[300];
+		const char *label = rwm_area_label_of(top[k].render);
+		const char *warm = rwm_warm_label(top[k].render);
+
+		snprintf(line, sizeof(line), "!!rwm failnames at %u failed buffers, %u: %s %s, in %u failed and %u fine", report,
+			 k + 1, warm != nullptr ? "warm-up" : rwm_variant_ahead(top[k].render) ? "variant ahead" : "at the draw",
+			 warm != nullptr ? warm : label != nullptr && label[0] ? label : "?", top[k].failed, top[k].fine);
+		sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+	}
+}
+
 extern "C" int
 rwm_command_run(struct rwm_command *c, struct rwa_device *device, struct rwm_work *const *works, unsigned count,
 		char *why, size_t why_size)
@@ -316,8 +428,10 @@ rwm_command_run(struct rwm_command *c, struct rwa_device *device, struct rwm_wor
 	c->status = RWM_CB_COMMITTED;
 	/* its copies in -- here, unless the driver's worker made them at -commit --, the draws, dispatches and copies in
 	 * order, the work sent off, the surfaces copied back */
+	running = c;
 	ran = rwm_run_works(device, works, count, !(rwm_worker_on() && !rwm_copyin_late()), finish_wanted(), &c->seq,
 			    &waited, why, why_size);
+	running = nullptr;
 	/* submitted; the fence is what makes it completed */
 	c->status = ran == 0 ? RWM_CB_SCHEDULED : RWM_CB_ERROR;
 
@@ -393,6 +507,7 @@ rwm_command_wait_completed(struct rwm_command *c, struct rwa_device *device, cha
 		rwm_perf.completed_waits++;
 		rwm_perf.completed_ns += rwm_ns() - from;
 		c->status = RWM_CB_COMPLETED;
+		failnames_check(c);
 		return 0;
 	}
 	if (air->finish(device, why, why_size) != 0) {

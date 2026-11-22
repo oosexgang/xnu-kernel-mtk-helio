@@ -35,6 +35,7 @@
 #include <IOKit/IOKitLib.h>
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
@@ -1691,6 +1692,134 @@ show_camera_icon(unsigned seconds)
 	});
 }
 
+/*
+ * A directory that could not be made. SpringBoard stopped in runs 301, 326, 337 and 338 at one place, BaseBoardUI+0x33f0
+ * of the 27 release: the BSAssert of -[BSUIMappedImageCache initWithUniqueIdentifier:options:] (BSUIMappedImageCache.m
+ * line 225, "Couldn't create directory at %@ with error %@"), whose -[NSFileManager
+ * createDirectoryAtPath:withIntermediateDirectories:attributes:error:] for CACHES/MappedImageCache/IDENTIFIER (the
+ * caches of the poster's container, on the ramfs of /private/var) said no; it is called from
+ * -[PUIMappedImageCacheManager _cacheLock_buildMappedImageCacheForKey:] (PosterUIFoundation+0x78afc). Here a no is said
+ * (kept, "!!mkdir:") with its errno where that is one that can pass (ENOMEM, EAGAIN, EINTR), with the first part of the
+ * path that mkdir(2) itself refuses, and the call is made again, three times at most (run 342: ENOMEM, of the ramfs's
+ * ACL reads, bsd/miscfs/ramfs/ramfs.c ramfs_getxattr); and where the path is a mapped image cache's and it still says no, the
+ * cache is let go on without its directory (its images are then not kept on disk, which a cache can do without) in
+ * place of the assert. Boot-arg sb_mkdir=0: left as Foundation has it.
+ */
+static BOOL (*original_create_directory)(id self, SEL selector, id path, BOOL intermediate, id attributes, id *error);
+
+static void
+say_refused_component(const char *path)
+{
+	char part[1024];
+	size_t length = strlen(path);
+	struct stat st;
+
+	if (length >= sizeof(part)) {
+		keep_line("!mkdir: %s[%d]: a path of %zu bytes", getprogname(), getpid(), length);
+		return;
+	}
+	memcpy(part, path, length + 1);
+	for (char *at = part + 1; ; at++) {
+		if (*at == '/' || *at == '\0') {
+			char was = *at;
+
+			*at = '\0';
+			if (stat(part, &st) != 0) {
+				int stat_errno = errno;
+
+				if (mkdir(part, 0755) != 0 && errno != EEXIST) {
+					keep_line("!mkdir: %s[%d]: mkdir %.120s: errno %d (stat: errno %d)", getprogname(), getpid(), part,
+					    errno, stat_errno);
+					return;
+				}
+				keep_line("!mkdir: %s[%d]: %.120s was missing (stat: errno %d), mkdir made it", getprogname(), getpid(),
+				    part, stat_errno);
+			} else if (!S_ISDIR(st.st_mode)) {
+				keep_line("!mkdir: %s[%d]: %.120s is not a directory (mode %o)", getprogname(), getpid(), part,
+				    st.st_mode);
+				return;
+			}
+			if (was == '\0') {
+				break;
+			}
+			*at = was;
+		}
+	}
+	keep_line("!mkdir: %s[%d]: every part of %.120s is a directory now", getprogname(), getpid(), path);
+}
+
+/* the error's own errno, or its underlying one's (NSCocoaErrorDomain 512 over NSPOSIXErrorDomain 12, run 342) */
+static long
+posix_code_of(id fault)
+{
+	id domain = fault ? SEND(id, fault, "domain") : nil;
+	const char *name = domain ? SEND(const char *, domain, "UTF8String") : NULL;
+	id info = fault ? SEND(id, fault, "userInfo") : nil;
+	id under = info ? SEND1(id, info, "objectForKey:", id, (id)CFSTR("NSUnderlyingError")) : nil;
+
+	if (name != NULL && strcmp(name, "NSPOSIXErrorDomain") == 0) {
+		return SEND(long, fault, "code");
+	}
+	return under ? SEND(long, under, "code") : 0;
+}
+
+static BOOL
+create_directory(id self, SEL selector, id path, BOOL intermediate, id attributes, id *error)
+{
+	id mine = nil;
+	id *where = error != NULL ? error : &mine;
+	BOOL made = original_create_directory(self, selector, path, intermediate, attributes, where);
+	const char *text;
+	long code;
+
+	if (made) {
+		return YES;
+	}
+	text = path ? SEND(const char *, path, "UTF8String") : NULL;
+	if (text == NULL) {
+		text = text_of(path);
+	}
+	/* again only for what can pass (no memory, interrupted): a missing parent or a file in the way stays a no */
+	for (int attempt = 1; !made && attempt <= 3 && ((code = posix_code_of(*where)) == ENOMEM || code == EAGAIN ||
+	    code == EINTR); attempt++) {
+		keep_line("!mkdir: %s[%d]: no for %.120s (try %d): errno %ld", getprogname(), getpid(), text, attempt, code);
+		if (intermediate) {
+			say_refused_component(text);
+		}
+		usleep(20000u * (unsigned)attempt);
+		*where = nil;
+		made = original_create_directory(self, selector, path, intermediate, attributes, where);
+	}
+	if (!made && strstr(text, "/MappedImageCache/") != NULL) {
+		keep_line("!mkdir: %s[%d]: %.110s: errno %ld; the mapped image cache goes on without its directory",
+		    getprogname(), getpid(), text, posix_code_of(*where));
+		*where = nil;
+		made = YES;
+	}
+	return made;
+}
+
+static void
+watch_directory_making(void)
+{
+	char args[1024] = "";
+	size_t size = sizeof(args) - 1;
+	Class manager = objc_getClass("NSFileManager");
+	Method method = manager ? class_getInstanceMethod(manager,
+	    sel_registerName("createDirectoryAtPath:withIntermediateDirectories:attributes:error:")) : NULL;
+
+	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "sb_mkdir=0") != NULL) {
+		return;
+	}
+	if (method == NULL) {
+		say("hakios: %s: no -[NSFileManager createDirectoryAtPath:withIntermediateDirectories:attributes:error:]\n",
+		    getprogname());
+		return;
+	}
+	original_create_directory = (BOOL (*)(id, SEL, id, BOOL, id, id *))method_setImplementation(method,
+	    (IMP)create_directory);
+}
+
 __attribute__((constructor))
 static void
 hakios_springboard_init(void)
@@ -1703,6 +1832,7 @@ hakios_springboard_init(void)
 	if (name == NULL) {
 		return;
 	}
+	watch_directory_making();
 	if (strcmp(name, "SpringBoard") != 0) {
 		static char who[64];
 
@@ -1844,6 +1974,53 @@ hakios_springboard_init(void)
 					put_wallpaper(0);
 				});
 			}
+		}
+	}
+	/*
+	 * The methods of the poster's image cache and of PaperBoardUI's poster controllers with where each starts, as an
+	 * offset into its image (dladdr's dli_fbase): SpringBoard stopped in a BSAssert of PUIMappedImageCacheManager.m
+	 * (runs 301, 326, 337 at the same place), and the shared cache of the 27 release has no names for those frames.
+	 * Boot-arg sb_methods=1 only.
+	 */
+	{
+		char args[1024] = "";
+		size_t size = sizeof(args) - 1;
+
+		if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "sb_methods=1") != NULL) {
+			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+				static const char *const names[] = { "PUIMappedImageCacheManager", "PBUIMappedImageCacheManager", "BSUIMappedImageCache", "BSUIMappedImageCacheOptions", "PFPathProvider",
+				    "PBUIPosterViewController", "PBUIPosterWallpaperViewController", "PBUIPosterVariantViewController" };
+
+				for (unsigned n = 0; n < sizeof(names) / sizeof(names[0]); n++) {
+					for (int meta = 0; meta < 2; meta++) {
+						Class cls = objc_getClass(names[n]);
+						unsigned count = 0;
+						Method *list;
+
+						if (cls == Nil) {
+							if (meta == 0) {
+								keep_line("!sbm: %s: no such class", names[n]);
+							}
+							continue;
+						}
+						list = class_copyMethodList(meta ? object_getClass((id)cls) : cls, &count);
+						for (unsigned i = 0; i < count; i++) {
+							IMP imp = method_getImplementation(list[i]);
+							Dl_info info;
+#if __has_feature(ptrauth_calls)
+							imp = (IMP)__builtin_ptrauth_strip((void *)imp, 0);   /* (the address, not the signed pointer) */
+#endif
+
+							if (dladdr((void *)imp, &info) != 0) {
+								keep_line("!sbm: %c[%s %s] %s+%#lx", meta ? '+' : '-', names[n],
+								    sel_getName(method_getName(list[i])), info.dli_fname ? strrchr(info.dli_fname, '/') + 1 : "?",
+								    (unsigned long)((uintptr_t)imp - (uintptr_t)info.dli_fbase));
+							}
+						}
+						free(list);
+					}
+				}
+			});
 		}
 	}
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{

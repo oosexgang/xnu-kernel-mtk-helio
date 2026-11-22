@@ -90,6 +90,7 @@ rwm_run_draw(const struct rwm_draw *d, char *why, size_t why_size)
 	draw.color = d->color;
 	draw.color_count = d->color_count;
 	draw.color_level = d->color_level;
+	draw.discard_mask = d->discard_mask;
 	draw.clear_color = d->clear_color;
 	draw.color_actions = d->color_actions;
 	memcpy(draw.color_load, d->color_load, sizeof(draw.color_load));

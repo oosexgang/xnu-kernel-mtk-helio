@@ -196,6 +196,8 @@ bool rwm_texture_read_depth(struct rwm_texture *texture, const unsigned origin[3
 			    float *depth, uint8_t *stencil);
 /* the surface a texture laid over its memory lies over (src/metal/import.cpp), drawn in place; 0: none */
 uint32_t rwm_texture_in_place(const struct rwm_texture *texture);
+void rwm_texture_set_memoryless(struct rwm_texture *texture, bool memoryless);
+bool rwm_texture_memoryless(const struct rwm_texture *texture);
 void rwm_texture_set_in_place(struct rwm_texture *texture, uint32_t surface);
 /* what the frames sample and which of it is empty (src/metal/texture.cpp, said by rwm_perf_report) */
 void rwm_texture_note_filled(struct rwm_texture *texture);
@@ -261,6 +263,7 @@ struct rwm_draw {
 	unsigned stream_mask;           /* the pipeline's: which vertex buffer indices are streams */
 	unsigned stream_count;          /* ... and the highest it fetches from, plus one */
 	struct rwa_texture *color[8];
+	unsigned discard_mask;          /* rwa_draw.discard_mask */
 	unsigned color_level[8];        /* the mip level of each (rwa_draw.color_level) */
 	unsigned color_count;
 	const float *clear_color;       /* NULL: kept, not cleared */
@@ -385,6 +388,7 @@ struct rwm_bound_buffer {
 };
 struct rwm_render_state {
 	struct rwa_device *device;
+	unsigned discard_mask;           /* colour attachments stored with MTLStoreActionDontCare */
 	unsigned color_level[8];          /* the mip level each colour attachment is drawn into */
 	struct rwm_bound_texture color[8];
 	unsigned color_count;
@@ -587,7 +591,26 @@ struct rwm_command {
 	volatile bool queued, processed;   /* handed to the driver's worker at -commit, and done there */
 	struct rwm_drawn drawn;         /* the surfaces it draws into in place, pending meanwhile */
 	struct rwm_sampled sampled;     /* the surfaces it reads in place, in use until the GPU is done */
+	const struct rwa_render *renders[32];   /* its pipelines, the first 32 (boot-arg rwm_failnames=1) */
+	unsigned nrenders;
 };
+
+/* boot-arg rwm_failnames=1: after each buffer the GPU finished, kern.hakios.mali_failed read; when it went up, the
+ * buffer's pipelines said, each marked w (built by the warm-up), v (a variant built ahead) or - (built at the draw) */
+bool rwm_failnames(void);
+void rwm_command_note_render(const struct rwa_render *render);
+bool rwm_warm_owns(const struct rwa_render *render);
+/* before a pipeline's render is destroyed: what is kept by its address forgets it -- the generic record whose base
+ * it is (whose variants a later pipeline at the same address would otherwise be given), its label, the warm-up's
+ * entry (src/metal/pipeline.cpp) */
+void rwm_render_forget(const struct rwa_render *render);
+void rwm_area_forget(const struct rwa_render *render);
+void rwm_warm_forget(const struct rwa_render *render);
+/* the task's memory as jetsam counts it (phys_footprint), in MB (src/metal/perf.cpp) */
+unsigned rwm_footprint_mb(void);
+/* the warm-up's label of a pipeline it built (short, without com.apple.coreanimation.), NULL for another */
+const char *rwm_warm_label(const struct rwa_render *render);
+bool rwm_variant_ahead(const struct rwa_render *render);
 
 void rwm_command_begin(struct rwm_command *command);
 /* -commit, on the thread that makes the buffer: the making counted, that thread put on a big core once (bigcore=1),
@@ -726,6 +749,7 @@ bool rwm_plib_modules_for(const char *label, bool allow_near, const void **verte
  * rwa_render_constants is global state in the library, and the warm-up thread builds too.
  */
 void rwm_compile_lock(void);
+void rwm_compile_lock_background(void);    /* the warm-up's and the builds ahead: after any a draw waits for */
 void rwm_compile_unlock(void);
 /* the builds ahead below the frames, one variant at a time (src/metal/pipeline.cpp; boot-arg rwm_bgprio=0: not) */
 bool rwm_bgprio(void);

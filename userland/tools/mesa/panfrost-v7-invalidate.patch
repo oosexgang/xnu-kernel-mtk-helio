@@ -1,0 +1,17 @@
+--- a/src/gallium/drivers/panfrost/pan_resource.c
++++ b/src/gallium/drivers/panfrost/pan_resource.c
+@@ -1960,8 +1960,13 @@
+    for (unsigned i = 0; i < batch->key.nr_cbufs; ++i) {
+       struct pipe_surface *surf = batch->key.cbufs[i];
+ 
+-      if (surf && surf->texture == prsrc)
++      if (surf && surf->texture == prsrc) {
+          batch->resolve &= ~(PIPE_CLEAR_COLOR0 << i);
++         /* and its contents forgotten, so that the next pass into it does not load them back: what an invalidated
++          * attachment holds is undefined (the 27 release's window server's memoryless RGBA16Float and R32Float
++          * attachments, two of three full-screen targets of every pass) */
++         BITSET_CLEAR(rsrc->valid.data, surf->u.tex.level);
++      }
+    }
+ }
+ 

@@ -1389,6 +1389,12 @@ struct rwa_draw {
 	unsigned color_actions;
 	unsigned char color_load[8], color_store[8];
 	float color_clear[8][4];
+	/* APPENDED (17 November): colour attachments whose contents the pass does not keep (MTLStoreActionDontCare), one
+	 * bit each. The 27 release's window server draws every frame into three full-screen attachments, the second and
+	 * third (RGBA16Float, R32Float) never read after their pass -- memoryless on Apple's GPUs -- and the Mali wrote
+	 * all three back and loaded them again at every pass, about 100 ms of the GPU a frame (run 248: 8 frames a
+	 * second, each waiting 97 ms for the GPU). */
+	unsigned discard_mask;
 };
 
 int rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,

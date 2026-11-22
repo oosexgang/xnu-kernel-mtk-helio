@@ -1778,9 +1778,14 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 	rwm_uploads[0]++;
 	rwm_uploads[1] += shape.width <= 512 && shape.height <= 512;
 	rw_apply_descriptor_swizzle(texture, descriptor);
-	return [[HakiosMetalTexture alloc] initWithHakiosDevice:self
-							 texture:texture
-							   shape:&shape];
+	HakiosMetalTexture *made = [[HakiosMetalTexture alloc] initWithHakiosDevice:self
+									     texture:texture
+									       shape:&shape];
+	/* MTLStorageModeMemoryless (3): its passes keep none of it (src/metal/texture.cpp) */
+	if ([descriptor storageMode] == 3) {
+		rwm_texture_set_memoryless([made hakiosCore], true);
+	}
+	return made;
 }
 
 /* The sampler's own base class exists and owes its protocol nothing, so this is the cheapest
@@ -3331,6 +3336,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 	 * descriptor, for the reason the compute one learned at its own line 1504 */
 	self = [super initWithDevice:device pipelineStateDescriptor:descriptor];
 	if (self == nil) {
+		rwm_render_forget(render);
 		mesa.render_destroy(render);
 		return nil;
 	}
@@ -3359,6 +3365,10 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 - (void)dealloc
 {
 	if (_render != NULL) {
+		/* forgotten first: a later pipeline may be given the same address, and the generic record that knew this
+		 * one by it would hand that one its variants (the Mali failing chains with status 0x58 and 0x5b, runs 270
+		 * to 277) */
+		rwm_render_forget(_render);
 		mesa.render_destroy(_render);
 	}
 	[super dealloc];
@@ -4288,11 +4298,26 @@ rw_core_of(id texture)
 		});
 		[self retain];
 		[scheduled release];
+		/* boot-arg rwm_early_done=1, a measurement and not a mode: the completed handlers at once, before the GPU
+		 * is done -- does the window server wait for a frame's completion before it starts the next one? (run 264:
+		 * every buffer completed some 10 ms after its commit, and half the frames came a refresh late) */
+		static int early = -1;
+
+		if (early < 0) {
+			early = rwm_boot_arg("rwm_early_done=1") ? 1 : 0;
+		}
+		if (early) {
+			for (id handler in completed) {
+				[self hakiosDeliver:(void (^)(id))handler];
+			}
+		}
 		dispatch_async(completions, ^{
 			[self waitUntilCompleted];
 			[self hakiosReleaseSampled];
-			for (id handler in completed) {
-				[self hakiosDeliver:(void (^)(id))handler];
+			if (!early) {
+				for (id handler in completed) {
+					[self hakiosDeliver:(void (^)(id))handler];
+				}
 			}
 			[completed release];
 			[self release];

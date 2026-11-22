@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #pragma GCC visibility push(default)   /* the contract, out of libOSMesa (userland/tools/mesa/air-osmesa.patch) */
 #include "air_metal.h"
@@ -93,6 +94,18 @@
 struct rwa_device {
    struct pipe_screen *screen;
    struct pipe_context *pipe;
+
+   /* A second context of the same screen, for compiling a pipeline's two stages only (rwa_render_create), under
+    * build_lock and not the library's lock: Panfrost's compile of a stage's first variant, at create_*_state, was
+    * the part of a pipeline's build still under that lock -- about 1.1 s of the 2 s a pipeline takes on the Mali
+    * G52, up to 2.5 s for the slowest -- and every draw of the window server waited on it while the warm-up built
+    * its 200 (the first six minutes after the 27 release's boot, runs 333-341). Its stages are the screen's
+    * (caps.shareable_shaders: Gallium's promise that a state made on one context binds on another, which Panfrost
+    * keeps -- a variant's code and descriptors are buffers of their own, referenced, out of this context's pools);
+    * nothing is drawn on it. NULL with boot-arg rwa_buildctx=0, RWA_BUILDCTX=0, a screen without shareable shaders,
+    * or no second context to be had: the stages are then compiled on `pipe` under the library's lock, as before. */
+   struct pipe_context *build_pipe;
+   pthread_mutex_t build_lock;
 
    /* NIR's options for this screen, asked once: the translator needs them to know what
     * the consumer can be handed (what it may leave for the backend to lower).
@@ -760,6 +773,30 @@ rwa_device_open(char *why, size_t why_size)
       goto fail;
    }
 
+   /* ... and the one pipelines are compiled on (build_pipe above) */
+   pthread_mutex_init(&device->build_lock, NULL);
+   {
+      const char *env = getenv("RWA_BUILDCTX");
+      bool aside = !(env && strcmp(env, "0") == 0) && device->screen->caps.shareable_shaders;
+#ifdef __APPLE__
+      char args[1024] = "";
+      size_t size = sizeof(args) - 1;
+
+      if (aside && sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "rwa_buildctx=0"))
+         aside = false;
+#endif
+      if (aside)
+         device->build_pipe = device->screen->context_create(device->screen, NULL, 0);
+#ifdef __APPLE__
+      char line[160];
+
+      snprintf(line, sizeof(line), "!!rwa: pipelines compiled on %s", device->build_pipe ?
+               "a context of their own, the draws not waiting" : aside ? "the drawing context (no second one was had)" :
+               "the drawing context (rwa_buildctx=0 or no shareable shaders)");
+      sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+#endif
+   }
+
    /* The two numbers Metal requires of every pipeline and its own base class answers
     * with nothing (userland/docs/metal.md 10.8). They are properties of the screen, asked once.
     *
@@ -794,6 +831,8 @@ rwa_device_open(char *why, size_t why_size)
    return device;
 
 fail:
+   if (device->build_pipe)
+      device->build_pipe->destroy(device->build_pipe);
    if (device->pipe)
       device->pipe->destroy(device->pipe);
    if (device->screen)
@@ -817,6 +856,9 @@ rwa_device_close(struct rwa_device *device)
          pipe_resource_reference(&device->blank_res[t][d], NULL);
       }
    }
+   if (device->build_pipe)
+      device->build_pipe->destroy(device->build_pipe);
+   pthread_mutex_destroy(&device->build_lock);
    device->pipe->destroy(device->pipe);
    device->screen->destroy(device->screen);
    free(device);
@@ -4215,7 +4257,7 @@ bind_stage(struct rwa_device *device, enum pipe_shader_type stage,
    struct pipe_sampler_view *views[RWA_MAX_TEXTURES] = { 0 };
    struct pipe_image_view images[RWA_MAX_TEXTURES] = { 0 };
    void *samplers[RWA_MAX_TEXTURES] = { 0 };
-   unsigned num_views = 0, num_images = 0, num_samplers = 0;
+   unsigned num_views = 0, num_images = 0, num_samplers = 0, declared_samplers = 0;
 
    for (unsigned i = 0; i < info->num_resources; i++) {
       const struct air_resource *r = &info->resources[i];
@@ -4402,6 +4444,7 @@ bind_stage(struct rwa_device *device, enum pipe_shader_type stage,
          break;
 
       case AIR_RESOURCE_SAMPLER:
+         declared_samplers = MAX2(declared_samplers, r->index + 1);
          if (r->inline_sampler) {
             /* The shader's own word, built once and kept with the pipeline. It goes
              * through Metal's vocabulary on the way (sampler_state_from_air), which is
@@ -4468,8 +4511,14 @@ bind_stage(struct rwa_device *device, enum pipe_shader_type stage,
     * for it or not: see default_sampler() -- softpipe dereferences the state of every
     * unit the shader touches, so a slot left empty is a crash rather than a default.
     */
-   for (unsigned i = 0; i < num_views; i++) {
-      if (!views[i] || samplers[i])
+   /* ... and in every slot the shader declares a sampler at that nothing was bound to, and every gap below the last
+    * one: Metal numbers samplers apart from textures, so a declared sampler with no texture at the same index was
+    * left empty -- and panfrost writes an empty slot as a descriptor of zeros, which the Mali refuses when the shader
+    * samples through it (DATA_INVALID_FAULT 0x58: runs 256 to 331, the fault pointer of run 331 at a sampler
+    * descriptor of 32 zero bytes between three valid ones). */
+   const unsigned sampler_slots = MAX3(num_views, num_samplers, declared_samplers);
+   for (unsigned i = 0; i < sampler_slots && i < ARRAY_SIZE(samplers); i++) {
+      if (samplers[i] || (i < num_views && !views[i] && i >= declared_samplers && i >= num_samplers))
          continue;
       samplers[i] = default_sampler(device);
       if (!samplers[i]) {
@@ -6126,8 +6175,8 @@ compact_vertex_inputs(nir_shader *nir, int remap[16])
 }
 
 static void *
-make_stage_cso_remap(struct rwa_device *device, nir_shader *nir, struct air_shader_info *info,
-                     int *remap, char *why, size_t why_size)
+make_stage_cso_remap(struct rwa_device *device, struct pipe_context *pipe, nir_shader *nir,
+                     struct air_shader_info *info, int *remap, char *why, size_t why_size)
 {
    nir_shader *clone = nir_shader_clone(NULL, nir);
    if (!clone) {
@@ -6149,7 +6198,6 @@ make_stage_cso_remap(struct rwa_device *device, nir_shader *nir, struct air_shad
       note_constant_reads(clone, info);
 
    struct pipe_shader_state templ = { .type = PIPE_SHADER_IR_NIR, .ir.nir = clone };
-   struct pipe_context *pipe = device->pipe;
    void *cso = nir->info.stage == MESA_SHADER_VERTEX
                   ? pipe->create_vs_state(pipe, &templ)
                   : pipe->create_fs_state(pipe, &templ);
@@ -6161,10 +6209,10 @@ make_stage_cso_remap(struct rwa_device *device, nir_shader *nir, struct air_shad
 }
 
 static void *
-make_stage_cso(struct rwa_device *device, nir_shader *nir, struct air_shader_info *info,
-               char *why, size_t why_size)
+make_stage_cso(struct rwa_device *device, struct pipe_context *pipe, nir_shader *nir,
+               struct air_shader_info *info, char *why, size_t why_size)
 {
-   return make_stage_cso_remap(device, nir, info, NULL, why, why_size);
+   return make_stage_cso_remap(device, pipe, nir, info, NULL, why, why_size);
 }
 
 /* Whether a vertex shader reads vertex attributes, which used to be the one thing the
@@ -7136,8 +7184,9 @@ rwa_render_create(struct rwa_device *device,
     * The translation without the lock (26 October): AIR -> NIR asks nothing of the context (the
     * function constants handed over are this thread's, the translator keeps no state), and it was
     * some 40% of a pipeline's 100 to 250 ms -- time the worker's draws waited, which is the hitch
-    * of an effect seen for the first time (run 202, "rwm pipelines"). Taken again before the
-    * driver compiles (make_stage_cso) and on the way out.
+    * of an effect seen for the first time (run 202, "rwm pipelines"). Taken again once the
+    * driver has compiled the stages on the device's second context (build_pipe), or before it
+    * compiles them where there is none (make_stage_cso), and on the way out.
     */
    bool unlocked = pthread_mutex_unlock(&rwa_lock) == 0;
 
@@ -7318,18 +7367,36 @@ rwa_render_create(struct rwa_device *device,
    /* Compile both stages now. A failure here is a creation failure and says so; the
     * stages are linked later, at the draw.
     */
+   /* Every stage, not only a configured one, has its decided branches taken away, outside the lock: a stage
+    * specialized by function constants is the uber shader with all its branches still in it (the icon's: some 6900
+    * values, 225 instructions once compiled), and panfrost keeps that NIR for the pipeline's life -- 16 to 32 MB a
+    * pipeline, 2.3 GB of the phone's 4 in backboardd after the warm-up's 200 (run 276), jetsam ending 150 processes
+    * and the GPU failing chains (runs 270, 273, 274). Boot-arg rwa_shrink=0: as before, configured stages only. */
+   static int shrink_all = -1;
+   if (shrink_all < 0) {
+      char args[1024] = { 0 };
+      size_t size = sizeof(args) - 1;
+
+      shrink_all = !(sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "rwa_shrink=0"));
+   }
+   if (fragment_config_size || shrink_all)
+      shrink_decided(fs);
+   if ((vertex_config_size || shrink_all) && !render->generated_vertex)
+      shrink_decided(vs);
    int64_t made_translated = os_time_get_nano();
-   if (unlocked) {
+   /* the two stages compiled on the device's second context, under its own lock, the library's still let go
+    * (build_pipe, struct rwa_device); on the drawing context and under the library's lock where there is none */
+   struct pipe_context *compile_pipe = device->pipe;
+   bool aside = false;
+   if (unlocked && device->build_pipe) {
+      pthread_mutex_lock(&device->build_lock);
+      compile_pipe = device->build_pipe;
+      aside = true;
+   } else if (unlocked) {
       pthread_mutex_lock(&rwa_lock);
       unlocked = false;
    }
-   if (fragment_config_size)
-      shrink_decided(fs);
-   if (vertex_config_size && !render->generated_vertex)
-      shrink_decided(vs);
-   render->fs_cso = make_stage_cso(device, fs, &render->finfo, why, why_size);
-   if (!render->fs_cso)
-      goto fail;
+   render->fs_cso = make_stage_cso(device, compile_pipe, fs, &render->finfo, why, why_size);
    int vremap[16];
    static int nocompact = -1;
    if (nocompact < 0) {
@@ -7342,8 +7409,17 @@ rwa_render_create(struct rwa_device *device,
          nocompact = strstr(args, "rwa_nocompact=1") != NULL;
 #endif
    }
-   render->vs_cso = make_stage_cso_remap(device, vs, render->generated_vertex ? NULL : &render->vinfo,
-                                         render->generated_vertex || nocompact ? NULL : vremap, why, why_size);
+   if (render->fs_cso)
+      render->vs_cso = make_stage_cso_remap(device, compile_pipe, vs,
+                                            render->generated_vertex ? NULL : &render->vinfo,
+                                            render->generated_vertex || nocompact ? NULL : vremap, why, why_size);
+   if (aside) {
+      pthread_mutex_unlock(&device->build_lock);
+      pthread_mutex_lock(&rwa_lock);
+      unlocked = false;
+   }
+   if (!render->fs_cso)
+      goto fail;
    if (nocompact)
       for (unsigned i = 0; i < 16; i++)
          vremap[i] = (int)i;
@@ -8108,6 +8184,8 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
    }
    if (flush_on_switch) {
       static struct pipe_surface *last_cbuf, *last_zs;
+      static struct pipe_resource *last_discard[PIPE_MAX_COLOR_BUFS];
+      static unsigned last_discard_count;
       if ((fb.nr_cbufs ? fb.cbufs[0] : NULL) != last_cbuf || fb.zsbuf != last_zs) {
          /* boot-arg rwa_syncpass=1: and the GPU waited for at each switch -- whether a pass that samples what the
           * passes before it drew reads them unfinished (15 November: the draws of the passes that load draw nothing) */
@@ -8123,6 +8201,19 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
                syncpass = strstr(args, "rwa_syncpass=1") != NULL;
 #endif
          }
+         /* the attachments the pass before did not keep (rwa_draw.discard_mask): not written back, and not loaded
+          * by a later pass, since what they hold is undefined (Gallium's invalidate_resource, with panfrost's
+          * patch to forget the level's contents as well) */
+         if (last_discard_count && pipe->invalidate_resource) {
+            for (unsigned k = 0; k < last_discard_count; k++)
+               pipe->invalidate_resource(pipe, last_discard[k]);
+         }
+         /* ... held by a reference of their own until here: CoreAnimation lets go of its memoryless targets right
+          * after the pass that used them, and a bare pointer to one was a texture freed and given to something else
+          * before this invalidated it -- panfrost writing into whatever had its memory now, and the Mali failing a
+          * fragment chain a frame from then on (status 0x58 and 0x5b, runs 256 to 279) */
+         for (unsigned k = 0; k < last_discard_count; k++)
+            pipe_resource_reference(&last_discard[k], NULL);
          if ((last_cbuf || last_zs) && syncpass) {
             struct pipe_fence_handle *fence = NULL;
 
@@ -8135,6 +8226,18 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
             pipe->flush(pipe, NULL, 0);
          last_cbuf = fb.nr_cbufs ? fb.cbufs[0] : NULL;
          last_zs = fb.zsbuf;
+         last_discard_count = 0;
+         /* ... and only while one of the pass's attachments is kept: a pass that keeps none -- a blur level stored
+          * with DontCare, its one target -- became a fragment job writing nothing back, which the Mali fails with
+          * status 0x58 or 0x5b, every frame from the first such pass on (runs 256 to 280; run 281 with no discards:
+          * 0 of 28875 chains failed) */
+         unsigned kept = 0;
+         for (unsigned k = 0; k < fb.nr_cbufs; k++)
+            if (fb.cbufs[k] && !((draw->discard_mask >> k) & 1))
+               kept++;
+         for (unsigned k = 0; kept != 0 && k < fb.nr_cbufs; k++)
+            if ((draw->discard_mask >> k) & 1 && fb.cbufs[k])
+               pipe_resource_reference(&last_discard[last_discard_count++], fb.cbufs[k]->texture);
       }
    }
    pipe->set_framebuffer_state(pipe, &fb);
