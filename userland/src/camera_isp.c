@@ -298,7 +298,7 @@ render_line(const struct isp *isp, const struct hakios_camera_frame *f, const ui
 
 /*
  * Two lines of 8-bit R, G, B as NV12 (BT.601's matrix, which CoreVideo's 420f and 420v and
- * tools/camraw.py take): each pixel's Y (y1 NULL: the second line has none, the picture's last of an
+ * tools/log/camraw.py take): each pixel's Y (y1 NULL: the second line has none, the picture's last of an
  * odd height), each 2x2's Cb and Cr from the sum of its four. The coefficients in 1/65536ths, video
  * range's scaled to its 219 steps of luma (16 to 235) and 224 of chroma (16 to 240); every value
  * rounded to the nearest step, so that the primaries come back within one step of 0 and 255 (red's and

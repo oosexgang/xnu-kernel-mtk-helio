@@ -59,7 +59,7 @@ struct rwd_surface {
 
 /*
  * The shape, in the same fields and the same order as `struct rwa_texture_shape`
- * (tools/mesa/air/air_metal.h). Declared again under a name of this file's own for the
+ * (userland/tools/mesa/air/air_metal.h). Declared again under a name of this file's own for the
  * reason the struct above is: this file is built by userland/build.sh, which has neither
  * tree's headers on its include path, and a second declaration of the same layout is
  * cheaper than making it have them.

@@ -114,7 +114,7 @@ trace_key(const char *who, CFStringRef key)
 
 uintptr_t hakios_cache_slide(void);
 
-/* who calls us: the return addresses, unslid, for tools/dsc to name (the capture graph's calls on our device and stream) */
+/* who calls us: the return addresses, unslid, for userland/tools/dsc to name (the capture graph's calls on our device and stream) */
 static void
 say_bt(const char *what)
 {
@@ -365,7 +365,7 @@ install_msg_hook(void)
 	static bool done;
 #ifndef CAM_TRACE_STUB
 	/* No address of the user's own cache is kept in the tree: for CAM_TRACE=1 build with -DCAM_TRACE_STUB=0x... (the unslid address of an
-	 * objc_stubs entry of CMCapture in the system's cache you built from, found with tools/dsc/objcstub.py) */
+	 * objc_stubs entry of CMCapture in the system's cache you built from, found with userland/tools/dsc/objcstub.py) */
 	say("msg hook: CAM_TRACE_STUB is not set in this build: no message trace");
 	return;
 #else

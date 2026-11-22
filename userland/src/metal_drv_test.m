@@ -65,7 +65,7 @@ extern id MTLCreateSystemDefaultDevice(void);
 
 /*
  * One call of the compiler library's own contract, declared here as hakiosmetal.m
- * declares the rest of it (tools/mesa/air/air_metal.h is in the Mesa tree and this
+ * declares the rest of it (userland/tools/mesa/air/air_metal.h is in the Mesa tree and this
  * program must not grow a dependency on it): what textures a module declares.
  *
  * It is asked of the same /hakios/lib/libhakiosair.dylib the driver loaded -- dyld
@@ -248,7 +248,7 @@ fnv1a(const unsigned char *bytes, size_t length)
  * frontend in docs/air.md reads exactly such a module.
  *
  * So this prints, for every function of the library, the wrapper's own idea of where the
- * module is and a checksum over it -- which tools/metallib.py computes over the same
+ * module is and a checksum over it -- which userland/tools/metallib.py computes over the same
  * function of the same file on the host. Equal numbers mean Metal and our own reader hand
  * the compiler the same bytes; different numbers would mean the frontend has been compiling
  * something other than what Metal would give it. */
@@ -847,7 +847,7 @@ compute_path(id<MTLDevice> dev, id<MTLLibrary> library, const char *only)
  *     air_run: drew 4x4 into r32g32b32a32_uint, 3 render targets
  *
  * They are written down here rather than computed, which is a real weakness: if the shader's
- * meaning ever changes the constant stays and the test lies. tools/air/metalcheck.py is being
+ * meaning ever changes the constant stays and the test lies. userland/tools/air/metalcheck.py is being
  * written to take the comparison off hardcoded numbers; until it does, the provenance above is
  * the only thing making this honest.
  */
@@ -904,7 +904,7 @@ static bool seed_rows;
  * before each shader was given what it declares. It exists because the first sweep with
  * per-shader textures stopped at its third shader, and a sweep that cannot finish measures
  * nothing: with this, the 256 shaders that declare no texture are measurable again while
- * the 15 that do are measured one process at a time (userland/rc.jobs.metaltex).
+ * the 15 that do are measured one process at a time (userland/jobs/rc.jobs.metaltex).
  */
 static bool use_decl = true;
 
@@ -2360,7 +2360,7 @@ draw_path(id<MTLDevice> dev, const char *metallib)
 		printf("drvtest: draw: no %s in that library\n", shader);
 		return;
 	}
-	/* Named in the log on purpose: tools/air/metalcheck.py can then produce the host
+	/* Named in the log on purpose: userland/tools/air/metalcheck.py can then produce the host
 	 * reference itself, rather than the comparison resting on the four words written into
 	 * this file. */
 	printf("drvtest: draw: %s %s\n", metallib, shader);
@@ -2701,7 +2701,7 @@ draw_path(id<MTLDevice> dev, const char *metallib)
  * Every draw this driver has made ran with no depth attachment and so with depth testing
  * off, which is not a choice anyone made -- it is an absence. This is the measurement that
  * closes it, and it is the same experiment air_metal_test runs on softpipe
- * (tools/mesa/air/air_metal_test.c, --draw-depth), so the two can be put side by side:
+ * (userland/tools/mesa/air/air_metal_test.c, --draw-depth), so the two can be put side by side:
  *
  *   - a fragment shader that writes COLOUR, drawn four times. Three with
  *     MTLCompareFunctionLess and depth writes on, at depths 0.5, 0.75 and 0.25, and then
@@ -2819,13 +2819,13 @@ read_depth_buffer(id<MTLTexture> zt, float *depth, const char *what)
  *     offset the window server binds its own fragment buffer at, 55 times in one boot,
  *     and until this work every one of those bindings was refused. The two pictures must
  *     be the same four words, and the same four words the host reference gives
- *     (tools/air/metalcheck.py, and draw_path's own `expected`).
+ *     (userland/tools/air/metalcheck.py, and draw_path's own `expected`).
  *
  * What is NOT here, said plainly: a DRAW through an argument buffer. That needs a
  * .metallib holding a shader that declares one, and this port has no container writer --
  * Apple's libraries have no sets, and the game's are not something a job list can reach.
  * The draw-through-an-encoder differential is therefore the host's
- * (tools/air/argbufruncheck.sh, on softpipe), and what the device adds is the three above.
+ * (userland/tools/air/argbufruncheck.sh, on softpipe), and what the device adds is the three above.
  */
 static void
 argbuf_path(id<MTLDevice> dev, const char *metallib)
@@ -3058,7 +3058,7 @@ argbuf_path(id<MTLDevice> dev, const char *metallib)
 		       pixel[3]);
 	}
 	printf("drvtest: argbuf: the four words above are the host's own reference "
-	       "(tools/air/metalcheck.py): %u %u %u %u\n", expected[0], expected[1],
+	       "(userland/tools/air/metalcheck.py): %u %u %u %u\n", expected[0], expected[1],
 	       expected[2], expected[3]);
 }
 
@@ -3526,7 +3526,7 @@ fault(int sig, siginfo_t *info, void *uap)
  * number.
  *
  * The line is deliberately terse and machine-readable -- name, status, four words -- because
- * the comparison belongs to tools/air/metalcheck.py, which produces each reference by running
+ * the comparison belongs to userland/tools/air/metalcheck.py, which produces each reference by running
  * air_run rather than trusting anything written here.
  *
  * Each shader is bound the textures IT declares, asked of the compiler library through
@@ -4908,7 +4908,7 @@ picture_path(id<MTLDevice> dev, const char *metallib, int seconds)
  * -[HakiosMetalCommandBuffer commit] does the work (docs/metal.md 10.13). The encoder only
  * RECORDS; commit walks the recorded list calling rwa_render_draw / rwa_dispatch, and each of
  * those flushes the Gallium context and WAITS ON ITS OWN FENCE before returning
- * (tools/mesa/air/air_metal.c, finish_or_say_why with required = true). Three consequences,
+ * (userland/tools/mesa/air/air_metal.c, finish_or_say_why with required = true). Three consequences,
  * and the mode is built around them:
  *
  *   1. encoding is nearly free and measures nothing an application cares about;

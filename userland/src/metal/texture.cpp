@@ -648,7 +648,7 @@ rwm_texture_note_view(struct rwm_texture *texture)
 /*
  * Boot-arg rwm_texshot=WxH: the first texture of that size in format 80 (BGRA8Unorm) that is sampled 30 times is read
  * back from the GPU and written into the host's kept lines as a small picture (48 pixels wide, red green blue alpha,
- * base64: "!!texshot k: ..."; tools/texshot.py makes a PNG of it), with how many of its pixels have any alpha. With
+ * base64: "!!texshot k: ..."; tools/log/texshot.py makes a PNG of it), with how many of its pixels have any alpha. With
  * rwa_tint=1 the 27 release's icons and widgets came on the screen as magenta rounded rectangles and without it as
  * nothing (run 70): the draws that put them on the screen work and what they sample -- a texture the window server
  * drew them into first, 129 x 158 for an icon and its name (rwm_capture, run 66) -- holds nothing to see. This says
@@ -660,7 +660,7 @@ namespace {
  * ... and rwm_texshot=N (no "x"): N different textures, any size from 32 x 32 in a four-byte format (RGBA8 70/71,
  * BGRA8 80/81), that reach their 30th sample once 100 s have passed since the first draw of this process -- the home
  * screen's and not the boot logo's (the 129 x 158 of run 71 was the Apple logo, whole) -- 32 pixels wide each, as
- * "texshot#k" so that tools/texshot.py can tell them apart. Each one's header says what filled it (fill_kind).
+ * "texshot#k" so that tools/log/texshot.py can tell them apart. Each one's header says what filled it (fill_kind).
  */
 /* boot-arg rwm_texshot_at=SECONDS: how long after this process's first draw a texshot may be taken (100 s by default;
  * the home screen's icons come at about 295 s, 15 November) */

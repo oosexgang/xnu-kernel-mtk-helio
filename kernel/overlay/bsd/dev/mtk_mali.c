@@ -175,7 +175,7 @@ SYSCTL_PROC(_kern_hakios, OID_AUTO, say, CTLTYPE_STRING | CTLFLAG_WR | CTLFLAG_L
  * run built (run 352) were in neither. A line written here goes into this buffer only (the writer says
  * in the log what it wants said there), and mtkloader puts the buffer into ramoops' pmsg zone when the
  * kernel comes back, by whatever way it does (its end, a panic, the watchdog), where Android shows it
- * as /sys/fs/pstore/pmsg-ramoops-0 and tools/xnu-cycle.sh appends it to the log. Lines that do not fit
+ * as /sys/fs/pstore/pmsg-ramoops-0 and tools/run/xnu-cycle.sh appends it to the log. Lines that do not fit
  * are counted, not kept.
  */
 #define HOST_KEEP_SIZE 0xff00          /* the pmsg zone is 64 KB, less its header and mtkloader's first line */
@@ -185,7 +185,7 @@ uint32_t hakios_host_keep_len, hakios_host_keep_dropped;
 /*
  * Pictures for the host (boot-arg fbframes=, iokit/Kernel/MiniIOMobileFramebuffer.cpp): mtkloader lays this buffer
  * over ramoops' dump zone, 4 KB records of 4076 bytes each after an 8-byte mark, where Android shows them as
- * /sys/fs/pstore/dmesg-ramoops-N and tools/xnu-cycle.sh takes them (tools/fbframes.py). 140 records' worth.
+ * /sys/fs/pstore/dmesg-ramoops-N and tools/run/xnu-cycle.sh takes them (tools/log/fbframes.py). 140 records' worth.
  */
 #define HOST_FRAMES_SIZE (140 * 4076)
 char hakios_host_frames[HOST_FRAMES_SIZE];

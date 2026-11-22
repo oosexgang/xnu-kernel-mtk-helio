@@ -1,6 +1,6 @@
 /*
  * libdeflate's decompressor, for the zlib pieces of compressed files.  The same file is
- * built into the kernel and into tools/apfs/apfs-tool, so the two run one decoder.
+ * built into the kernel and into userland/tools/apfs/apfs-tool, so the two run one decoder.
  *
  * The sources are bsd/miscfs/apfs/libdeflate as tools/mk-libdeflate.sh takes them from the
  * release, unchanged.  libdeflate is Copyright 2016 Eric Biggers and 2024 Google LLC, under

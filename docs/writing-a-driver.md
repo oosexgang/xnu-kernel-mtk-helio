@@ -49,16 +49,16 @@ is not built into the kernel.
 3. **Write the driver**, starting from the example. Put register access behind the
    `HAKIOS_MMIO_TEST` seam (`rd`/`wr`), as the example, `mtk_keys.c` and `mtk_battery.c` do. The
    kernel's build compiles the same code either way.
-4. **Write its test** next to the others in `tests/`. Include the driver's `.c`, fake the kernel
-   with `tests/fakekernel`, and model the hardware (`tests/pwrap_model.h` is the PMIC's). Write one
+4. **Write its test** next to the others in `workbench/`. Include the driver's `.c`, fake the kernel
+   with `workbench/fakekernel`, and model the hardware (`workbench/pwrap_model.h` is the PMIC's). Write one
    scenario per behavior, including the failures: the part does not answer, the argument is not
-   given, the board does not have the part. Add the test to the list in `tests/run.sh`.
+   given, the board does not have the part. Add the test to the list in `workbench/run.sh`.
 5. **Build it in.** Assemble the tree (`kernel/assemble.sh ../xnu-8796-hakios`), add the file to
    `bsd/conf/files` there (`bsd/dev/NAME.c standard`, as `mtk_keys.c` is), and call its init from
    `hakios_input_init()` in `hakios_input.c`. Then `kernel/export.sh` writes the change back into
    `kernel/patches/` and `kernel/overlay/`.
 6. **Check:** `make syntax-check` (seconds), `make check`, then `make kernel` (`kernel/build.sh`).
-7. **Run it on the phone** with its argument added: `XNU_ARGS="... example_pwrkey=1" tools/xnu-cycle.sh`
+7. **Run it on the phone** with its argument added: `XNU_ARGS="... example_pwrkey=1" tools/run/xnu-cycle.sh`
    ([building.md](building.md)). Read the result in the log, not from the screen.
 8. `make docs` updates [boot-args.md](boot-args.md); [drivers.md](drivers.md) gets a line by hand.
 

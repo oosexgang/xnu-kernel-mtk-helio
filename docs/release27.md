@@ -9,7 +9,7 @@ Branch `ios27`: the kernel of the 27 release (xnu-12377.121.6) with this port's 
 | --- | --- |
 | 5 | The lock screen of 27.2 at about 180 s: date, battery percentage (`mtkbatt`), "Swipe up to open". |
 | 6 | Touch: Settings opened and scrolled with a finger; `rwtouch` swipes reach SpringBoard. |
-| 7 | With Metal (`metal=1 camtl=1`): the phone did not come back to Android and the log was empty. The image had the 16.5 build's Mesa, which is arm64 and cannot be loaded by arm64e processes. `system27/mtk27.sh metal` now builds an arm64e one; not yet run on the phone. |
+| 7 | With Metal (`metal=1 camtl=1`): the phone did not come back to Android and the log was empty. The image had the 16.5 build's Mesa, which is arm64 and cannot be loaded by arm64e processes. `darwin/mtk27.sh metal` now builds an arm64e one; not yet run on the phone. |
 
 Without Metal everything is drawn by the CPU, which is slow (16.5 drew 10 frames a second that way; 16.5
 with Metal drew up to 40).
@@ -38,15 +38,15 @@ What 12377 needs beyond the 16.5 kernel's build, all in `kernel/deps/setup.sh` a
 ## User space
 
 ```bash
-REL=/path/to/ios27 system27/mtk27.sh all
+REL=/path/to/ios27 darwin/mtk27.sh all
 ```
 
 `REL` is the extracted IPSW (`rootfs/`, `cryptex/os/`, `cryptex/app/`, `dyld/`, `dyld-strip/`). macOS
 14 cannot mount 27's APFS, so the images are unpacked with `7zz x -snl -snld`, and `unzbm` fixes the
 LZBITMAP files 7-Zip leaves. The `.aea` images are decrypted with blacktop's `ipsw fw aea`.
-`system27/tools/pacstrip cache` writes `dyld-strip/`, and `system27/tools/fips26.py` patches it.
+`darwin/tools/pacstrip cache` writes `dyld-strip/`, and `darwin/tools/fips26.py` patches it.
 
-`system27/mtk27.sh` makes the darwin-renoir tree that the Qualcomm port's scripts expect, out of this
+`darwin/mtk27.sh` makes the darwin-renoir tree that the Qualcomm port's scripts expect, out of this
 repository. Then it builds:
 
 - our libraries for the system's processes, arm64e (`inj26.sh`);
@@ -61,9 +61,9 @@ The system image (4.16 GB) leaves the last 96 MiB of `xnusys` free for the paylo
 payload no longer fits in `boot_a`.
 
 ```bash
-HAKIOS_PAYLOAD=flash tools/system-flash.sh $REL/system27-prune.apfs
-HAKIOS_RAMDISK=$REL/root26-sys.apfs tools/mkpayload.sh
-HAKIOS_PAYLOAD=flash XNU_ARGS="cpus=4 touchscreen=2 buttons=2 mtkbatt=1 fbscale=2 fbfit=3 launchd_unsecure_cache=1 sb_wallpaper=0" tools/xnu-cycle.sh
+HAKIOS_PAYLOAD=flash tools/run/system-flash.sh $REL/system27-prune.apfs
+HAKIOS_RAMDISK=$REL/root26-sys.apfs tools/run/mkpayload.sh
+HAKIOS_PAYLOAD=flash XNU_ARGS="cpus=4 touchscreen=2 buttons=2 mtkbatt=1 fbscale=2 fbfit=3 launchd_unsecure_cache=1 sb_wallpaper=0" tools/run/xnu-cycle.sh
 ```
 
 Add `metal=1 camtl=1 fb_queue=1 fb_flip=1` for Metal.

@@ -56,7 +56,7 @@ tools/boards.py new NAME --soc SOC      # start a new board from the template
 
 Neither is kept in the repository. The builds make them (`kernel/build.sh`, `loader/build.sh`), so
 what is built knows exactly the boards whose packages were present: bring the package in, then build.
-The tests make their own, with a stand-in phone (`tests/devices`, `tests/soc`).
+The tests make their own, with a stand-in phone (`workbench/devices`, `workbench/soc`).
 
 `sysctl hw.board` shows what the running kernel found: `name`, `soc`, `description`, `features`.
 
@@ -72,4 +72,4 @@ When a driver needs something of a device that no section has yet, it becomes a 
 4. **The files**: the key explained in `devices/_template/` (a test fails while it is not), the value
    in the packages that have it, with a comment naming where on the phone it was read.
 5. **The driver** reads `hakios_board()->…`.
-6. **Tests**: `tests/tools_test.py` for what the tool takes, refuses and writes.
+6. **Tests**: `workbench/tools_test.py` for what the tool takes, refuses and writes.

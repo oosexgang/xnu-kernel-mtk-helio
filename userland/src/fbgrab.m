@@ -1,11 +1,11 @@
 /*
  * fbgrab -log|-keep NAME [WIDTH [QUALITY]]    the picture on the panel, scaled to WIDTH pixels (default 375: a point a pixel) as a JPEG
- * fbgrab HOST PORT NAME                 ... or whole, as a PNG, sent to HOST:PORT (tools/fbrecv.py) as POST /NAME.png
+ * fbgrab HOST PORT NAME                 ... or whole, as a PNG, sent to HOST:PORT (tools/log/fbrecv.py) as POST /NAME.png
  *
  * The kernel's side is sysctl kern.hakios.fbgrab (bsd/dev/hakios_fbgrab.c): 16 bytes -- width, height, stride, 'BGRA' -- and the rows.
  * fbshot's pictures go through the log too but are 60 to 130 pixels wide, a blur. The JPEG goes to the console in base64 lines
  *     fbjpg NAME I/N: ...
- * and the last 261 KB of the console come back with the run, so a picture of 60 to 100 KB is the last thing a run says; tools/fbjpg.py
+ * and the last 261 KB of the console come back with the run, so a picture of 60 to 100 KB is the last thing a run says; tools/log/fbjpg.py
  * puts it together. (A network way needs the Mac on the phone's Wi-Fi: not so, run 759.)
  */
 #import <CoreGraphics/CoreGraphics.h>

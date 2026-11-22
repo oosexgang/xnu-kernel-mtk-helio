@@ -1,5 +1,5 @@
 /*
- * libhakiosmali.dylib: tools/mesa/air/air_metal.h's contract (rwa_*) on the Mali-G52, with this library writing the job
+ * libhakiosmali.dylib: userland/tools/mesa/air/air_metal.h's contract (rwa_*) on the Mali-G52, with this library writing the job
  * descriptors itself -- the same calls libhakiosair.dylib serves through Gallium's panfrost, so that the Metal plug-in
  * (src/hakiosmetal.m, userland/src/metal) draws the window server's frames through either, by boot-arg mali_native=1.
  *

@@ -6,7 +6,7 @@
  * work can be built and read without the Objective-C runtime around it.
  *
  * Moved here so far: the compiler library (libhakiosair.dylib, the contract of
- * tools/mesa/air/air_metal.h) and buffers. The plug-in used to carry a copy of air_metal.h's
+ * userland/tools/mesa/air/air_metal.h) and buffers. The plug-in used to carry a copy of air_metal.h's
  * declarations "because build.sh knows nothing of Mesa's tree"; it is the same repository, so the
  * core includes the original, and a call's type is the library's own (__typeof__ of its prototype)
  * rather than a second spelling that can drift from it.

@@ -24,7 +24,7 @@ int hm_compile_kernel(const char *name, unsigned gpu_id, struct hm_kernel *out, 
 void hm_kernel_free(struct hm_kernel *k);
 /*
  * A compute kernel of Apple's: function ENTRY of the .metallib LIB (AIR, LLVM bitcode), translated to NIR by the AIR
- * frontend (tools/mesa/air, nir_air.h), its device buffers made global memory at addresses the driver pushes
+ * frontend (userland/tools/mesa/air, nir_air.h), its device buffers made global memory at addresses the driver pushes
  * (uniform buffer HM_AIR_SYSVAL_UBO, 8 bytes a Metal buffer index), compiled by Mesa's Bifrost compiler. *OUT as
  * hm_compile_kernel's; *DEVICE_BUFFERS the Metal indices of the device buffers it reads or writes (bit n: buffer n),
  * *CONSTANT_BUFFERS those it reads as constants (uniform buffer n). 0, or -1 with WHY (the frontend's refusal by

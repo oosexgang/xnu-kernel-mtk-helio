@@ -10,11 +10,11 @@ SHELL := /bin/bash
 help:
 	@echo "make check          lint + boards + test: everything that needs no phone (what CI runs)"
 	@echo "make device DEVICE=NAME   bring a phone's package in from the devices branch (tools/device.py add)"
-	@echo "make test           host tests of the tools; the loader compiled for a made-up phone (tests/run.sh)"
+	@echo "make test           host tests: the tools, the drivers against models, the loader for a made-up phone (workbench/run.sh)"
 	@echo "make lint           syntax of every shell and Python script, shellcheck, nothing unpublishable"
 	@echo "make boards         validate the device packages and soc/, write what the code is built with (build/boards)"
 	@echo "make verify-kernel  Apple's release + overlay + patches assemble and export back unchanged (network)"
-	@echo "make syntax-check   every overlay file through clang -fsyntax-only, in seconds (TREE=../xnu-8796-hakios)"
+	@echo "make syntax-check   every overlay file through clang -fsyntax-only, in seconds (TREE=an assembled tree)"
 	@echo "make docs           docs/boot-args.md from the kernel's sources (tools/bootargs.py --write)"
 	@echo "make kernel         build the kernel (kernel/build.sh; docs/building.md says what it needs)"
 	@echo "make loader         build the loader for the phone whose package is here (loader/build.sh)"
@@ -24,7 +24,7 @@ check: lint boards-check test
 
 .PHONY: test
 test:
-	tests/run.sh
+	workbench/run.sh
 
 .PHONY: lint
 lint:
@@ -40,7 +40,7 @@ docs:
 	tools/bootargs.py --write
 
 .PHONY: syntax-check
-TREE ?= ../xnu-8796-hakios
+TREE ?= ../xnu-12377-hakios
 syntax-check:
 	kernel/syntax-check.sh --tree $(TREE)
 

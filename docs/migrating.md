@@ -20,7 +20,7 @@ is rebased onto it, work is carried over.
 | `mtkloader/touchfw.h`, `mtkloader/font8x16.h` | Not in the repository. `loader/build.sh` makes them in `build/loader/` from your phone's firmware file (`fw-touch/hdl_firmware.img`) and, on macOS, from a system font |
 | `mtkloader/camjn1.h`, `camrx.h` | `build/loader/camjn1.h`, `camrx.h` (`tools/camtable.py`, `tools/camrx.py`) |
 | `tools/chainboot.py`, `xnuloader/mkpayload.py`, `xnuloader/identity.h`, `mkidentity.py` | `loader/chainboot.py`, `loader/mkpayload.py`, `loader/identity.h`, `loader/mkidentity.py` |
-| `XL_RAMDISK=userland/root.apfs ./xl_x6826b build` | `tools/mkpayload.sh` (the payload is the kernel and the small root; the UEFI loader is no longer packed into it) |
+| `XL_RAMDISK=userland/root.apfs ./xl_x6826b build` | `tools/run/mkpayload.sh` (the payload is the kernel and the small root; the UEFI loader is no longer packed into it) |
 | `build-payload.bin`, `xnu-flashed-slot_a.img` | `build/payload.bin`, `build/boot_a.img` |
 | `xnu-deps/host/zig` | `build/zig` (`tools/get-zig.sh`) |
 | `ios165/` | `system/` (the scripts and, ignored by git, what they fetch) |
@@ -73,7 +73,7 @@ after it.
 | The request in pmsg: `DARWIN-REDWOOD:BOOT-XNU`, `:GPU-PROBE`, `:CAM-PROBE` | `HAKIOS:BOOT-XNU`, `HAKIOS:GPU-PROBE`, `HAKIOS:CAM-PROBE` |
 | `REDWOOD_*` macros and header guards, `redwood_*()` functions | `HAKIOS_*`, `hakios_*()`; `MTK_*`, `mtk_*()` where the code is MediaTek's |
 | make variable `REDWOOD_OBJECTS` | `HAKIOS_OBJECTS` |
-| `userland/src/redwoodmetal.m`, `redwood_*.h`, `tools/mesa/redwood-drm/`, `panfrost-redwood-perf.patch` | `hakiosmetal.m`, `hakios_*.h`, `tools/mesa/hakios-drm/`, `panfrost-hakios-perf.patch` |
+| `userland/src/redwoodmetal.m`, `redwood_*.h`, `userland/tools/mesa/redwood-drm/`, `panfrost-redwood-perf.patch` | `hakiosmetal.m`, `hakios_*.h`, `userland/tools/mesa/hakios-drm/`, `panfrost-hakios-perf.patch` |
 
 Kernel files (`kernel/overlay/bsd/dev/`, headers in `bsd/sys/`):
 
@@ -111,5 +111,5 @@ git status                                          # new files under kernel/ove
   here) and its output is in `build/loader/`.
 - **The run cycle checks the phone's identity** (`[boot] android_device`) besides the serial number,
   the slot and the payload, before it writes `boot_a`.
-- **An image and a kernel must be of the same side of the rename**: `tools/system-flash.sh` again
+- **An image and a kernel must be of the same side of the rename**: `tools/run/system-flash.sh` again
   after moving to this repository.

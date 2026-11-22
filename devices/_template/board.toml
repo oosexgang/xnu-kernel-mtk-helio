@@ -42,7 +42,7 @@ features = []
 # pmsg = 0x4d0e0000                 # the pmsg zone, after the ftrace zone
 # pmsg_size = 0x10000
 # dump = 0x4d010000                 # the dump zone (4 KB records), the region's start: optional; the pictures of
-# dump_size = 0x8f000               # boot-arg fbframes= go out in it (tools/fbframes.py)
+# dump_size = 0x8f000               # boot-arg fbframes= go out in it (tools/log/fbframes.py)
 
 # The panel and LK's framebuffer.
 # [display]
@@ -70,7 +70,7 @@ features = []
 # wifi_dma = 0x51400000             # wifi-reserve-memory
 # wifi_dma_size = 0x100000
 
-# A plain run (tools/xnu-cycle.sh).
+# A plain run (tools/run/xnu-cycle.sh).
 # [boot]
 # android_device = "codename"       # `adb shell getprop ro.product.device`: the tools refuse any other phone
 # cpus = 4                          # how many cores the kernel is given (one is always kept for the loader's watcher)

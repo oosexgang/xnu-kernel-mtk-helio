@@ -1,6 +1,6 @@
 /*
  * Boot-arg rwm_capture=TEXT: one pipeline whose label has TEXT in it, and one draw of it, written whole into the host's
- * kept lines ("!!cap ..."), for tools/air/ca27_replay.c to draw again on the Mac through the same library on softpipe.
+ * kept lines ("!!cap ..."), for userland/tools/air/ca27_replay.c to draw again on the Mac through the same library on softpipe.
  * The 27 release's image layers come out with their colour near zero whatever their textures hold (runs 55 to 61), and
  * finding which step of the shader makes it so is done there and not with a run on the phone for every guess.
  *

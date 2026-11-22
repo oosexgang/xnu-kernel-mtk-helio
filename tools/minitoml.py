@@ -8,7 +8,7 @@ still ships 3.9, and nothing here may ask for a package to be installed, so this
 files there: tables ([a], [a.b]), arrays of tables ([[a]]), keys with strings ("..." with the usual
 escapes, '...'), integers (decimal, 0x, 0o, 0b, with _), true and false, and arrays of those, which may
 run over several lines. Dates, floats, inline tables, multi-line strings and dotted keys are not read:
-a file that uses one is refused with its line, never half understood. tests/tools_test.py holds the
+a file that uses one is refused with its line, never half understood. workbench/tools_test.py holds the
 two readers against each other on every TOML file of the repository.
 """
 import re

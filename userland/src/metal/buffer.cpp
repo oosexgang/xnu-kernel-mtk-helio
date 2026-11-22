@@ -1,7 +1,7 @@
 /*
  * A Metal buffer on this port: Mesa's memory when the compiler library is loaded, else a GEM
  * allocation of the kernel's own gpu driver made and mapped exactly as Mesa's shim does it
- * (tools/mesa/hakios-drm/hakios_drm.c): kMsmGemNew for the memory, MSM_INFO_GET_IOVA through
+ * (userland/tools/mesa/hakios-drm/hakios_drm.c): kMsmGemNew for the memory, MSM_INFO_GET_IOVA through
  * kMsmGemInfo for the address the GPU sees, IOConnectMapMemory64 for the address this processor
  * sees, kDrmGemClose to give it back (iokit/Kernel/HakiosGPU.cpp has the numbers).
  */

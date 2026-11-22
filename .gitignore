@@ -7,9 +7,9 @@ __pycache__/
 
 # what the builds make: the board tables, the loader, the payload, the boot image, zig
 /build/
-# built by system27/mtk27.sh env
-/system27/tools/pacstrip
-/system27/userland/obj26
+# built by darwin/mtk27.sh env
+/darwin/tools/pacstrip
+/darwin/userland/obj26
 # device packages brought in with tools/device.py: they are kept on the devices branch, not here
 /devices/*/
 !/devices/_template/
@@ -17,7 +17,7 @@ __pycache__/
 /backup/
 /logs/
 /jb/
-fw-*/
+/fw-*
 
 # of kernel/deps only what is ours; setup.sh fetches and builds the rest
 /kernel/deps/*
@@ -49,17 +49,20 @@ fw-*/
 !/kernel/deps/build/lzbitmap/libzbitmap.c
 !/kernel/deps/build/lzbitmap/libzbitmap.h
 
-# the system image's files are fetched by system/fetch.sh from their maker and stay on your machine
-/system/*
-!/system/fetch.sh
-!/system/*.py
+# the system image's files are fetched by darwin/system/fetch.sh from their maker and stay on your machine
+/darwin/system/*
+!/darwin/system/fetch.sh
+!/darwin/system/*.py
 
 # of userland only sources; what build.sh makes there is ignored
 /userland/*
+!/userland/README.md
 !/userland/build.sh
 !/userland/*.py
 !/userland/rc.*
-!/userland/com.*.plist
+!/userland/jobs/
+!/userland/launchd/
+!/userland/tools/
 !/userland/src/
 !/userland/libmini/
 !/userland/var/

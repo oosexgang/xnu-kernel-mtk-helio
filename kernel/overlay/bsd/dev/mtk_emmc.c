@@ -457,7 +457,7 @@ find_partition(void)
 		at += n * bs;
 	}
 	if (at == 0) {
-		printf("emmc: no APFS container in %s (tools/system-flash.sh writes it)\n", EMMC_PART);
+		printf("emmc: no APFS container in %s (tools/run/system-flash.sh writes it)\n", EMMC_PART);
 		return false;
 	}
 	printf("emmc: %s at block %llu, %llu MB of %llu MB in its APFS containers\n", EMMC_PART, emmc_lba, at >> 20,

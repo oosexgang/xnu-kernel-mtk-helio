@@ -380,7 +380,7 @@ connsys_file(const char *name, uint32_t *size)
 
 	/*
 	 * The system image's /fw/connsys (16.5: userland/build.sh), else the small image's (the 27 release, whose system
-	 * image is made without it: system27/userland/root26-sys.sh puts the files into the tree mounted at /hakios).
+	 * image is made without it: darwin/userland/root26-sys.sh puts the files into the tree mounted at /hakios).
 	 */
 	snprintf(path, sizeof(path), "/fw/connsys/%s", name);
 	if (vnode_lookup(path, 0, &vnode, context) != 0) {

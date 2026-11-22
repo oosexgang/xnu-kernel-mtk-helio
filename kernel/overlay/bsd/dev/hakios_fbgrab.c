@@ -1,7 +1,7 @@
 /*
  * sysctl kern.hakios.fbgrab: the picture on the panel, whole (what fbshot puts in the log 60 to 130 pixels wide).
  * Read it with a buffer big enough: 16 bytes -- width, height, bytes a row, 'BGRA' -- and the rows, B G R A in memory
- * (src/fbgrab.m reads it, makes a PNG and sends it over the network to tools/fbrecv.py). EINVAL if no frame has been shown yet.
+ * (src/fbgrab.m reads it, makes a PNG and sends it over the network to tools/log/fbrecv.py). EINVAL if no frame has been shown yet.
  */
 #include <kern/kalloc.h>
 #include <libkern/libkern.h>

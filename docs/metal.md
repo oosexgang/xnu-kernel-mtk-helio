@@ -2,7 +2,7 @@
 
 Разбор: что в the system image 20F66 просит Metal, где проходит граница, которую пришлось бы реализовать, и
 стоит ли её переходить. Всё, что ниже, проверено по извлечённой системе
-(`system/rootfs`, кэш `system/20F66__iPhone10,3_6/dyld_shared_cache_arm64`), по исходникам порта и
+(`darwin/system/rootfs`, кэш `darwin/system/20F66__iPhone10,3_6/dyld_shared_cache_arm64`), по исходникам порта и
 по журналам прогонов; адреса — невыровненные (unslid) адреса этого кэша.
 
 Коротко, в четырёх пунктах:
@@ -590,7 +590,7 @@ metal_test:   CoreImage rendered: first pixel 0 229 255 255
 (`4d544c42`); у пяти `*_rt.metallib` внутри `AGXMetalA11.bundle` магия другая — это внутренние
 библиотеки драйвера AGX, не AIR.
 
-Разбор контейнера (разбирает его `tools/metallib.py`; проверено на
+Разбор контейнера (разбирает его `userland/tools/metallib.py`; проверено на
 `Extensions/AppleMetalGLRenderer.bundle/default.metallib`, 1 111 748 байт):
 
 | смещение | что |

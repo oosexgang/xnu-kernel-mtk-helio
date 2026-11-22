@@ -6,7 +6,7 @@
  * out of LIBRARY and its shape, as a run with boot-arg rwm_capture_gen=1 said them ("!!gen LABEL ..." in LOG); and
  * first each generic pipeline's BASE, as pipeline.cpp builds it at start (without_generic: constant 0, fc_generic,
  * made 0; no configuration) -- 34 stages run 594 still compiled on the phone while it started. With
- * RWA_CACHE_OUT=FILE every stage compiled goes into the stage cache (tools/rwacache.sh). Built by mk-rwa-host.sh.
+ * RWA_CACHE_OUT=FILE every stage compiled goes into the stage cache (userland/tools/rwacache.sh). Built by mk-rwa-host.sh.
  */
 #include <stdbool.h>
 #include <stdio.h>

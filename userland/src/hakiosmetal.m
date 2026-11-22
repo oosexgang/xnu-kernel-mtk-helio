@@ -23,7 +23,7 @@
  *     MTLAddDevice read is conformsToProtocol:. One call says the same thing truthfully.
  *     MTLDeviceSPI adopts MTLDevice, so one declaration satisfies both.
  *   - -initWithAcceleratorPort: opens this port's OWN gpu service, `HakiosGPU`, the way
- *     Mesa's shim does (tools/mesa/hakios-drm/hakios_drm.c: IOServiceOpen with type 0,
+ *     Mesa's shim does (userland/tools/mesa/hakios-drm/hakios_drm.c: IOServiceOpen with type 0,
  *     then msm-shaped requests through IOConnectCallStructMethod). That is the road the
  *     resource layer will take, and it already carries Mesa's own dispatches today. The
  *     IOGPU road was measured shut: IOServiceOpen on our IOAcceleratorES service with
@@ -31,7 +31,7 @@
  *
  * The first resource is here too. A Metal buffer on this port is a GEM allocation of the
  * kernel's own gpu driver, made and mapped exactly the way Mesa's shim makes and maps one
- * (tools/mesa/hakios-drm/hakios_drm.c): kMsmGemNew (0x42) for the memory, MSM_INFO_GET_IOVA
+ * (userland/tools/mesa/hakios-drm/hakios_drm.c): kMsmGemNew (0x42) for the memory, MSM_INFO_GET_IOVA
  * through kMsmGemInfo (0x43) for the address the GPU sees, IOConnectMapMemory64 for the
  * address the processor sees, kDrmGemClose (0x09) to give it back. The kernel makes that
  * memory write-combined, with no cache of this processor between the program and what the
@@ -46,7 +46,7 @@
  * those bytes were checked against our own AIR reader over all eleven functions of
  * AV1SW.metallib -- same lengths, same checksums (docs/metal.md 10.12). The front end that
  * reads them lives in Mesa, so the compiling and the dispatching are asked of
- * /hakios/lib/libhakiosair.dylib through the contract in tools/mesa/air/air_metal.h.
+ * /hakios/lib/libhakiosair.dylib through the contract in userland/tools/mesa/air/air_metal.h.
  *
  * That library is loaded with dlopen rather than linked, for a measured reason: the device
  * object must exist even when there is no GPU. The port starts the Adreno only with the
@@ -109,7 +109,7 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 
-/* The contract with Mesa's side is tools/mesa/air/air_metal.h itself, through the core
+/* The contract with Mesa's side is userland/tools/mesa/air/air_metal.h itself, through the core
  * (src/metal/rwm.h): this file used to carry a copy of its declarations. */
 #include "metal/rwm.h"
 
@@ -125,7 +125,7 @@
 
 /*
  * The library's MTLVertexFormat table, checked against Apple's own header HERE, where the
- * SDK is in hand: tools/mesa/air/air_metal.c carries those numbers as literals (it has no
+ * SDK is in hand: userland/tools/mesa/air/air_metal.c carries those numbers as literals (it has no
  * Metal headers to read them from), this file is compiled against
  * iPhoneOS16.5.sdk/System/Library/Frameworks/Metal.framework/Headers/MTLVertexDescriptor.h,
  * and a disagreement between the two would be a vertex fetched in the wrong format rather
@@ -221,7 +221,7 @@ _Static_assert((int)MTLColorWriteMaskNone == 0 && (int)MTLColorWriteMaskAlpha ==
  * air_resource growing by eight bytes so that every resource after the first was read
  * eight bytes early.
  *
- * The numbers below are the same numbers asserted in tools/mesa/air/air_metal.c against
+ * The numbers below are the same numbers asserted in userland/tools/mesa/air/air_metal.c against
  * the library's own definitions. Neither file can see the other's structs, so this is
  * not a comparison -- it is two independent statements of one agreement, and an edit to
  * one side alone fails to build on that side. The offsets are asserted as well as the
@@ -888,7 +888,7 @@ rw_on_big_stack(void (^work)(void))
  *
  *   recorded  every pipeline of CoreAnimation's a process builds is kept as a recipe -- the label
  *             and the shape's non-zero words -- and said, a piece at a time, into the log when
- *             notification com.hakios.rwm_recipes comes (rwtouch notify); tools/rwm-recipes.py
+ *             notification com.hakios.rwm_recipes comes (rwtouch notify); userland/tools/rwm-recipes.py
  *             puts them together into userland/share/rwm-recipes.txt for the image;
  *   warmed    at start each process reads its own section of that file ("[backboardd]", "[SpringBoard]"
  *             ...: run 333 showed SpringBoard and the posters build their own) and a thread of its own
@@ -3828,7 +3828,7 @@ hakios_clear_semaphore_debt(id commandBuffer)
  * it, and it is printed out of these constants, so the line cannot drift from what -status
  * answers. A log without that line is older than this change, and in it "status 6" is this
  * completion, "status 4" is a buffer that was only submitted, and 2 and 3 do not occur at all.
- * That is the rule tools/air/metalcheck.py reads a log by, and the measurement that makes it
+ * That is the rule userland/tools/air/metalcheck.py reads a log by, and the measurement that makes it
  * safe: over all 141 logs in logs/ the only statuses the test ever printed are 5 (128 times) and
  * 6 (990 times) -- never 4.
  *

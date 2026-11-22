@@ -13,7 +13,7 @@
  * write-combined, so what the program writes goes to memory where the GPU reads it. A job chain is
  * run to its end before the call returns, so waiting for a buffer has nothing left to wait for, and
  * the synchronisation objects Mesa asks about can all be answered "signalled" in the program
- * (tools/mesa/hakios-drm). Not here yet: jobs that overlap, an address space for each program,
+ * (userland/tools/mesa/hakios-drm). Not here yet: jobs that overlap, an address space for each program,
  * interrupts, buffers shared between programs.
  */
 

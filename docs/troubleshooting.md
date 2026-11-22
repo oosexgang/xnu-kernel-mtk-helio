@@ -2,7 +2,7 @@
 
 What went wrong on the first phone, what it looked like, and what fixed it. A line here comes from a
 run or a build that showed it; nothing is listed from guesswork. Most of what a run does is read
-from its log (`XNU_LOG_OUT=...` of `tools/xnu-cycle.sh`), not from the screen.
+from its log (`XNU_LOG_OUT=...` of `tools/run/xnu-cycle.sh`), not from the screen.
 
 ## The board files and the tools
 
@@ -13,7 +13,7 @@ from its log (`XNU_LOG_OUT=...` of `tools/xnu-cycle.sh`), not from the screen.
   the file does not cause: the file needs the real build's generated headers. Add it to
   `kernel/syntax-check.skip`. A file on that list that compiles fails the check, so the list stays
   short.
-- **`tests/bootargs_test.py`: "run `make docs`".** A boot argument's read or its comment changed;
+- **`workbench/bootargs_test.py`: "run `make docs`".** A boot argument's read or its comment changed;
   `make docs` writes [boot-args.md](boot-args.md) again.
 - **On a Mac, a script fails with "mapfile: command not found" or "wait: -n: invalid option".** macOS
   has bash 3.2. The scripts here do without both; a new one must too.
@@ -41,12 +41,12 @@ from its log (`XNU_LOG_OUT=...` of `tools/xnu-cycle.sh`), not from the screen.
   booted. Run again.
 - **`payload: ITS SUM IS NOT ITS HEADER'S: not used`.** The payload in the system partition's tail is
   not the one its header describes: a write was cut short, or the partition was written over.
-  Write it again with `tools/payload-flash.sh`; it reads back what it wrote.
+  Write it again with `tools/run/payload-flash.sh`; it reads back what it wrote.
 - **`payload: none in the tail of xnusys`.** The boot image was built with `HAKIOS_PAYLOAD=flash`
-  and the payload was never written. `tools/xnu-cycle.sh` writes it when `HAKIOS_PAYLOAD=flash` is set
+  and the payload was never written. `tools/run/xnu-cycle.sh` writes it when `HAKIOS_PAYLOAD=flash` is set
   for the run too.
 - **launchd panics in the key bag step.** The image has the key store in it and the run did not
-  pass `aks_keys=1`. The image and the boot arguments must agree: `tools/image.sh bluetooth` with
+  pass `aks_keys=1`. The image and the boot arguments must agree: `tools/run/image.sh bluetooth` with
   the arguments [building.md](building.md#wi-fi-bluetooth-and-metal) gives.
 
 ## What the screen shows
@@ -56,7 +56,7 @@ from its log (`XNU_LOG_OUT=...` of `tools/xnu-cycle.sh`), not from the screen.
 - **No wallpaper.** `sb_wallpaper=0` was among the arguments: it turns the wallpaper off. Leave it
   out.
 - **Pictures from a run.** `/hakios/bin/fbgrab -log NAME` in the run's job list puts a JPEG in the
-  log; `python3 tools/fbjpg.py LOG OUT.jpg NAME` takes it out. The log keeps its last 256 KB, which
+  log; `python3 tools/log/fbjpg.py LOG OUT.jpg NAME` takes it out. The log keeps its last 256 KB, which
   holds about two pictures, so take them as the last thing a run does.
 
 ## Hardware

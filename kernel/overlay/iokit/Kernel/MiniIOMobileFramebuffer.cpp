@@ -171,7 +171,7 @@ static TUNABLE(uint32_t, gFBFit, "fbfit", 0);
  * seconds, every frame that is shown is also kept -- one pixel of every REC_STEP in each
  * direction, three bytes a pixel -- in a piece of memory of M megabytes (default 480, which
  * is 520 frames) that is left in place when the kernel returns to the loader. The loader
- * hands it to the host ("xl recording"), where tools/recording.py makes a video of it.
+ * hands it to the host ("xl recording"), where tools/log/recording.py makes a video of it.
  *
  *   struct rec_header, then per frame: struct rec_frame, width * height pixels (R, G, B)
  *
@@ -258,7 +258,7 @@ swapQueue(void)
  * Boot-arg touch_lat=1: a line for every swap handed over ("tl: s ID at US") and for every frame
  * put on the panel ("tl: v ID ready US shown US done US": the GPU done with it, its beat come, the
  * pixels in the panel's memory), in microseconds of mach_absolute_time, for measuring how long a
- * touch takes to show (tools/latency.py; the touch's own lines: bsd/dev/hakios_input.c).
+ * touch takes to show (tools/log/latency.py; the touch's own lines: bsd/dev/hakios_input.c).
  */
 static TUNABLE(uint32_t, gTouchLat, "touch_lat", 0);
 
@@ -1163,7 +1163,7 @@ IOMobileFramebuffer::reportFrameTimes(void)
 
 /*
  * Boot-arg fbshot=SECONDS: the frame, 60 pixels wide, red green blue, in base64 on lines that begin
- * "fbshot N:" (tools/fbshot.py makes a picture of them): what the screen shows, for a run nobody
+ * "fbshot N:" (tools/log/fbshot.py makes a picture of them): what the screen shows, for a run nobody
  * watches. Every minute from SECONDS of frames on, so that the end of the log has one.
  */
 static bool shot_keep;          /* (set around one shot_pixels: its lines go to the host's kept lines too) */
@@ -1403,7 +1403,7 @@ keepShotFired(thread_call_param_t fb, thread_call_param_t unused)
  * Boot-arg fbframes=SECONDS[,SECONDS...] (up to six, uptime): the picture on the panel at each of those times, every
  * fbframes_step-th pixel across and down (4 by default: 187 x 406 of the 750 x 1624 panel), as RGB565, into
  * hakios_host_frames (bsd/dev/mtk_mali.c), which mtkloader lays over ramoops' dump zone for the host
- * (tools/fbframes.py). A picture that does not fit what is left is not taken, and says so.
+ * (tools/log/fbframes.py). A picture that does not fit what is left is not taken, and says so.
  */
 extern "C" char hakios_host_frames[];
 extern "C" uint32_t hakios_host_frames_len;
@@ -2513,7 +2513,7 @@ MiniIOMobileFramebufferShow(const uint8_t * pixels, uint32_t width, uint32_t hei
 	}
 	/*
 	 * Boot-arg fbshot_panel=1: what such a picture put on the panel, 90 pixels wide, as
-	 * fbshot's lines (tools/fbshot.py): on the 60th picture and every 400th after, so that a
+	 * fbshot's lines (tools/log/fbshot.py): on the 60th picture and every 400th after, so that a
 	 * program repainting for minutes leaves one at the end of the log.
 	 */
 	static uint32_t shown;

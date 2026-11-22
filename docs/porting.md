@@ -14,8 +14,8 @@ order it was needed, and where each thing is in the tree. Expect a step it does 
 | --- | --- |
 | The kernel: Apple's xnu-8796.121.2 + `kernel/patches/` + `kernel/overlay/`, built as `DEVELOPMENT_ARM64_BCM2837` | Your phone's package: `devices/NAME/board.toml` (the table below) |
 | GICv3, PSCI cores, the return to the loader, the platform expert | `soc/SOC.toml`, if your chip has none yet |
-| The loader, the image format and its packer (`loader/chainboot.py`), the run cycle (`tools/xnu-cycle.sh`, `tools/boot-xnu.sh`) | The storage driver if yours is not an eMMC on MSDC0 left ready by LK |
-| The user space side: `system/fetch.sh`, `userland/build.sh`, the inserted libraries | The touch controller, the GPU's power sequence, the keys, the radios, the camera: a driver each, with a feature |
+| The loader, the image format and its packer (`loader/chainboot.py`), the run cycle (`tools/run/xnu-cycle.sh`, `tools/run/boot-xnu.sh`) | The storage driver if yours is not an eMMC on MSDC0 left ready by LK |
+| The user space side: `darwin/system/fetch.sh`, `userland/build.sh`, the inserted libraries | The touch controller, the GPU's power sequence, the keys, the radios, the camera: a driver each, with a feature |
 | The log's road back through ramoops (`loader/mtkdbg.h`) | The addresses of the ramoops zones and of LK's framebuffer |
 
 A phone with the same chip and the same parts is a package and nothing else. A phone with another
@@ -50,11 +50,11 @@ boot ROM -> preloader -> LK (stock, untouched)
 
 - `loader/chainboot.py` packs the image; the arm64 header's `res2` is the length of Android's Image and `res3` the payload's offset
   (`loader/start.S`). Android's ramdisk, dtb and command line are kept as they were.
-- The payload is `build/payload.bin`, made by `loader/mkpayload.py` as `tools/mkpayload.sh` calls it. The
+- The payload is `build/payload.bin`, made by `loader/mkpayload.py` as `tools/run/mkpayload.sh` calls it. The
   loader takes two of its entries: `kernel` and `ramdisk` (the small root, md1). `loader/build_flashed.py` then makes
   `build/boot_a.img`.
 - **The default is Android.** XNU starts only when the loader finds the words `HAKIOS:BOOT-XNU` in ramoops' pmsg zone, written from
-  Android by `tools/boot-xnu.sh`, and takes them away: the boot after XNU is Android again. A kernel that hangs costs a power cycle.
+  Android by `tools/run/boot-xnu.sh`, and takes them away: the boot after XNU is Android again. A kernel that hangs costs a power cycle.
   (`-DMENU_DEFAULT_XNU=1` reverses that; an image that always started XNU, with no watchdog, is how the phone was trapped.)
 - The loader runs with the MMU off, so all memory is device memory: no SIMD, no unaligned access, no compiler builtins
   (`-mgeneral-regs-only -mstrict-align -fno-builtin`, `loader/build.sh`). Code added to it must hold to that.
@@ -123,7 +123,7 @@ Each step has the check that proves it. Do not start a step whose predecessor's 
 2. **The loader's own log.** Build `mtkloader` with `-DMSDC_TEST=1` (the next step's test: it starts no kernel). *Check:* its lines in the same file. Now every later
    step has a voice: the rule is that code says what it is about to do **before** anything that can hang, so the last line of a log is the step
    that hung.
-3. **The flash.** `tools/msdc-test.sh` (`-DMSDC_TEST=1`): the loader reads the GPT through `msdc.h`, in PIO mode, with the card as LK left it:
+3. **The flash.** `tools/run/msdc-test.sh` (`-DMSDC_TEST=1`): the loader reads the GPT through `msdc.h`, in PIO mode, with the card as LK left it:
    nothing is initialised. *Check:* `eMMC read test` in the log with your partition names. On a UFS phone this step is a driver you write
    (`bsd/dev/hakios_ufs.c` is the Qualcomm phone's and is a place to start reading, not a fit).
 4. **Timers and interrupts, before the kernel.** `-DTIMER_PROBE=1` sets the GIC up as XNU does and arms each timer. Two things stopped the first phone
@@ -133,7 +133,7 @@ Each step has the check that proves it. Do not start a step whose predecessor's 
      (`gic_fix_eoimode`) and patches one instruction of the kernel's `gic_v3_irq_cpu_init` so that every other core clears it too.
    - XNU's timer is the virtual one (PPI 27). The loader prints CNTPCT against CNTVCT and the exception level it was started at.
    *Check:* the probe's lines name a timer that was taken.
-5. **The kernel's first lines.** Build the kernel (`kernel/README.md`), make the payload, run `tools/xnu-cycle.sh` with `XNU_ARGS="cpus=1"`. There is
+5. **The kernel's first lines.** Build the kernel (`kernel/README.md`), make the payload, run `tools/run/xnu-cycle.sh` with `XNU_ARGS="cpus=1"`. There is
    no serial port, so the loader finds the kernel's console functions by symbol and points them at its own log buffer (`run_xnu`: the patches of
    `vmapple_uart`). If the kernel says nothing, `-DXNU_CHECKPOINT=n` makes it return at the n-th `LOADER_CHECKPOINT` of `osfmk/arm64/start.s` /
    `arm_init.c`, and the log says `(checkpoint)`: bisect with that. `-DXNU_VERBOSE=1` puts the text console on the panel; it is slow and the system cannot
@@ -144,18 +144,18 @@ Each step has the check that proves it. Do not start a step whose predecessor's 
 7. **The other cores.** Raise `cpus=` one at a time. `XNU_CORES` and `cpus=` must be the same number (`xnu-cycle.sh` keeps them so): the tree
    offers exactly that many, from the head of `core_order`, and the next one is the watcher's. A watcher on a core the kernel wants hangs every
    rendezvous. *Check:* each processor checks in, in the log.
-8. **The root.** `system/fetch.sh` (your own download of the system image 20F66, 20F66), `userland/build.sh` for `system.apfs`, the partition
+8. **The root.** `darwin/system/fetch.sh` (your own download of the system image 20F66, 20F66), `userland/build.sh` for `system.apfs`, the partition
    (`tools/gpt-carve.py` writes a new GPT **to files**; putting it on the phone is your step and the one that can lose `userdata`), then
-   `tools/system-flash.sh`. With `emmc_root=1` the kernel reads the partition itself (`bsd/dev/mtk_emmc.c`, the measurements (the journal `x6826b-emmc.md` of the package `x6826b`):
+   `tools/run/system-flash.sh`. With `emmc_root=1` the kernel reads the partition itself (`bsd/dev/mtk_emmc.c`, the measurements (the journal `x6826b-emmc.md` of the package `x6826b`):
    holding the image in DRAM instead cost 2.5 GB wired and 203 s of every boot). *Check:* `launchd` starts; then the home screen appears on
    LK's framebuffer, drawn by the CPU.
 9. **The screen as the system wants it.** LK's layer has per-pixel alpha on and the kernel's console writes pixels with alpha 0: nothing is seen. The
    loader switches the alpha off and the other LK layers too. If your panel is command mode and not video mode, pixels written into the
    framebuffer do not appear by themselves: that was not met here.
-10. **Touch.** Probe from the loader first (`tools/touch-probe.sh`, `-DTOUCH_PROBE=1`): a cycle is four minutes and no kernel is rebuilt. Then
+10. **Touch.** Probe from the loader first (`tools/run/touch-probe.sh`, `-DTOUCH_PROBE=1`): a cycle is four minutes and no kernel is rebuilt. Then
     the kernel driver has one entry point, `hakios_touch_post(type, finger, x, y)`. The first phone's controller (TD4160, `mtk_tcm.c`) keeps its
     firmware in RAM, so the loader uploads it on the way (`tcm.h`); yours may not need that.
-11. **The keys and the clocks** (`mtk_keys.c`, through the PMIC wrapper), **the GPU** (`tools/gpu-probe.sh`, then `mtk_mali.c`, with Mesa's
+11. **The keys and the clocks** (`mtk_keys.c`, through the PMIC wrapper), **the GPU** (`tools/run/gpu-probe.sh`, then `mtk_mali.c`, with Mesa's
     panfrost in user space), **the sensor hub** (`mtk_scp.c`, [sensors](the journal of the first phone: sensors)).
     `mtk_cpufreq=` and `mali_mhz=` change PLLs and, above some points, voltages: read your chip's table first.
 12. **The radios, the camera, the battery**: [Wi-Fi](the journal of the first phone: wifi) (CONNSYS from the phone's own firmware), [Bluetooth](bluetooth-porting.md),
@@ -170,8 +170,8 @@ system image in its partition and your boot image in `backup/`. [building.md](bu
 export HAKIOS_SERIAL=<your phone's adb serial>          # never in a file
 kernel/build.sh -j8 -k                                   # the kernel (kernel/README.md for the first time)
 ./userland/build.sh                                     # the small root, userland/root.apfs (its head comment lists the switches)
-tools/mkpayload.sh         # the payload: kernel + the small root
-XNU_LOG_OUT=logs/run1.log tools/xnu-cycle.sh      # the board file's [boot]: 120 s, cpus=4 touchscreen=2 mali=1 fbscale=2 fbfit=3
+tools/run/mkpayload.sh         # the payload: kernel + the small root
+XNU_LOG_OUT=logs/run1.log tools/run/xnu-cycle.sh      # the board file's [boot]: 120 s, cpus=4 touchscreen=2 mali=1 fbscale=2 fbfit=3
 ```
 
 `xnu-cycle.sh` builds the loader with the run's flags (anything after the script's name goes to the compiler, such as `-DXNU_CHECKPOINT=17`), packs

@@ -362,7 +362,7 @@ media_threads(void *argument)
 		thread_resume(threads[i]);
 		if (depth != 0) {
 			/* no names: a daemon stuck holding dyld's lock would stop dladdr here too. The addresses are
-			 * unslid, for the shared cache to name them on the Mac (tools/cache-name.py) */
+			 * unslid, for the shared cache to name them on the Mac (userland/tools/cache-name.py) */
 			char line[200];
 			size_t used = (size_t)snprintf(line, sizeof(line), "!media t%u", i);
 

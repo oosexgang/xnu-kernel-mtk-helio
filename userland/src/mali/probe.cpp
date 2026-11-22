@@ -10,7 +10,7 @@
 //
 // Each verdict is a line "mali-probe: <stage> PASS|FAIL|MEASURE ..." on standard output (the console, when launchd's
 // job com.hakios.demo runs it from etc/rc.jobs) and, on the phone, the same line with "!!" through kern.hakios.say,
-// which the kernel keeps for the host however long the run (tools/xnu-cycle.sh appends them to the log).
+// which the kernel keeps for the host however long the run (tools/run/xnu-cycle.sh appends them to the log).
 //
 // The expected pixels are computed here from the colour, independently of the library (round(c * 255), to even, as
 // pan_clear.c rounds), and every byte of a target's buffer outside the pixels the frame covers must keep the canary.

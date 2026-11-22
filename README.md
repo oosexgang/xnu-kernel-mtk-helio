@@ -11,8 +11,8 @@ with the kernel's log.
 
 > Experimental. Needs an unlocked bootloader and root under Android.
 > **Two partitions are written**: `boot_a` (the phone's rooted boot image with the loader in front of
-> its kernel, `tools/xnu-cycle.sh`) and a partition of your own for the system image
-> (`tools/system-flash.sh`). Slot `b` is never written. Check that the boot ROM's download mode can
+> its kernel, `tools/run/xnu-cycle.sh`) and a partition of your own for the system image
+> (`tools/run/system-flash.sh`). Slot `b` is never written. Check that the boot ROM's download mode can
 > rewrite `boot_a` **before** the first flash: [the way back](docs/porting.md#what-the-phone-must-allow).
 
 This branch is the project itself, for any phone: the kernel, the loader, the tools, the description
@@ -81,7 +81,7 @@ Then build and run: [docs/building.md](docs/building.md). For a phone that has n
 | `loader/` | `mtkloader`: what LK starts in place of a kernel. Built for one board. |
 | `system/` | Fetching the system image's files from their maker and choosing which go in. |
 | `userland/` | Our own user-space sources: `init`, the libraries inserted into a few processes, the Metal device, the audio plug-in, test programs; `build.sh` makes the two images. |
-| `tests/` | Host tests of the tools, with a made-up phone and chip. |
+| `workbench/` | Host tests of the tools, with a made-up phone and chip. |
 | `tools/` | `boards.py` (board files), `device.py` (packages), the run cycle (`xnu-cycle.sh`, `system-flash.sh`), probes, image and log tools. |
 | `components.toml` | Everything taken from elsewhere, pinned to an exact version. |
 | `docs/` | Documentation. |
@@ -90,7 +90,7 @@ Then build and run: [docs/building.md](docs/building.md). For a phone that has n
 
 Nothing of Apple's and nothing of a phone's vendor. XNU is fetched at build time from Apple's
 open-source release. The system image's files are fetched by you, on your machine, from Apple's own
-server (`system/fetch.sh`); the SDK is yours to install. The phone's firmware (touch controller,
+server (`darwin/system/fetch.sh`); the SDK is yours to install. The phone's firmware (touch controller,
 CONNSYS, sensor hub) and its rooted boot image come off your own phone. No picture of a screen is
 kept: the documents say in words what the screen showed.
 Details: [docs/architecture.md](docs/architecture.md#what-is-not-in-this-repository), [NOTICE.md](NOTICE.md).

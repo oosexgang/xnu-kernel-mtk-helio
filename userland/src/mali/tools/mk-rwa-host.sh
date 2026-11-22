@@ -20,10 +20,10 @@ for e in json.load(open(sys.argv[1])):
         break
 PY
 )
-INC=(-I"$HERE/../../../../tools/mesa/air" -I"$B/src" -I"$S/src" -I"$S/include" -I"$B/src/compiler/nir" -I"$S/src/compiler/nir" -I"$B/src/compiler"
+INC=(-I"$HERE/../../../../userland/tools/mesa/air" -I"$B/src" -I"$S/src" -I"$S/include" -I"$B/src/compiler/nir" -I"$S/src/compiler/nir" -I"$B/src/compiler"
 	-I"$S/src/compiler" -I"$B/src/panfrost/lib" -I"$S/src/panfrost/lib" -I"$B/src/panfrost/lib/genxml"
 	-I"$S/src/panfrost/lib/genxml" -I"$S/src/panfrost" -I"$S/src/panfrost/lib" -I"$B/src/util/format" -I"$S/src/compiler/air"
-	-I"$HERE/../../../../tools/mesa/air" -I"$R")
+	-I"$HERE/../../../../userland/tools/mesa/air" -I"$R")
 W=(-Wall -Wno-unused-function -Wno-missing-braces -Wno-unused-variable)
 for f in rwa_shader rwa_mali rwa_helio kmali; do
 	# shellcheck disable=SC2086
@@ -31,13 +31,13 @@ for f in rwa_shader rwa_mali rwa_helio kmali; do
 done
 # shellcheck disable=SC2086
 clang -std=c11 -O1 -g -Wall $DEFS "${INC[@]}" -c "$HERE/rwacheck.c" -o "$OUT/rwacheck.o"
-# the AIR front end from this tree (tools/mesa/air), not the copy the host Mesa was built with: what the phone
+# the AIR front end from this tree (userland/tools/mesa/air), not the copy the host Mesa was built with: what the phone
 # runs is this tree's, and the stage cache made here must be what the phone would make (libair.a below then
 # gives nothing these do not)
 AIR=()
 for f in air_bitcode air_layout air_metallib air_module air_print air_to_nir air_intrinsics; do
 	# shellcheck disable=SC2086
-	clang -std=c11 -O2 -g -w $DEFS "${INC[@]}" -c "$HERE/../../../../tools/mesa/air/$f.c" -o "$OUT/air-$f.o"
+	clang -std=c11 -O2 -g -w $DEFS "${INC[@]}" -c "$HERE/../../../../userland/tools/mesa/air/$f.c" -o "$OUT/air-$f.o"
 	AIR+=("$OUT/air-$f.o")
 done
 L=$B/src

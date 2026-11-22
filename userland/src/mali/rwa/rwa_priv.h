@@ -1,5 +1,5 @@
 /*
- * libhakiosmali.dylib's insides: the contract of tools/mesa/air/air_metal.h (rwa_*) served by writing the Mali-G52's
+ * libhakiosmali.dylib's insides: the contract of userland/tools/mesa/air/air_metal.h (rwa_*) served by writing the Mali-G52's
  * job descriptors here, with no Gallium and no Panfrost driver underneath -- Mesa's AIR front end and Bifrost compiler
  * make the shaders, genxml's v7 packers lay out the descriptors, and HakiosMali (kmali.h) takes the job chains.
  *

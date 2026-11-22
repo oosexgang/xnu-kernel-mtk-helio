@@ -1,0 +1,9 @@
+# Bluetooth as an application sees it (src/bt_test.m: CoreBluetooth's state and a scan, 120 s), then
+# Settings' Bluetooth page as a picture at the panel's own scale (fbgrab -log, tools/log/fbjpg.py), the last
+# thing of the run. For an image made with BT=1 WIFID=1 RC=rc.launchd.aks and the Bluetooth jobs
+# (docs/building.md, "Bluetooth"); taps are fractions of the screen, for fbscale=2 fbfit=3.
+/hakios/bin/rwtouch wait 100
+/hakios/bin/tolog /hakios/bin/bt_test 120
+/hakios/bin/rwtouch button home wait 3 tap 0.83 0.74 wait 22 tap 0.5 0.44 wait 30
+/hakios/bin/fbgrab -log bluetooth
+/hakios/bin/rwtouch wait 300

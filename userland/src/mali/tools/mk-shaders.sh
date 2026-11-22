@@ -23,7 +23,7 @@ INC=(-I"$B/src" -I"$S/src" -I"$S/include" -I"$B/src/compiler/nir" -I"$S/src/comp
 	-I"$S/src/compiler" -I"$B/src/panfrost/lib" -I"$S/src/panfrost/lib" -I"$B/src/panfrost/lib/genxml"
 	-I"$S/src/panfrost/lib/genxml" -I"$S/src/panfrost" -I"$B/src/util/format")
 # shellcheck disable=SC2086
-clang -std=c11 -O1 -g -w -DPAN_ARCH=7 $DEFS "${INC[@]}" -I"$S/src/compiler/air" -I"$HERE/../../../../tools/mesa/air" \
+clang -std=c11 -O1 -g -w -DPAN_ARCH=7 $DEFS "${INC[@]}" -I"$S/src/compiler/air" -I"$HERE/../../../../userland/tools/mesa/air" \
 	-c "$HERE/../compiler.c" -o "$OUT/compiler.o"
 clang -std=c11 -O1 -g -w -c "$HERE/bishaders.c" -o "$OUT/bishaders.o"
 clang -std=c11 -O1 -g -w -c "$HERE/airkernels.c" -o "$OUT/airkernels.o"

@@ -189,7 +189,7 @@ main(int argc, char **argv)
 			continue;
 		}
 		/* each pipeline in a child: the host's Mesa has not got the phone's compiler patches
-		 * (tools/mesa/panfrost-v7-b8csel.patch), and an assertion there is the host's, not this library's */
+		 * (userland/tools/mesa/panfrost-v7-b8csel.patch), and an assertion there is the host's, not this library's */
 		fflush(stdout);
 		pid_t child = fork();
 		if (child > 0) {

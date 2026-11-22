@@ -641,7 +641,7 @@ own_tree(const char *path, int uid)
 
 /*
  * The rootless prefix of a package manager, /var/jb: the Procursus bootstrap with Sileo in it
- * (tools/mk-jb.sh) rides in the system image as /jb (or in the boot volume, /private/preboot/jb,
+ * (userland/tools/mk-jb.sh) rides in the system image as /jb (or in the boot volume, /private/preboot/jb,
  * with the root on the flash), an APFS image that cannot be written to, while dpkg and apt must be
  * able to write anywhere in their own prefix.
  *
@@ -797,7 +797,7 @@ mount_writable(void)
 	}
 	check(ok, "mount a memory filesystem on /private/var");
 
-	/* the directories of the data volume, as listed in the template that ships with the system (system/mkvarskel.py) */
+	/* the directories of the data volume, as listed in the template that ships with the system (darwin/system/mkvarskel.py) */
 	fd = open(in_image("/etc/var.skel"), O_RDONLY, 0);
 	n = fd >= 0 ? read(fd, skeleton, sizeof(skeleton) - 1) : -1;
 	close(fd);
@@ -847,7 +847,7 @@ mount_writable(void)
 	check(ok && made > 50, "create the directories of the data volume");
 
 	/*
-	 * and the package manager's prefix, when the image was built with one (tools/mk-jb.sh): /jb of
+	 * and the package manager's prefix, when the image was built with one (userland/tools/mk-jb.sh): /jb of
 	 * the system image in RAM, or, with the system's volume on the flash as the root, /private/preboot/jb
 	 * -- the boot volume, where a rootless jailbreak on a reference phone keeps its Procursus too
 	 * (/var/jb leads into /private/preboot there)
@@ -1348,7 +1348,7 @@ configure_inject(void)
 #define MAX_VNODES      32768
 
 /*
- * The launchd job cache from the small image (system27/userland/root26-sys.sh, JOBCACHE=1): etc/xpc/launchd.plist
+ * The launchd job cache from the small image (darwin/userland/root26-sys.sh, JOBCACHE=1): etc/xpc/launchd.plist
  * there is bound over /System/Library/xpc, a union, so that it hides the system volume's and the rest of that
  * directory is seen below it. launchd_cache_loader reads /System/Library/xpc/launchd.plist and no other file
  * (launchd_unsecure_cache=1 is a switch: strtoul of the boot-arg), so without this a job changed -- Wi-Fi's
@@ -1378,7 +1378,7 @@ overlay_job_cache(void)
  * small image has what goes over each at overlay/PATH), bound as a union like the job cache above: what the small image
  * has is seen, the rest below it. For a file or two the system image lacks, without writing a new 4 GB image to the
  * phone -- such as the empty en.lproj a bundle whose development region is "English" needs to find its strings
- * (system27/userland/root26-sys.sh).
+ * (darwin/userland/root26-sys.sh).
  */
 static void
 overlay_dirs(void)

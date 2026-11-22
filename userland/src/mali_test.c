@@ -8,7 +8,7 @@
  * it got; the last line says whether the GPU did the work.
  *
  * The request numbers and structures are Linux's panfrost ones (include/uapi/drm/panfrost_drm.h),
- * as tools/mesa/hakios-drm will send them for Mesa.
+ * as userland/tools/mesa/hakios-drm will send them for Mesa.
  */
 #include <stdio.h>
 #include <stdint.h>

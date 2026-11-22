@@ -3,7 +3,7 @@
 #
 #   hello            one raw-syscall program; as a RAM disk on its own it boots through mockfs
 #   root.apfs        the small image: our init and test programs, etc/rc, and the launchd jobs
-#                    (LaunchDaemons/), an APFS container (../tools/apfs/mkapfs.py). It travels in
+#                    (LaunchDaemons/), an APFS container (../userland/tools/apfs/mkapfs.py). It travels in
 #                    the payload next to the kernel (the second RAM disk, /dev/md1) and is mounted
 #                    on /hakios. Rebuilt every time.
 #                      RC=<file>    etc/rc: rc.launchd (default) hands process 1 to the system's launchd
@@ -19,11 +19,11 @@
 #                                   init hands the list to the kernel (etc/inject.conf -> sysctl kern.exec_inject)
 #                      EXTRA="..."  more programs for /hakios/bin (files on this machine): one-off
 #                                   diagnostics, which a file given as RC_JOBS can then run
-#                      RC_JOBS=<file> what the job com.hakios.demo runs: rc.jobs (default), or
+#                      RC_JOBS=<file> what the job com.hakios.demo runs (a name in jobs/, or a path): rc.jobs (default), or
 #                                   rc.jobs.unlock, which also swipes the lock screen away (for the phone,
 #                                   where nothing else can touch the screen yet)
 #                      GL=1         with an OpenGL ES implementation for the window server: Mesa
-#                                   (tools/mk-mesa.sh fetches and builds it) behind src/eagl.c, as
+#                                   (userland/tools/mk-mesa.sh fetches and builds it) behind src/eagl.c, as
 #                                   lib/libOSMesa.8.dylib (15 MB) and lib/libhakios-gl.dylib. Where the
 #                                   kernel has started the phone's GPU, CoreAnimation then draws with its
 #                                   OpenGL ES renderer, by that GPU (boot-arg gpu=1); anywhere else -- QEMU,
@@ -42,7 +42,7 @@
 #                                   mounted). Not beside GL=1: the two do not fit the 64 MB the loader takes with
 #                                   the kernel. adsp=1 needs none of it: the system image has the firmware in /fw.
 #   system.apfs      the system image, the root filesystem (the resident RAM disk, /dev/md0), an
-#                    APFS container: the part of the system image 20F66 chosen by ../system/select-system.py at
+#                    APFS container: the part of the system image 20F66 chosen by ../darwin/system/select-system.py at
 #                    its real paths, the dyld shared cache, and src/stage0.c as /sbin/launchd (the
 #                    real one is /sbin/launchd.system). 2.5 GB; upload once per loader session with
 #                    `xl ramdisk userland/system.apfs`. Rebuilt when missing, when its inputs
@@ -57,7 +57,7 @@
 #                    the images are then made of them and of the system's files alone (python3)
 #   CHECK=1          check every image (every container) as it is made: apfsck has to find it clean and
 #                    the kernel's apfs_lib has to read every volume back as the directory it was made of
-#                    (../tools/apfs/check-image.sh; the system image takes a few minutes more)
+#                    (../userland/tools/apfs/check-image.sh; the system image takes a few minutes more)
 set -e
 cd "$(dirname "$(readlink -f "$0")")"
 source ../kernel/env.sh
@@ -75,16 +75,16 @@ sha256() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum 
 CC="xnu-clang -arch arm64 -Os -static -nostdlib -ffreestanding -fno-stack-protector -fno-builtin -Wall -Wextra"
 LD="-Wl,-e,_start -Wl,-pagezero_size,0x100000000"
 DYN="xnu-clang -arch arm64 -isysroot ${THEOS:-$HOME/theos}/sdks/iPhoneOS16.5.sdk -O1"
-SYSFILES=../system
+SYSFILES=../darwin/system
 CACHE=$SYSFILES/20F66__iPhone10,3_6
-# system/rootfs and system/cryptex must be this copy's own directories of hard links, the way
+# darwin/system/rootfs and darwin/system/cryptex must be this copy's own directories of hard links, the way
 # tools/new-workspace.sh makes them. A symlink to another copy's tree makes sysroot a symlink too, because
 # cp -a does not follow one, and then every rm -rf and mv below edits the shared extraction in place. That
 # happened on 19 October 2026: 491 LaunchDaemons, NanoLaunchDaemons, LaunchAngels, xpc/launchd.plist and
 # private/var went out of the main copy's tree, and only the hard links in the other copies still held them.
 for d in rootfs cryptex cryptex-app; do
 	[ -L $SYSFILES/$d ] || continue
-	echo "build.sh: system/$d is a symlink to $(readlink $SYSFILES/$d)" >&2
+	echo "build.sh: darwin/system/$d is a symlink to $(readlink $SYSFILES/$d)" >&2
 	echo "build.sh: it has to be a directory of this copy's own: rm it and cp -al the original over," >&2
 	echo "build.sh: as tools/new-workspace.sh does. Building against a link damages the shared tree." >&2
 	exit 1
@@ -173,7 +173,7 @@ cp obj/child root/bin/child
 # ends: the program and its job together, away from the system's job list below, which several working
 # copies are editing at once.
 [ -f obj/var_store ] && cp obj/var_store root/bin/
-cp com.hakios.varstore.plist com.hakios.nullcomm.plist root/LaunchDaemons/
+cp launchd/com.hakios.varstore.plist launchd/com.hakios.nullcomm.plist root/LaunchDaemons/
 echo "Darwin on image built $(date '+%Y-%m-%d %H:%M')" > root/etc/motd
 # 300000 bytes, byte i = (i*31 + (i>>8)) & 0xff; init verifies it through read() and mmap()
 python3 -c "import sys; sys.stdout.buffer.write(bytes((i*31 + (i>>8)) & 0xff for i in range(300000)))" > root/share/pattern.bin
@@ -212,15 +212,15 @@ if [ -d $SYSFILES/rootfs/usr/lib ]; then
 			# /System/Library/Extensions, -[NSBundle classNamed:] then wants the class out of it),
 			# the switch that names it on IOAcceleratorES (src/metal_props.c), and the driver's test
 			# the driver's core is C++ (src/metal: the compiler library's calls, typed by
-			# tools/mesa/air/air_metal.h itself, buffers, what the driver says), the plug-in over
+			# userland/tools/mesa/air/air_metal.h itself, buffers, what the driver says), the plug-in over
 			# it Metal's classes in Objective-C (src/metal/rwm.h is the line between them)
 			mkdir -p obj/metal
 			for f in air buffer log texture blit draw command recipes import perf plib shape argenc run worker surfaces render compute cmdbuf pipeline drawable capture; do
-				${DYN/xnu-clang/xnu-clang++} -Os -std=c++20 -fno-exceptions -fno-rtti -I../tools/mesa/air \
+				${DYN/xnu-clang/xnu-clang++} -Os -std=c++20 -fno-exceptions -fno-rtti -I../userland/tools/mesa/air \
 					-c src/metal/$f.cpp -o obj/metal/$f.o
 			done
 			$DYN -Os -bundle -framework Foundation -framework IOKit -framework IOSurface -framework Metal -lobjc \
-				-lc++ -I../tools/mesa/air -Isrc -o obj/HakiosMetal src/hakiosmetal.m \
+				-lc++ -I../userland/tools/mesa/air -Isrc -o obj/HakiosMetal src/hakiosmetal.m \
 				obj/metal/air.o obj/metal/buffer.o obj/metal/log.o obj/metal/texture.o obj/metal/blit.o obj/metal/draw.o obj/metal/command.o obj/metal/recipes.o obj/metal/import.o obj/metal/perf.o obj/metal/plib.o obj/metal/shape.o obj/metal/argenc.o obj/metal/run.o obj/metal/worker.o obj/metal/surfaces.o obj/metal/render.o obj/metal/compute.o obj/metal/cmdbuf.o obj/metal/pipeline.o obj/metal/drawable.o
 			$DYN -framework CoreFoundation -framework IOKit -o obj/metal_props src/metal_props.c
 			$DYN -o obj/psgrep src/psgrep.c
@@ -279,8 +279,8 @@ if [ -d $SYSFILES/rootfs/usr/lib ]; then
 			# the OpenGL ES library, and the table of functions that hands CoreAnimation's calls to it
 			# (Mesa says beside the library what it was built from: one from other patches is built again)
 			M=../kernel/deps/build/mesa/out
-			[ "$(cat $M/built-from 2>/dev/null)" = "$(cat ../tools/mesa/*.patch ../tools/mesa/hakios-drm/* | sha256)" ] ||
-				../tools/mk-mesa.sh
+			[ "$(cat $M/built-from 2>/dev/null)" = "$(cat ../userland/tools/mesa/*.patch ../userland/tools/mesa/hakios-drm/* | sha256)" ] ||
+				../userland/tools/mk-mesa.sh
 			./mkeagl.py src/eagl_slots.txt $M/gl.xml $M/exported-gl.txt src/eagl.c > obj/eagl_gen.h
 			$DYN -dynamiclib -install_name /hakios/lib/libhakios-gl.dylib -Iobj -framework CoreFoundation \
 				-framework IOKit -framework IOSurface -lobjc $M/libOSMesa.8.dylib -o obj/libhakios-gl.dylib \
@@ -290,7 +290,7 @@ if [ -d $SYSFILES/rootfs/usr/lib ]; then
 			# air_run draws with a Metal shader translated by the AIR frontend
 			# and reads the pixels back (docs/air.md). It is built inside the
 			# Mesa build, because it needs Gallium itself and not the gl*
-			# entry points this library exports; AIR=1 tools/mk-mesa.sh makes
+			# entry points this library exports; AIR=1 userland/tools/mk-mesa.sh makes
 			# it, and it is copied in when it is there.
 			[ -f $M/air_run ] && cp $M/air_run obj/air_run
 		fi
@@ -325,12 +325,12 @@ if [ -d $SYSFILES/rootfs/usr/lib ]; then
 	cp obj/libhakios.dylib obj/libhakios-sb.dylib root/lib/
 	# the wallpaper of this system release as one picture, for SpringBoard where PosterBoard cannot draw it (src/inject_sb.c,
 	# put_wallpaper): drawn on this Mac from the .ca packages of the extracted system, with the Mac's own
-	# QuartzCore (../tools/render-ca-wallpaper.m), and not kept in the repository, being Apple's. Half the
+	# QuartzCore (../userland/tools/render-ca-wallpaper.m), and not kept in the repository, being Apple's. Half the
 	# screen's size and JPEG quality 0.4: about 15 KB, what boot_a has room for (SpringBoard scales it up)
 	WALLPAPER="$SYSFILES/rootfs/Library/Wallpaper/Collections/iOS_16~iphone.wallpaperCollection/Wallpapers/7400.WWDC_2022-375w-812h@3x~iphone.wallpaper"
 	if [ "$(uname)" = Darwin ] && [ -d "$WALLPAPER" ] && [ ! -f root/share/wallpaper.jpg ]; then
 		clang -fobjc-arc -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics \
-			-o obj/render-ca-wallpaper ../tools/render-ca-wallpaper.m &&
+			-o obj/render-ca-wallpaper ../userland/tools/render-ca-wallpaper.m &&
 			mkdir -p root/share && obj/render-ca-wallpaper "$WALLPAPER" root/share/wallpaper.jpg 375 812 0.4 | tail -1
 	fi
 	[ -f obj/libhakios-media.dylib ] && cp obj/libhakios-media.dylib root/lib/     # (as with cpu_test)
@@ -349,7 +349,7 @@ if [ -d $SYSFILES/rootfs/usr/lib ]; then
 		cp obj/HakiosMetal root/lib/HakiosMetal.bundle/
 		cp src/metal_plugin.plist root/lib/HakiosMetal.bundle/Info.plist
 		cp obj/metal_props obj/metal_drv_test obj/psgrep root/bin/
-		# on the Mali the driver's compiler is inside libOSMesa (tools/mesa/panfrost-osmesa-air.patch)
+		# on the Mali the driver's compiler is inside libOSMesa (userland/tools/mesa/panfrost-osmesa-air.patch)
 		ln -s libOSMesa.8.dylib root/lib/libhakiosair.dylib
 		# QC_METALLIB=FILE: QuartzCore's shaders in AIR for CoreAnimation's Metal renderer (boot-arg
 		# camtl=1, src/inject.c give_quartzcore_its_shaders): the AIR slice of a macOS QuartzCore's
@@ -357,7 +357,7 @@ if [ -d $SYSFILES/rootfs/usr/lib ]; then
 		rm -f root/share/QuartzCore-default.metallib
 		[ -z "$QC_METALLIB" ] || { mkdir -p root/share; cp "$QC_METALLIB" root/share/QuartzCore-default.metallib; }
 		# CoreAnimation's pipelines for backboardd to build at start (src/hakiosmetal.m, rw_warm_start;
-		# tools/rwm-recipes.py makes the file out of a run's log)
+		# userland/tools/rwm-recipes.py makes the file out of a run's log)
 		rm -f root/share/rwm-recipes.txt
 		[ ! -f share/rwm-recipes.txt ] || cp share/rwm-recipes.txt root/share/rwm-recipes.txt
 	fi
@@ -426,14 +426,17 @@ with open(path, 'w') as f:
 		done
 	fi
 	cp ${RC:-rc.launchd} root/etc/rc
-	cp ${RC_JOBS:-rc.jobs} root/etc/rc.jobs
+	# a job list by its name in jobs/ (rc.jobs.unlock), or by a path of its own
+	rc_jobs=${RC_JOBS:-rc.jobs}
+	[ -f "$rc_jobs" ] || rc_jobs=jobs/$rc_jobs
+	cp "$rc_jobs" root/etc/rc.jobs
 	# QUIET=1: launchd's own standard error goes nowhere (src/init.c). It says a few thousand
 	# lines about its own business in the first minutes and pushes everything else out of the
 	# kernel's log; the daemons keep their own standard error on the console all the same.
 	rm -f root/etc/quiet
 	[ -n "$QUIET" ] && : > root/etc/quiet
 	# the jobs the system's launchd will see (/System/Library/LaunchDaemons is a symlink to this directory)
-	cp com.hakios.demo.plist com.hakios.wifi.plist root/LaunchDaemons/
+	cp launchd/com.hakios.demo.plist launchd/com.hakios.wifi.plist root/LaunchDaemons/
 	[ -n "$IOS_JOBS" ] && OSLOG=${OSLOG-com.apple.backboardd} ./mkjobs.py ${REST:+--rest} $SYSFILES/rootfs root/LaunchDaemons $IOS_JOBS
 fi
 # firmware of the phone's own hardware, where somebody has pulled it from the phone's Android into ../fw-gpu
@@ -509,8 +512,8 @@ done
 [ -d root/lib/HakiosAudio.driver ] && ln -s /hakios/lib/HakiosAudio.driver root/hal/HakiosAudio.driver
 # the image: zlib where it saves room (a small file whole in its attribute, as Apple keeps them); fw/
 # as it is, which the kernel's drivers use where it lies in memory (bsd/dev/hakios_image.c)
-python3 ../tools/apfs/mkapfs.py -z --plain fw -o root.apfs hakios=root | tail -1
-[ -z "$CHECK" ] || ../tools/apfs/check-image.sh root.apfs hakios=root
+python3 ../userland/tools/apfs/mkapfs.py -z --plain fw -o root.apfs hakios=root | tail -1
+[ -z "$CHECK" ] || ../userland/tools/apfs/check-image.sh root.apfs hakios=root
 
 # --- the RAM part of a boot off the flash: FLASHBOOT=1 -> flashboot.apfs --------------------------------
 # With the system's volume on the phone's flash as the root, all that has to come from RAM is what is not
@@ -548,7 +551,7 @@ if [ -n "$FLASHBOOT" ] && [ -f $CACHE/dyld_shared_cache_arm64 ]; then
 		mkdir -p flashboot/fw
 		cp ../fw-audio/aw882xx_acf.bin flashboot/fw/
 	fi
-	# the package manager's prefix, when tools/mk-jb.sh has fetched one: /jb of the boot volume, which is
+	# the package manager's prefix, when userland/tools/mk-jb.sh has fetched one: /jb of the boot volume, which is
 	# /private/preboot/jb once the system's volume is the root -- the volume where a rootless jailbreak keeps its
 	# Procursus on a reference phone as well; init grafts it onto /var/jb (src/init.c, mount_writable)
 	if [ -d ../jb/root/var/jb ]; then
@@ -569,8 +572,8 @@ if [ -n "$FLASHBOOT" ] && [ -f $CACHE/dyld_shared_cache_arm64 ]; then
 		ln -f "$f" $D/
 	done
 	fi
-	python3 ../tools/apfs/mkapfs.py -z --plain fw -o flashboot.boot.apfs Boot=flashboot | tail -1
-	[ -z "$CHECK" ] || ../tools/apfs/check-image.sh flashboot.boot.apfs Boot=flashboot
+	python3 ../userland/tools/apfs/mkapfs.py -z --plain fw -o flashboot.boot.apfs Boot=flashboot | tail -1
+	[ -z "$CHECK" ] || ../userland/tools/apfs/check-image.sh flashboot.boot.apfs Boot=flashboot
 	# the third container: Apple's App cryptex as it is (10 MB; fetch.sh), for the boot volume's Cryptexes/App
 	APP=""
 	[ -f $SYSFILES/cryptex-app.dmg ] && APP=$SYSFILES/cryptex-app.dmg
@@ -579,8 +582,8 @@ if [ -n "$FLASHBOOT" ] && [ -f $CACHE/dyld_shared_cache_arm64 ]; then
 	elif [ -n "$CRYPTEX_IMAGE" ]; then
 		cat flashboot.boot.apfs "$CRYPTEX_IMAGE" $APP > flashboot.apfs
 	else
-		python3 ../tools/apfs/mkapfs.py -z -o flashboot.os.apfs OS=flashboot.os | tail -1
-		[ -z "$CHECK" ] || ../tools/apfs/check-image.sh flashboot.os.apfs OS=flashboot.os
+		python3 ../userland/tools/apfs/mkapfs.py -z -o flashboot.os.apfs OS=flashboot.os | tail -1
+		[ -z "$CHECK" ] || ../userland/tools/apfs/check-image.sh flashboot.os.apfs OS=flashboot.os
 		cat flashboot.boot.apfs flashboot.os.apfs $APP > flashboot.apfs
 		rm -f flashboot.os.apfs
 	fi
@@ -592,11 +595,11 @@ fi
 if [ -f $SYSFILES/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 	{ [ ! -f system.apfs ] || [ obj/stage0 -nt system.apfs ] || [ $SYSFILES/system.manifest -nt system.apfs ] ||
 	  [ $SYSFILES/cryptex -nt system.apfs ] || [ $SYSFILES/cryptex-app -nt system.apfs ] || [ -n "$SYSTEM" ]; }; then
-	# what system/select-system.py has chosen since system/rootfs was extracted is not in it, and would not be
+	# what darwin/system/select-system.py has chosen since darwin/system/rootfs was extracted is not in it, and would not be
 	# in the image either (so it was once with the audio plug-ins and the system's sounds: The system found no
 	# speaker and played nothing, though our device was there and the kernel's side worked)
 	if [ -f $SYSFILES/.done-rootfs ] && [ $SYSFILES/select-system.py -nt $SYSFILES/.done-rootfs ]; then
-		echo "build.sh: system/select-system.py has changed since system/rootfs was extracted: run KEEP=1 system/fetch.sh" >&2
+		echo "build.sh: darwin/system/select-system.py has changed since darwin/system/rootfs was extracted: run KEEP=1 darwin/system/fetch.sh" >&2
 		exit 1
 	fi
 	rm -rf sysroot
@@ -635,7 +638,7 @@ if [ -f $SYSFILES/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 		mkdir -p sysroot/fw/connsys
 		cp ../kernel/deps/build/connsys-fw/firmware/* sysroot/fw/connsys/
 	fi
-	# the package manager's prefix, when tools/mk-jb.sh has fetched one: the Procursus bootstrap with
+	# the package manager's prefix, when userland/tools/mk-jb.sh has fetched one: the Procursus bootstrap with
 	# Sileo in it, as /jb. It cannot live at /var/jb in the image -- /private/var is a memory
 	# filesystem made afresh at every boot -- so init copies it there (src/init.c, copy_tree).
 	if [ -d ../jb/root/var/jb ]; then
@@ -695,7 +698,7 @@ if [ -f $SYSFILES/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 	done
 	# zlib where it saves room, as Apple keeps the root (a small file whole in its attribute): 5.4 GB of
 	# files in 2.5 GB, what fits into the phone's RAM beside the system
-	python3 ../tools/apfs/mkapfs.py -z -o system.apfs System=sysroot,manifest=$SYSFILES/system.manifest | tail -1
-	[ -z "$CHECK" ] || ../tools/apfs/check-image.sh system.apfs System=sysroot,manifest=$SYSFILES/system.manifest
+	python3 ../userland/tools/apfs/mkapfs.py -z -o system.apfs System=sysroot,manifest=$SYSFILES/system.manifest | tail -1
+	[ -z "$CHECK" ] || ../userland/tools/apfs/check-image.sh system.apfs System=sysroot,manifest=$SYSFILES/system.manifest
 	rm -rf sysroot
 fi

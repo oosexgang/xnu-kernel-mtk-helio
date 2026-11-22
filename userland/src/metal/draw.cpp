@@ -1,6 +1,6 @@
 /*
  * A draw, run when its command buffer is committed: Metal's tables made into the library's rwa_draw
- * (tools/mesa/air/air_metal.h) and drawn.
+ * (userland/tools/mesa/air/air_metal.h) and drawn.
  */
 #include "rwm.h"
 

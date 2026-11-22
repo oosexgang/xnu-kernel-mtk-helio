@@ -5,7 +5,7 @@
 #
 # The descriptors are packed by Mesa's generated genxml/v7_pack.h, made here from MESA's v7.xml by Mesa's own
 # gen_pack.py: MESA is the Mesa source tree kernel/deps/setup.sh unpacks (Mesa 25.0.7). The phone's build is
-# system27/userland/mali27.sh.
+# darwin/userland/mali27.sh.
 
 MESA     ?= ../../../kernel/deps/build/mesa/mesa-25.0.7
 OUT      ?= out/host

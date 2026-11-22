@@ -35,12 +35,12 @@ kernel/assemble.sh ../xnu-8796-hakios    #         Apple's xnu-8796.121.2 + kern
 kernel/deps/setup.sh                     # 40 s    what the kernel's build needs: sources, host tools, the SDK's overlay, two libraries
 kernel/build.sh -j8 -k                   # 2 min 48 s the kernel. -k is needed: one harmless error (lldbmacros) ends make with code 2
 tools/get-zig.sh                         #         zig 0.13.0 into build/zig: its ld.lld links the loader (not needed where ld.lld is installed)
-system/fetch.sh                          # ~30 min at 4 MB/s: the files of the system image (20F66) from Apple's server; a broken download is taken up again
+darwin/system/fetch.sh                          # ~30 min at 4 MB/s: the files of the system image (20F66) from Apple's server; a broken download is taken up again
 userland/build.sh                        # 4 min   our programs and libraries, userland/root.apfs (4 MB) and userland/system.apfs (2.4 GB)
-tools/mkpayload.sh                       # 1 s     build/payload.bin = the kernel + the small root
+tools/run/mkpayload.sh                       # 1 s     build/payload.bin = the kernel + the small root
 mkdir -p backup fw-touch && cp <your rooted boot image> backup/boot_a_magisk.img && cp <the touch firmware> fw-touch/hdl_firmware.img
-tools/system-flash.sh                    # ~2 min  system.apfs into xnusys (Android must be up; 2.4 GB free on /data for the way there)
-XNU_LOG_OUT=logs/run1.log tools/xnu-cycle.sh   # 5 min   the board file's [boot]: 120 s, cpus=4 touchscreen=2 mali=1 fbscale=2 fbfit=3
+tools/run/system-flash.sh                    # ~2 min  system.apfs into xnusys (Android must be up; 2.4 GB free on /data for the way there)
+XNU_LOG_OUT=logs/run1.log tools/run/xnu-cycle.sh   # 5 min   the board file's [boot]: 120 s, cpus=4 touchscreen=2 mali=1 fbscale=2 fbfit=3
 ```
 
 The times are those of a clone of this repository built on 12 November 2026 on the Intel Mac named above;
@@ -64,10 +64,10 @@ In `logs/run1.log`, in this order:
 - `=== end of XNU log ===`, `starting Android`
 
 Ten frames a second is the CPU drawing: this build has no Mesa in it. The GPU path is `GL=1` (and `METAL=1`) of `userland/build.sh`, which needs
-`tools/mk-mesa.sh` and for that meson and ninja; it was not part of this test.
+`userland/tools/mk-mesa.sh` and for that meson and ninja; it was not part of this test.
 
 To see the screen without looking at the phone, add `fbshot=20` to `XNU_ARGS` and give the run ten seconds more (`XNU_SECS=130`): the kernel
-prints a small picture of the frame into the log and `python3 tools/fbshot.py logs/run1.log shot.png` makes a PNG of it. `fbshot=N` counts the
+prints a small picture of the frame into the log and `python3 tools/log/fbshot.py logs/run1.log shot.png` makes a PNG of it. `fbshot=N` counts the
 five-second frame reports, N/5 of them, and those start only when SpringBoard draws (about 85 s in): `fbshot=20` is a picture at about 125 s.
 The log keeps its last 256 KB, so a picture wider than the default 60 pixels, or one taken long before the end, falls out of it.
 
@@ -75,7 +75,7 @@ The log keeps its last 256 KB, so a picture wider than the default 60 pixels, or
 
 - No Wi-Fi, Bluetooth, sensors, camera or sound: their firmware is your phone's own and is not fetched (`build.sh: fw/: 0 files ... absent`),
   and each wants its boot-args and jobs; see that subject's journal in [README.md](README.md).
-- The five test programs that want an entitlement are unsigned without `ldid` (`build.sh: no ldid: ...`). `LDID=$PWD/tools/ldid-codesign.sh ./userland/build.sh` signs
+- The five test programs that want an entitlement are unsigned without `ldid` (`build.sh: no ldid: ...`). `LDID=$PWD/userland/tools/ldid-codesign.sh ./userland/build.sh` signs
   them with macOS's `codesign`.
 - `lsd` fills the log with `denied attempt to escape CPU monitor`, twenty lines a second. It is harmless and it is why the log's beginning is lost.
 
@@ -84,15 +84,15 @@ The log keeps its last 256 KB, so a picture wider than the default 60 pixels, or
 `boot_a` holds Android's own kernel and ramdisk besides ours; on the first phone it is 32 MB, and with
 the kernel and the small root in it 2 MB were left. With `HAKIOS_PAYLOAD=flash` the boot image carries
 only the loader in front of Android (23.9 MB on the first phone), and the payload goes into the last
-96 MiB of the system partition, written and read back by `tools/payload-flash.sh` (the run cycle calls
+96 MiB of the system partition, written and read back by `tools/run/payload-flash.sh` (the run cycle calls
 it). The loader reads it from there (1.6 s for 19 MB), checks its sum and starts it; a missing or
 damaged one sends the phone to Android, as a boot image without a payload always did.
 
 ```sh
-HAKIOS_PAYLOAD=flash XNU_LOG_OUT=logs/run1.log tools/xnu-cycle.sh
+HAKIOS_PAYLOAD=flash XNU_LOG_OUT=logs/run1.log tools/run/xnu-cycle.sh
 ```
 
-`tools/system-flash.sh` refuses a system image that would reach those 96 MiB. A loader built before
+`tools/run/system-flash.sh` refuses a system image that would reach those 96 MiB. A loader built before
 this change cannot read the tail: the first such run needs the new loader in `boot_a`, which every run
 of `xnu-cycle.sh` writes anyway.
 
@@ -100,16 +100,16 @@ of `xnu-cycle.sh` writes anyway.
 
 Each needs more in the images than the plain boot, and the phone's CONNSYS firmware in
 `kernel/deps/build/connsys-fw/firmware` (the files are listed in the package's Wi-Fi journal; never in the
-repository). `tools/image.sh` makes both images and the payload; the system image changes, so write it
+repository). `tools/run/image.sh` makes both images and the payload; the system image changes, so write it
 before the run.
 
 ```sh
-tools/image.sh wifi && tools/system-flash.sh       # and fw-wifi/network: your network's name, then its passphrase
+tools/run/image.sh wifi && tools/run/system-flash.sh       # and fw-wifi/network: your network's name, then its passphrase
 XNU_ARGS="cpus=4 touchscreen=2 buttons=2 mali=1 fbscale=2 fbfit=3 scp_step=7 connsys_step=17 connsys_wake=0 mtkbatt=1" \
-  XNU_SECS=210 tools/xnu-cycle.sh
+  XNU_SECS=210 tools/run/xnu-cycle.sh
 
-tools/image.sh bluetooth && tools/system-flash.sh  # the same arguments and connsys_bt=2 aks_keys=1, XNU_SECS=300
-QC_METALLIB=<QuartzCore's shaders> tools/image.sh metal && tools/system-flash.sh   # and metal=1 fb_queue=1 fb_flip=1
+tools/run/image.sh bluetooth && tools/run/system-flash.sh  # the same arguments and connsys_bt=2 aks_keys=1, XNU_SECS=300
+QC_METALLIB=<QuartzCore's shaders> tools/run/image.sh metal && tools/run/system-flash.sh   # and metal=1 fb_queue=1 fb_flip=1
 ```
 
 What was seen on 12 November 2026 from this repository: Wi-Fi joined the network given (WPA2, its keys
@@ -118,7 +118,7 @@ devices through CoreBluetooth; with Metal the plug-in `HakiosMetalDevice` was on
 CoreAnimation drew through the GPU, up to 17 frames a second with the payload in `boot_a` (`35 checks,
 4 failed`: the files of init's four tests that the cut image leaves out) and up to 40 with the payload in
 the system partition and nothing cut (`36 checks, 0 failed`). The pictures come from the job lists'
-`fbgrab -log NAME`: `python3 tools/fbjpg.py LOG OUT.jpg NAME`.
+`fbgrab -log NAME`: `python3 tools/log/fbjpg.py LOG OUT.jpg NAME`.
 
 ## If it does not come back
 

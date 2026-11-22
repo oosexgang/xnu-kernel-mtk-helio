@@ -961,7 +961,7 @@ cam_rx_program(void)
  * and over lines 0..63, and a few lines' bytes.
  */
 /* a 64x48 picture of a frame held at a byte a pixel: each cell is the mean of 16 samples inside its 63x64-pixel block; one log line a row,
- * "THUMB nn: " and 64 hex pairs, for tools/camthumb.py to make a PNG of (a whole 12 MB frame does not fit the log) */
+ * "THUMB nn: " and 64 hex pairs, for tools/log/camthumb.py to make a PNG of (a whole 12 MB frame does not fit the log) */
 static void
 cam_thumb(const char *name, volatile uint8_t *base)
 {

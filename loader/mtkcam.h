@@ -1,5 +1,5 @@
 /*
- * Camera probe, stage 0 (tools/cam-probe.sh): read only. Nothing of the camera is switched on.
+ * Camera probe, stage 0 (tools/run/cam-probe.sh): read only. Nothing of the camera is switched on.
  *
  * What the camera needs on this phone was read off Android's own bring-up (the first phone's journal (camera)):
  * the PMIC rails, the GPIO pins, the clock gates. What is not known yet, and what this prints so it

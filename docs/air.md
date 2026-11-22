@@ -16,9 +16,9 @@ document assumes those measurements and records the decisions taken on top of th
 
 **Decision: a Mesa frontend in Mesa's tree, shaped like `src/compiler/spirv`.** Its entry point
 is one function, `air_to_nir()` (`nir_air.h`), the analogue of `spirv_to_nir()`. In this
-repository the sources are `tools/mesa/air/`; `tools/mk-mesa.sh` and `tools/air/mk-host.sh` copy
-them to `src/compiler/air/` of the pinned Mesa release, exactly as `tools/mesa/hakios-drm/` is
-copied to `src/hakios-drm/`, and `tools/mesa/air-frontend.patch` adds the two lines of meson that build
+repository the sources are `userland/tools/mesa/air/`; `userland/tools/mk-mesa.sh` and `userland/tools/air/mk-host.sh` copy
+them to `src/compiler/air/` of the pinned Mesa release, exactly as `userland/tools/mesa/hakios-drm/` is
+copied to `src/hakios-drm/`, and `userland/tools/mesa/air-frontend.patch` adds the two lines of meson that build
 it. The tree is the shape an upstream merge request would have.
 
 Why not a standalone library that Mesa links:
@@ -59,7 +59,7 @@ This is the biggest commitment of the project, so both sides in full.
 - **The cost lands in every Metal process.** libLLVM is 50–100 MB of C++ with global constructors,
   a static option registry and its own copy of libc++ assumptions, loaded into every app that
   touches Metal. On this port that is every app: CoreAnimation, CoreImage and UIKit all link
-  Metal. The port's Mesa is built with `-Dllvm=disabled` (`tools/mk-mesa.sh`) for exactly this
+  Metal. The port's Mesa is built with `-Dllvm=disabled` (`userland/tools/mk-mesa.sh`) for exactly this
   reason today.
 - **It would have to be cross-built for the system** with the port's toolchain (the `xnu-clang` wrapper,
   the system's SDK, ld64). That is a multi-hour build and a second large dependency to keep building
@@ -89,7 +89,7 @@ silently: they make the module fail with the record's name, and the corpus repor
 the price is visible as a number rather than as a wrong shader.
 
 **It is written, and it agrees with LLVM on all 456 modules of the corpus** —
-`tools/air/reader-check.sh`, 1 900 lines of C for the reader and its printer. What the check
+`userland/tools/air/reader-check.sh`, 1 900 lines of C for the reader and its printer. What the check
 compares is described in section 4; the two things it does *not* keep are function and parameter
 attributes (`nounwind`, `captures(none)`, the attribute groups) and the order of declarations,
 because the translation uses neither. Everything else — types, constants, every instruction,
@@ -213,7 +213,7 @@ LLVM parameter type, and the NIR value is cut or converted to it.
 
 What each `air.*` name means was a guess until this was read, and one of the guesses was wrong.
 `AGXCompilerCore` — the back end of Apple's own shader compiler, in **this device's** shared
-cache (`system/20F66__iPhone10,3_6`, never another device's) — carries its whole operation
+cache (`darwin/system/20F66__iPhone10,3_6`, never another device's) — carries its whole operation
 vocabulary as a run of C strings at file offsets `0x16cf9f`–`0x16d400`, which is virtual
 `0x1bbf43f9f`–`0x1bbf44400` (`__cstring` begins at file 1 482 768 for `0x1bbf41010`). 137 names,
 and they are suffixes: the full function is `air.` + name + `.` + a type suffix, which is why
@@ -266,7 +266,7 @@ the `gamma_*` conversions, `pack`/`unpack`, and `assert`.
 A shader is reported as *working* only when its output was compared, never because it compiled.
 Three references, each independent of the translator:
 
-1. **LLVM on the CPU (the strongest).** `tools/air/cpuref.py` changes the module's triple to the
+1. **LLVM on the CPU (the strongest).** `userland/tools/air/cpuref.py` changes the module's triple to the
    host's, compiles it with `llc`, fills a buffer per `air.buffer` argument with a fixed pattern
    and calls the entry point; `air2nir --eval` replaces the same buffer loads in *our* NIR with
    the same bytes and folds it with `nir_opt_constant_folding` (no algebraic rewriting, so the
@@ -355,11 +355,11 @@ the SPIR-V frontend does) and **I/O lowering** (variables with locations, then `
 
 ## 5. Milestones and how each is measured
 
-The corpus report (`tools/air/corpus.py report`) is the progress meter: every number below comes
-out of it, and it runs from `tools/air/check.sh` (section 6). Two corpora:
+The corpus report (`userland/tools/air/corpus.py report`) is the progress meter: every number below comes
+out of it, and it runs from `userland/tools/air/check.sh` (section 6). Two corpora:
 
-- **the device image** — the five `.metallib` files the port installs (`system/rootfs` +
-  `system/cryptex`): 456 modules. This is the corpus the milestones are stated against.
+- **the device image** — the five `.metallib` files the port installs (`darwin/system/rootfs` +
+  `darwin/system/cryptex`): 456 modules. This is the corpus the milestones are stated against.
 - **the full IPSW** — all 134 MTLB libraries of the system image 20F66 root filesystem and cryptexes,
   16 841 functions, extracted from `rootfs.dmg` with 7-Zip. Reported alongside, because the
   device image is a selection and the system's own shaders are this set.
@@ -403,7 +403,7 @@ an unhandled metadata key), so "features not yet handled" is a ranked list, not 
   texture whose aspect selector is not 1.
 
   **Six texture shaders have now been run and return the exact texel**
-  (`tools/air/texcheck.sh`). `air_run` binds a texture whose texel is
+  (`userland/tools/air/texcheck.sh`). `air_run` binds a texture whose texel is
   `(100+x, 200+y, 300+x+y+z, 400)` — 4×4 for a 2D sampler, 4×4×4 for a 3D one — a nearest
   sampler with clamped addressing, and a coordinate at the centre of texel (1, 1). A single
   sample or fetch must then return that texel *exactly*: nearest filtering at a texel centre has
@@ -469,8 +469,8 @@ This was the open question, because nothing here had run. The answer is that the
 the Mesa already on the phone rather than being built from nothing:
 
 - The port's Mesa **already creates a Gallium screen for the Adreno**:
-  `osmesa_create_gpu_screen()` in `tools/mesa/freedreno-darwin.patch` opens the kernel's `msm`
-  driver through `tools/mesa/hakios-drm` and calls `fd_drm_screen_create_renderonly()`. It also
+  `osmesa_create_gpu_screen()` in `userland/tools/mesa/freedreno-darwin.patch` opens the kernel's `msm`
+  driver through `userland/tools/mesa/hakios-drm` and calls `fd_drm_screen_create_renderonly()`. It also
   already has `osmesa_surface_resource()`, which wraps an IOSurface as a `pipe_resource`. So the
   Gallium layer is reachable inside the library CoreAnimation already draws the system through.
 - **freedreno takes NIR natively** (`PIPE_SHADER_CAP_SUPPORTED_IRS` includes
@@ -481,8 +481,8 @@ the Mesa already on the phone rather than being built from nothing:
   `osmesa_create_gpu_screen()` makes, and **no line below that changes**.
 
 **That is now built and in the image, and no export was needed.** `air_run` is built *inside* the
-Mesa cross build (`AIR=1 tools/mk-mesa.sh`), so it links Gallium's own static libraries and opens
-the Adreno itself — `drmOpenWithType("msm", …)` through `tools/mesa/hakios-drm`, then
+Mesa cross build (`AIR=1 userland/tools/mk-mesa.sh`), so it links Gallium's own static libraries and opens
+the Adreno itself — `drmOpenWithType("msm", …)` through `userland/tools/mesa/hakios-drm`, then
 `fd_drm_screen_create_renderonly()`, exactly as `osmesa_create_gpu_screen()` does. It needs
 nothing exported from `libOSMesa` and does not load it: a 9.8 MB arm64 Mach-O against libSystem,
 libz and IOKit alone. `userland/build.sh` puts it in `/hakios/bin`, and `rc.jobs.air` runs it.
@@ -603,8 +603,8 @@ either answer is worth the run.
 ## 6. Running it
 
 ```
-tools/air/mk-host.sh            # Mesa for this machine (x86-64): the frontend, ir3, softpipe
-tools/air/check.sh              # the reader against llvm-dis, the corpus report, and LLVM
+userland/tools/air/mk-host.sh            # Mesa for this machine (x86-64): the frontend, ir3, softpipe
+userland/tools/air/check.sh              # the reader against llvm-dis, the corpus report, and LLVM
 ```
 
 and on one shader:
@@ -615,24 +615,24 @@ build/mesa-host/build/src/compiler/air/air2nir       FILE[.metallib] [FUNCTION] 
 build/mesa-host/build/src/compiler/air/air2nir --eval FILE[.metallib] [FUNCTION]  # folded to numbers
 build/mesa-host/build/src/gallium/drivers/freedreno/ir3_compiler \
         --chip-id 0x007506030500 FILE[.metallib] [FUNCTION]                      # Adreno code
-tools/air/cpuref.py --compare FILE[.metallib] [FUNCTION]   # ours against LLVM's own answer
-tools/air/cpuref.py --all --draw FILE.metallib             # every function: LLVM, folded, drawn
+userland/tools/air/cpuref.py --compare FILE[.metallib] [FUNCTION]   # ours against LLVM's own answer
+userland/tools/air/cpuref.py --all --draw FILE.metallib             # every function: LLVM, folded, drawn
 build/mesa-host/build/src/gallium/drivers/freedreno/air_run \
         FILE[.metallib] [FUNCTION]                         # draw with it, print the pixel
 ```
 
 `0x007506030500` is how freedreno names the hakios's Adreno 7c+ Gen 3 (A635); it has no
-`gpu-id`, which is why `tools/mesa/air-ir3.patch` adds `--chip-id` to that tool.
+`gpu-id`, which is why `userland/tools/mesa/air-ir3.patch` adds `--chip-id` to that tool.
 
 There is no hosted CI: the corpus is Apple's code and stays out of the repository (and out of
 GitHub). `check.sh` is the CI; it takes 20 seconds, so it runs before every commit that touches
 the frontend, and the report it writes is committed as `docs/air-report.md` with the numbers of
 that commit.
 
-The frontend lives in `tools/mesa/air/` and `mk-host.sh` links it into the pinned Mesa as
+The frontend lives in `userland/tools/mesa/air/` and `mk-host.sh` links it into the pinned Mesa as
 `src/compiler/air` — a link, not a copy, so there is no stale copy to build by mistake (a trap
-this project has already fallen into once with `tools/mk-mesa.sh` and the freedreno patches).
-`tools/mesa/air-ir3.patch` is the two-file change that teaches `ir3_compiler` to read AIR and
+this project has already fallen into once with `userland/tools/mk-mesa.sh` and the freedreno patches).
+`userland/tools/mesa/air-ir3.patch` is the two-file change that teaches `ir3_compiler` to read AIR and
 declares `air_run` beside it; it also removes a call of `ir3_nir_lower_variant` that tool makes
 itself, which is a bug of the tool — `ir3_context_init` already calls it on its own clone, and
 the const-state setup inside asserts the second time. It shows on every vertex shader and on

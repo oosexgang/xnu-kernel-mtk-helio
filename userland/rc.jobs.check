@@ -1,9 +1,0 @@
-# The check of a run, in pictures at the panel's own scale (fbgrab -log NAME, tools/fbjpg.py LOG OUT NAME):
-# Settings' first page (the status bar with the battery's percentage; Wi-Fi and Bluetooth with what they
-# say), then its Wi-Fi page. Taps are fractions of the screen, for fbscale=2 fbfit=3. The pictures are the
-# last thing the run says, two at most: the log keeps only its last 256 KB.
-/hakios/bin/rwtouch wait 120 tap 0.83 0.74 wait 25
-/hakios/bin/fbgrab -log settings
-/hakios/bin/rwtouch tap 0.5 0.383 wait 20
-/hakios/bin/fbgrab -log wifi
-/hakios/bin/rwtouch wait 300

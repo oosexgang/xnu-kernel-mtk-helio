@@ -1,7 +1,7 @@
 /*
  * gl_mrt: what the Mali draws into a colour target other than the first, and into an integer one,
  * when OpenGL ES asks -- through Mesa's own GL state tracker, the road CoreAnimation already takes
- * on this phone. The Metal path (tools/mesa/air: air_run, air_metal) reads zeros for exactly
+ * on this phone. The Metal path (userland/tools/mesa/air: air_run, air_metal) reads zeros for exactly
  * these on the Mali and the right numbers for a float target 0; the same cases here say whether
  * that is panfrost on this port, or something the AIR path hands panfrost.
  *

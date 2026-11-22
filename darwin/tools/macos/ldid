@@ -1,0 +1,22 @@
+#!/bin/bash
+# ldid on a Mac, by Apple's codesign: what the darwin/ scripts ask of it.
+#   ldid -e FILE              the entitlements, as XML, to standard output (nothing if there are none)
+#   ldid [-Cadhoc] -S FILE    an ad-hoc signature (codesign's is always marked CS_ADHOC)
+#   ldid [-Cadhoc] -SENT FILE ... with those entitlements
+ent=""; sign=0; files=()
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-e) shift; out=$(/usr/bin/codesign -d --entitlements :- "$1" 2>/dev/null); [ -n "$out" ] && printf '%s\n' "$out"; exit 0 ;;
+	-Cadhoc) ;;
+	-S) sign=1 ;;
+	-S?*) sign=1; ent=${1#-S} ;;
+	-*) echo "ldid (codesign): $1 is not supported" >&2; exit 1 ;;
+	*) files+=("$1") ;;
+	esac
+	shift
+done
+[ $sign = 1 ] && [ ${#files[@]} -gt 0 ] || { echo "ldid (codesign): nothing to sign" >&2; exit 1; }
+if [ -n "$ent" ]; then
+	exec /usr/bin/codesign -s - -f --entitlements "$ent" "${files[@]}" 2>/dev/null
+fi
+exec /usr/bin/codesign -s - -f "${files[@]}" 2>/dev/null

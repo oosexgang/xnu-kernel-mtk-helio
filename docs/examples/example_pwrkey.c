@@ -2,7 +2,7 @@
  * The example driver of docs/writing-a-driver.md: the power key's state, read from the MT6358 PMIC
  * through the PMIC wrapper's second channel each time it is asked for, as the sysctl
  * kern.hakios.example_pwrkey (1 while the key is down, 0 while it is up, -1 when the PMIC does not
- * answer or the driver was not asked for). It is not built into the kernel; tests/run.sh runs it against tests/pwrap_model.h.
+ * answer or the driver was not asked for). It is not built into the kernel; workbench/run.sh runs it against workbench/pwrap_model.h.
  *
  * Nothing is done unless boot-arg example_pwrkey=1 asks for it, and only on a board whose file lists
  * "keys-mt6358": the wrapper's address is that board's (hakios_board()->blocks.pwrap). The register is

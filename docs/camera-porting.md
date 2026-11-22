@@ -25,7 +25,7 @@ run on a phone: there is no port for it to run on yet.
 1. **Power** (`power_on`/`power_off`). Which rails, clocks, power domain, reset and MCLK pins the camera needs, and the order Android uses. On the first phone:
    the PMIC (MT6358) rails VCAMIO and VCAMD (and VCAMD's voltage: LK leaves one that Android changes; write it **and read it back**), a GPIO for the
    analog supply, the CAM power domain in the SPM and its bus protection, the camera clocks in topckgen/mmsys/camsys, reset and MCLK GPIOs. The loader's
-   probe (hakios-mt6768's `loader/mtkcam.h`, built with `CAM_PROBE=1`, started by `tools/cam-probe.sh`) reads pins, rails and the I2C controller and reports, then goes
+   probe (hakios-mt6768's `loader/mtkcam.h`, built with `CAM_PROBE=1`, started by `tools/run/cam-probe.sh`) reads pins, rails and the I2C controller and reports, then goes
    back to Android: it only reads. A PMIC wrapper (WACS2) is shared with the keys and the connectivity drivers here: take `mtk_pwrap_lock()` around
    every transaction (hakios-mt6768's `kernel/patches/mtk_pwrap_lock.patch`), or two drivers will interleave.
 2. **The sensor** (`sensor_start`/`sensor_stop`). Its I2C address and bus, the chip-ID register and the expected ID (the first phone's is 0x38e1; check yours
@@ -37,7 +37,7 @@ run on a phone: there is no port for it to run on yet.
    git), and the order of writes. Queue the buffers the way the HAL does.
 4. **What the DMA wrote** (`frame_done`, `read_lines`). Do not assume the layout. On the first phone the DMA, programmed as the HAL does, writes **one byte a
    pixel** (the top 8 of the 10 bits), so the pitch is 4080 for a 4080-pixel line and not the 5100 bytes of MIPI RAW10; the partial frames seen before that
-   was found were that mismatch (runs 496-499). Look at a line's bytes before you trust a stride (`tools/camthumb.py` makes a picture from the log's
+   was found were that mismatch (runs 496-499). Look at a line's bytes before you trust a stride (`tools/log/camthumb.py` makes a picture from the log's
    thumbnail lines). `read_lines` is where such a layout is made MIPI RAW10 (4 pixels in 5 bytes) for user space. Here a frame counts as done when the
    last 64 bytes of its buffer have been written, not from an interrupt. Map the frame memory cached and invalidate (`dc civac`) what you read; three
    buffers and a cached read-out are what ended a stall after the first three frames.
@@ -47,7 +47,7 @@ run on a phone: there is no port for it to run on yet.
 ## Checking it
 
 - Each operation says (`say()`) what it is about to do **before** a step that could hang a bus; the last line of a log that ends is the step that hung.
-- `camera_test` (`userland/src/camera_test.c`) reads frames from the node and checks them; `tools/camthumb.py` makes a picture of one.
+- `camera_test` (`userland/src/camera_test.c`) reads frames from the node and checks them; `tools/log/camthumb.py` makes a picture of one.
 - The system's side needs the sensor to be known to Camera.app: its sensor ID in the device's `CameraSetup.plist`, module info for the capture graph; that is
   `userland/src/camera_device.c`'s part (its header says what is answered).
 - A Camera.app icon on the home screen needs `still-camera` in SpringBoard's visible icon tags (`libhakios-sb`, see `camera-x6826b.md`).

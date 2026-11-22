@@ -1,7 +1,7 @@
 /*
  * The test of docs/examples/example_pwrkey.c, as docs/writing-a-driver.md describes it: the driver's
- * own .c included, the kernel faked (tests/fakekernel), the hardware a model (tests/pwrap_model.h).
- * One scenario a process: tests/run.sh lists them by running this with no argument.
+ * own .c included, the kernel faked (workbench/fakekernel), the hardware a model (workbench/pwrap_model.h).
+ * One scenario a process: workbench/run.sh lists them by running this with no argument.
  */
 #include <stdarg.h>
 #include <unistd.h>

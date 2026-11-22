@@ -26,7 +26,7 @@ boot ROM -> preloader -> LK (the phone's own, untouched)
 ```
 
 **The default is Android.** XNU starts only when the loader finds the request `HAKIOS:BOOT-XNU` in
-ramoops' pmsg zone, written from Android by `tools/boot-xnu.sh`, and takes it away: the boot after
+ramoops' pmsg zone, written from Android by `tools/run/boot-xnu.sh`, and takes it away: the boot after
 XNU is Android again. A kernel that hangs costs a power cycle.
 
 With `HAKIOS_PAYLOAD=flash` the payload is not in `boot_a` but in the last 96 MiB of the system
@@ -141,7 +141,7 @@ from elsewhere. Everything that is fetched is pinned, listed in one place: `comp
 | What | Why not here | Where it comes from |
 | --- | --- | --- |
 | Apple's XNU release | It is Apple's; only the pin is kept. | `kernel/assemble.sh` fetches it. |
-| The system image's files | Apple's files are never redistributed. | `system/fetch.sh`, on your machine, from Apple's server. |
+| The system image's files | Apple's files are never redistributed. | `darwin/system/fetch.sh`, on your machine, from Apple's server. |
 | The SDK | Apple's. | `iPhoneOS16.5.sdk` of github.com/theos/sdks, into `$THEOS/sdks`. |
 | The phone's firmware (touch, CONNSYS, sensor hub) and camera tables | The vendor's; taken from the same phone it runs on. | `adb pull` from its Android; the package's journal says which files. |
 | The rooted boot image | Your phone's own. | `backup/boot_a_magisk.img`. |

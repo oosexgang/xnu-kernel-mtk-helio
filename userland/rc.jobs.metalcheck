@@ -1,6 +1,0 @@
-# The check of a Metal run: the home screen drawn by the GPU, as a picture at the panel's own scale
-# (fbgrab -log, tools/fbjpg.py), the last thing of the run. The frames per second are in the log
-# (MiniIOMobileFramebuffer's lines). For GL=1 METAL=1 RC=rc.launchd.metal and boot-arg metal=1.
-/hakios/bin/rwtouch wait 130
-/hakios/bin/fbgrab -log home
-/hakios/bin/rwtouch wait 300

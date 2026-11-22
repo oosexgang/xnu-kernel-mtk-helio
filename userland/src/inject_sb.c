@@ -89,7 +89,7 @@ say(const char *format, ...)
  * Boot-arg touch_lat=1: a line for every turn of SpringBoard's main run loop -- when it woke up (a
  * touch, a timer, the display link ...), when CoreAnimation's commit of what that turn changed
  * began and when it was done (our observers just before and after its own, of order 2000000), in
- * microseconds of mach_absolute_time, as the other "tl:" lines (tools/latency.py, tools/frames.py):
+ * microseconds of mach_absolute_time, as the other "tl:" lines (tools/log/latency.py, tools/log/frames.py):
  *   tl: a WOKE COMMIT DONE
  * (a commit with nothing in it takes some microseconds; one that sends changes, a good deal more)
  */
@@ -1004,7 +1004,7 @@ status_bar_provider(void)
  * PosterBoard's extensions draw live and SpringBoard hosts; on a phone without Metal for the window
  * server (the first phone: CollectionsPoster runs, nothing of it reaches the screen) the space behind
  * the icons stays black. /hakios/share/wallpaper.jpg -- this system release's wallpaper drawn on a Mac by
- * tools/render-ca-wallpaper.m from the very .ca packages the phone has -- is put there instead:
+ * userland/tools/render-ca-wallpaper.m from the very .ca packages the phone has -- is put there instead:
  * into the layer of every window whose class says Wallpaper, or, where there is none, as the
  * bottom layer of the home screen's window. Said once (and kept, kern.hakios.say) which it was.
  * Boot-arg sb_wallpaper=0: not at all.
@@ -1431,7 +1431,7 @@ watch_for_hangs(void)
 /*
  * Boot-arg sb_prof=SECONDS: SECONDS after start, ten seconds of samples of SpringBoard's threads -- the
  * ones running at that moment only (THREAD_BASIC_INFO), about a thousand times a second -- and the
- * stacks seen most kept to the end of the log, shared cache addresses unslid (tools/cache-name.py names
+ * stacks seen most kept to the end of the log, shared cache addresses unslid (userland/tools/cache-name.py names
  * them). For SpringBoard at two cores on an idle home screen, two thirds of it in the kernel, in work
  * items too short for a stack taken now and then to catch (runs 324-327).
  */

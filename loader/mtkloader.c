@@ -83,16 +83,16 @@ static const uint8_t core_order[HAKIOS_LOADER_CORE_ORDER_COUNT] = HAKIOS_LOADER_
 #ifndef XNU_RETURN_AFTER
 #define XNU_RETURN_AFTER    "0"
 #endif
-/* 1: always start XNU (tools/xnu-cycle.sh); 0: Android unless asked once (tools/boot-xnu.sh). */
+/* 1: always start XNU (tools/run/xnu-cycle.sh); 0: Android unless asked once (tools/run/boot-xnu.sh). */
 /* 1: look at the touch screen's SPI and report, then go back to Android (no XNU). */
 #ifndef TOUCH_PROBE
 #define TOUCH_PROBE         0
 #endif
-/* 1: wake the GPU and ask it what it is, if Android asked for it (tools/gpu-probe.sh); then Android. */
+/* 1: wake the GPU and ask it what it is, if Android asked for it (tools/run/gpu-probe.sh); then Android. */
 #ifndef GPU_PROBE
 #define GPU_PROBE           0
 #endif
-/* 1: read the camera's pins, rails and I2C controller and report, if Android asked for it (tools/cam-probe.sh); then Android. */
+/* 1: read the camera's pins, rails and I2C controller and report, if Android asked for it (tools/run/cam-probe.sh); then Android. */
 #ifndef CAM_PROBE
 #define CAM_PROBE           0
 #endif
@@ -467,7 +467,7 @@ static const struct payload_header *payload_find(void)
 /*
  * The payload in the system partition's tail, for a boot image that has none of its own (boot_a holds
  * Android's kernel and its ramdisk as well, and is 32 MB on the first phone): the last PAYLOAD_TAIL bytes
- * of SYSTEM_PART, written by tools/payload-flash.sh. The first block is a header -- "HKPL", version 1,
+ * of SYSTEM_PART, written by tools/run/payload-flash.sh. The first block is a header -- "HKPL", version 1,
  * the payload's size, a Fletcher-64 of its 32-bit words -- and the payload follows it. It is read into
  * the top of the kernel's own memory, which nothing uses until the kernel and the ramdisk are copied out
  * of it, and checked before anything of it is believed.
@@ -509,7 +509,7 @@ static const struct payload_header *payload_from_flash(void)
 	}
 	uint64_t size = head[2] | ((uint64_t)head[3] << 32), sum = head[4] | ((uint64_t)head[5] << 32);
 	if (head[0] != PAYLOAD_FLASH_MAGIC || head[1] != 1 || size < 16 || size > PAYLOAD_TAIL - 512 || (size & 3)) {
-		out("payload: none in the tail of " SYSTEM_PART " (tools/payload-flash.sh writes it)\n");
+		out("payload: none in the tail of " SYSTEM_PART " (tools/run/payload-flash.sh writes it)\n");
 		return NULL;
 	}
 	out("payload: ");
@@ -1143,7 +1143,7 @@ static void save_log(const struct span *sp, int nsp)
 
 /*
  * The kernel's lines for the host (kern.hakios.host_keep, bsd/dev/mtk_mali.c) into ramoops' pmsg
- * zone, whole: Android shows them as /sys/fs/pstore/pmsg-ramoops-0, and tools/xnu-cycle.sh appends them
+ * zone, whole: Android shows them as /sys/fs/pstore/pmsg-ramoops-0, and tools/run/xnu-cycle.sh appends them
  * to the run's log. Called on each way back from XNU, after the boot request in that zone was taken.
  */
 static void save_host_keep(const struct xnu_syms *s)
@@ -1200,8 +1200,8 @@ static void save_host_keep(const struct xnu_syms *s)
 /*
  * The kernel's pictures for the host (boot-arg fbframes=, hakios_host_frames) over ramoops' dump zone, one 4 KB record
  * after another: each a ramoops header, then "HKFR" and the record's number (4 bytes, little-endian), then 4076 bytes of
- * the buffer. Android shows the records as /sys/fs/pstore/dmesg-ramoops-N; tools/xnu-cycle.sh takes them and
- * tools/fbframes.py puts them back in order by that number. Nothing is written when the kernel kept no picture, so a
+ * the buffer. Android shows the records as /sys/fs/pstore/dmesg-ramoops-N; tools/run/xnu-cycle.sh takes them and
+ * tools/log/fbframes.py puts them back in order by that number. Nothing is written when the kernel kept no picture, so a
  * dump of Android's own stays where it is.
  */
 static void save_host_frames(const struct xnu_syms *s)
@@ -2732,7 +2732,7 @@ static void msdc_self_test(void)
 	out("\n");
 
 	/* How fast, how far, and is what comes back right: a checksum of 4 MB of boot_a, which
-	 * is the image this program was flashed in, so the host can check it (tools/msdc-test.sh). */
+	 * is the image this program was flashed in, so the host can check it (tools/run/msdc-test.sh). */
 	for (uint32_t blocks = 256; blocks <= 8192; blocks *= 4) {
 		const uint64_t at = HAKIOS_LOADER_TEST_BUFFER;
 		uint64_t total = 4u * 1024 * 1024, t0, t1, f = dbg_freq();
@@ -3144,7 +3144,7 @@ static void touch_hand_back(void)
 /*
  * Android unless asked for XNU, once. The keypad's state registers change by themselves (a scan
  * pattern), so keys are not used. The request is a line written to /dev/pmsg0 under Android
- * (tools/boot-xnu.sh): ramoops keeps it in its pmsg zone across the reboot, where this finds it
+ * (tools/run/boot-xnu.sh): ramoops keeps it in its pmsg zone across the reboot, where this finds it
  * and wipes it, so the boot after XNU is Android again.
  */
 static const char boot_xnu_flag[] = "HAKIOS:BOOT-XNU";

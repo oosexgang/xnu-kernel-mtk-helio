@@ -262,7 +262,7 @@ variant_main(void *context)
 /*
  * Variants built AHEAD. A variant built at the draw stops the frame for 1 to 4 s on the phone (83 of them, 125 s, in
  * run 202 alone: the home screen's frames came 5 to 15 s apart). Each one's configuration is in the log ("rwm variant
- * LABEL #N built in T ms: vHEX fHEX"), so tools/rwm-variants.py folds them into userland/share/rwm-variants27.txt,
+ * LABEL #N built in T ms: vHEX fHEX"), so userland/tools/rwm-variants.py folds them into userland/share/rwm-variants27.txt,
  * the image has it as /hakios/share/rwm-variants.txt, and once a generic pipeline is made a thread of its own builds
  * every configuration listed for its label, one at a time under the compile lock, while the frames go on. A draw that
  * wants one still being built waits for it (generic_cond) instead of building it again. Boot-arg rwm_prebuild=0: none.
@@ -381,7 +381,7 @@ async_variant_main(void *context)
 		static unsigned said;
 		char line[300];
 
-		/* as the draw's own line, for tools/rwm-variants.py: "built in T ms: vHEX fHEX" */
+		/* as the draw's own line, for userland/tools/rwm-variants.py: "built in T ms: vHEX fHEX" */
 		if (said++ < 120) {
 			int n = snprintf(line, sizeof(line), "!!rwm variant %s #%u %s in %llu ms: v", g->label +
 					 (strncmp(g->label, "com.apple.coreanimation.", 24) == 0 ? 24 : 0),

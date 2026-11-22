@@ -135,7 +135,7 @@ def render(found):
            f'Every boot argument the kernel reads: {total} of them, by the file that reads them. The text is the comment',
            'beside the code, so the file named in each heading has the full explanation.',
            '',
-           '- Pass them in `XNU_ARGS="..."` to `tools/xnu-cycle.sh`, or for good in the board file\'s `[boot] bootargs`.',
+           '- Pass them in `XNU_ARGS="..."` to `tools/run/xnu-cycle.sh`, or for good in the board file\'s `[boot] bootargs`.',
            '- An argument that is not given leaves its feature off unless the text says otherwise: drivers of a phone\'s',
            '  hardware do nothing until asked.',
            f'- {bare} arguments have no comment naming them yet and show "—". To document one, write a comment with',
