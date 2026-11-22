@@ -1476,6 +1476,8 @@ bt_quirks(uint8_t *packet, unsigned length)
 	return length;
 }
 
+static unsigned bt_open_said;   /* opens said as kept lines */
+
 static int
 bt_open(__unused dev_t dev, __unused int flags, __unused int type, __unused struct proc *p)
 {
@@ -1485,7 +1487,13 @@ bt_open(__unused dev_t dev, __unused int flags, __unused int type, __unused stru
 	lck_mtx_lock(&bt_lock);
 	bt_opens++;
 	lck_mtx_unlock(&bt_lock);
-	hakios_host_keep_add("connsys: bt device %u opened by %s (pid %d) with flags %#x, %u open", minor(dev), name, proc_selfpid(), flags, bt_opens);
+	/* bluetoothd opens and closes it every few seconds: the first opens kept, the rest in the log only */
+	if (bt_open_said < 6) {
+		bt_open_said++;
+		hakios_host_keep_add("connsys: bt device %u opened by %s (pid %d) with flags %#x, %u open", minor(dev), name, proc_selfpid(), flags, bt_opens);
+	} else {
+		printf("connsys: bt device %u opened by %s (pid %d) with flags %#x, %u open\n", minor(dev), name, proc_selfpid(), flags, bt_opens);
+	}
 	return 0;
 }
 
@@ -1497,7 +1505,11 @@ bt_close(__unused dev_t dev, __unused int flags, __unused int type, __unused str
 		bt_opens--;
 	}
 	lck_mtx_unlock(&bt_lock);
-	hakios_host_keep_add("connsys: bt device %u closed (pid %d), %u open", minor(dev), proc_selfpid(), bt_opens);
+	if (bt_open_said < 6) {
+		hakios_host_keep_add("connsys: bt device %u closed (pid %d), %u open", minor(dev), proc_selfpid(), bt_opens);
+	} else {
+		printf("connsys: bt device %u closed (pid %d), %u open\n", minor(dev), proc_selfpid(), bt_opens);
+	}
 	return 0;
 }
 

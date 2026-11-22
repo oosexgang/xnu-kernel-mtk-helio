@@ -631,7 +631,7 @@ static struct wf_mail wf_mail[WF_MAIL];
 static unsigned wf_mail_next;
 static struct hakios_sta_bss *wf_heard;        /* what the last scan heard, WF_BSS_MOST of it at most */
 static unsigned wf_heard_count, wf_frames, wf_other_events, wf_rx_dropped, wf_rx_ethernets;
-/* what the joined network carried, said every 10 s while it is joined (wf_link_poll) */
+/* what the joined network carried, said every 10 s for a minute, then every minute, while it is joined (wf_link_poll) */
 static struct {
 	unsigned tx, tx_failed, arp, udp, tcp, other, unicast, broadcast, clear, wtbl, error, said, dropped_said;
 	uint8_t last_eid[4], last_mgmt[4];      /* the last events and management subtypes that came while joined */
@@ -1866,7 +1866,8 @@ wf_link_poll(void)
 	{
 		static uint32_t last;
 
-		if (wf_net.linked && wf_ms() - last >= 10000 && wf_st.said < 40) {
+		/* every 10 s for the first minute, then every minute (the kept lines are 64 KB for everything) */
+		if (wf_net.linked && wf_ms() - last >= (wf_st.said < 6 ? 10000u : 60000u) && wf_st.said < 40) {
 			last = wf_ms();
 			wf_st.said++;
 			hakios_host_keep_add("connsys: carried [%u ms]: sent %u (%u not), in: %u to us, %u to all -- ARP %u, UDP %u, TCP %u, "

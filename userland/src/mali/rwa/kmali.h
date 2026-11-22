@@ -58,6 +58,9 @@ struct km_bo *km_surface(uint32_t surface_id, struct km_surface_info *info, char
 int km_submit(uint64_t jc, bool fragment, struct km_bo *const *bos, unsigned count, uint64_t *seq);
 /* until job SEQ is done, at most TIMEOUT_NS (0: only ask): 0, ETIMEDOUT, or another errno */
 int km_wait(uint64_t seq, int64_t timeout_ns);
+/* time spent in submits and in waits for the GPU so far, by every thread but those that called km_wait_uncounted */
+void km_spent(uint64_t *submit_ns, uint64_t *wait_ns);
+void km_wait_uncounted(void);
 /* the last job submitted by this process */
 uint64_t km_last_seq(void);
 /* the kernel's display: surface SURFACE's last job (~0: drawn and not yet sent) */

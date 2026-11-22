@@ -374,6 +374,16 @@ public:
 	/* ... and how evenly: the time from each frame to the next, counted by the millisecond (the last count: longer) */
 	uint64_t        fLastFrame;
 	uint32_t        fFrameTimes[FRAME_TIMES + 1], fFramePauses, fFrameLongest;
+	/*
+	 * ... and by each thing that moved: the frames from one pause to the next, said as a kept line when the next
+	 * pause comes (boot-arg fb_motion=0: not): how many, how many came within a refresh, two, three and later at
+	 * 60 a second, the longest gap, and how long the GPU kept them waiting here. Whether an animation ran at 30 a
+	 * second throughout is the "later" count of its line, which must be 0.
+	 */
+	uint64_t        fMotionStart, fMotionPause, fMotionWaiting;
+	uint32_t        fMotionFrames, fMotionGaps[4], fMotionLongest, fMotionLines;
+	/* ... and all of them so far, for the minute's kept line: animations, those with a gap of 35 ms or more, the gaps */
+	uint32_t        fMotionAll, fMotionAllLate, fMotionAllGaps[4], fMotionWorst, fMotionWorstAt;
 	/* boot-arg fb_diff=1: which pixels of the panel each frame changed (it costs: the panel's memory is slow to read) */
 	bool            fDiff;
 	uint64_t        fDiffPixels;
@@ -404,6 +414,7 @@ public:
 	void presenter(void);
 	static void presenterMain(void * self, wait_result_t result);
 	void reportFrameTimes(void);
+	void motionEnd(void);
 	void drawLayer(MiniIOSurface * s, const int32_t * src, const int32_t * dst);
 	void drawRows(const struct RowJob * job, int32_t y0, int32_t y1, uint32_t * blendRow);
 	static void helperMain(void * self, wait_result_t result);
@@ -1105,6 +1116,46 @@ IOMobileFramebuffer::drawLayer(MiniIOSurface * s, const int32_t * src, const int
 }
 
 /*
+ * The frames since the last pause, if something moved (fb_motion): a kept line, "fb motion at S s: N frames in T ms
+ * (R a second) after a pause of P ms; gaps a b c d (within 18, 35, 52 ms, longer), the longest L ms; W ms waiting
+ * for the GPU". With the lock held.
+ */
+void
+IOMobileFramebuffer::motionEnd(void)
+{
+	static int on = -1;
+	uint64_t span, start, waited;
+
+	if (on < 0) {
+		on = PE_parse_boot_argn("fb_motion", &on, sizeof(on)) ? on : 1;
+	}
+	if (fMotionFrames >= 8) {
+		absolutetime_to_nanoseconds(fMotionStart, &start);
+		fMotionAll++;
+		fMotionAllLate += fMotionGaps[2] + fMotionGaps[3] != 0;
+		for (unsigned i = 0; i < 4; i++) {
+			fMotionAllGaps[i] += fMotionGaps[i];
+		}
+		if (fMotionLongest > fMotionWorst) {
+			fMotionWorst = fMotionLongest;
+			fMotionWorstAt = (uint32_t)(start / NSEC_PER_SEC);
+		}
+	}
+	if (on != 0 && fMotionFrames >= 8 && fMotionLines < 120) {
+		fMotionLines++;
+		absolutetime_to_nanoseconds(fLastFrame - fMotionStart, &span);
+		absolutetime_to_nanoseconds(fMotionWaiting, &waited);
+		span /= NSEC_PER_MSEC;
+		hakios_keep("fb motion at %llu s: %u frames in %llu ms (%llu a second) after a pause of %llu ms; gaps %u %u %u %u, "
+		    "the longest %u ms; %llu ms waiting for the GPU", start / NSEC_PER_SEC, fMotionFrames, span,
+		    span != 0 ? (fMotionFrames - 1) * 1000ULL / span : 0, fMotionPause, fMotionGaps[0], fMotionGaps[1],
+		    fMotionGaps[2], fMotionGaps[3], fMotionLongest, waited / NSEC_PER_MSEC);
+	}
+	fMotionFrames = fMotionLongest = 0;
+	bzero(fMotionGaps, sizeof(fMotionGaps));
+}
+
+/*
  * How evenly the frames of the last seconds came: how many followed the one before within the
  * time of one refresh at 120, 60, 40 and 30 a second, and the times half and 95 in 100 of them
  * stayed under. With the lock held.
@@ -1156,6 +1207,9 @@ IOMobileFramebuffer::reportFrameTimes(void)
 
 			hakios_keep("MiniIOMobileFramebuffer: busy frames so far: %u, %u%% within 18 ms; %u under 26, %u under 35, %u longer",
 			    all, all ? (run[0] + run[1]) * 100 / all : 0, run[2], run[3], run[4]);
+			hakios_keep("fb motion so far: %u animations, %u with a gap of 35 ms or more; gaps %u %u %u %u (within 18, 35, "
+			    "52 ms, longer); the longest %u ms, at %u s", fMotionAll, fMotionAllLate, fMotionAllGaps[0],
+			    fMotionAllGaps[1], fMotionAllGaps[2], fMotionAllGaps[3], fMotionWorst, fMotionWorstAt);
 		}
 	}
 	bzero(fFrameTimes, sizeof(fFrameTimes));
@@ -1715,7 +1769,7 @@ void
 IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 {
 	uint32_t set = swapWord(swap, SWAP_LAYERS_SET);
-	uint64_t began = mach_absolute_time(), nanos, ready, shown, drawn;
+	uint64_t began = mach_absolute_time(), nanos, ready, shown, drawn, gpuWait;
 	uint32_t layers = 0;
 	MiniIOSurface * recorded = NULL;
 	bool report;
@@ -1726,7 +1780,8 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 			    swapWord(swap, SWAP_ID), swapWord(swap, SWAP_SURFACE(layer)), SWAP_GPU_MS);
 		}
 	}
-	fStatWaiting += mach_absolute_time() - began;
+	gpuWait = mach_absolute_time() - began;
+	fStatWaiting += gpuWait;
 	began = ready = mach_absolute_time();
 	if (gOnTheBeat) {
 		uint64_t period, aim, next;
@@ -1759,9 +1814,20 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 		nanos /= NSEC_PER_MSEC;
 		if (nanos >= FRAME_PAUSE) {
 			fFramePauses++;
+			motionEnd();
+			fMotionPause = nanos;
 		} else {
 			fFrameTimes[nanos < FRAME_TIMES ? nanos : FRAME_TIMES]++;
 			fFrameLongest = nanos > fFrameLongest ? (uint32_t) nanos : fFrameLongest;
+			if (fMotionFrames == 0) {
+				fMotionStart = fLastFrame;
+				fMotionFrames = 1;
+				fMotionWaiting = 0;
+			}
+			fMotionFrames++;
+			fMotionWaiting += gpuWait;
+			fMotionGaps[nanos < 18 ? 0 : nanos < 35 ? 1 : nanos < 52 ? 2 : 3]++;
+			fMotionLongest = nanos > fMotionLongest ? (uint32_t) nanos : fMotionLongest;
 		}
 	}
 	fLastFrame = began;

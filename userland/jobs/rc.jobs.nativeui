@@ -4,9 +4,12 @@
 # Center the same, and the home screen's pages swiped -- the library's 30-second lines give the command buffers and
 # the pipelines made second by second, and the refreshes between frames. The recipes are asked for twice, a minute
 # apart: the log keeps its start and its last minute or so, and the first answer may fall between (runs 583 to 591).
+# The home screen's widget extensions into Darwin's background as they start (psgrep -bg): after each start they take
+# whole cores for minutes while the window server waits for a processor (runs 595-676).
+/hakios/bin/psgrep -bg 2 Widget
 /hakios/bin/rwtouch wait 170 swipe 0.705 0.586 0.707 0.587 150
 /hakios/bin/rwtouch wait 40
-/hakios/bin/cputop 3 100 keep
+/hakios/bin/cputop 10 30 keep
 /hakios/bin/fbgrab -log home 750 0.7
 /hakios/bin/rwtouch tap 0.375 0.47 wait 4 button home wait 3 tap 0.375 0.47 wait 4 button home wait 3
 /hakios/bin/rwtouch tap 0.375 0.355 wait 4 swipe 0.5 0.8 0.5 0.3 150 wait 2 button home wait 3 tap 0.375 0.355 wait 4 button home wait 3

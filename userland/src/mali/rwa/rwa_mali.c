@@ -136,8 +136,9 @@ keep(const char *fmt, ...)
 	va_end(ap);
 	/*
 	 * Boot-arg rwn_keepfps=1: of the 30-second report only what says the frame rate is kept (frames each second, the
-	 * gaps, the GPU's load, the library's time) -- the rest is said to the log without "!!" -- so that a long run
-	 * driven by hand fits its whole timeline into the host's 64 KB of kept lines.
+	 * gaps, the late frames, the GPU's load and its passes, what the passes keep, the library's time) -- the rest is
+	 * said to the log without "!!" -- so that a long run driven by hand fits its whole timeline into the host's 64 KB
+	 * of kept lines.
 	 */
 	static int fps_only = -1;
 	if (fps_only < 0)
@@ -145,7 +146,8 @@ keep(const char *fmt, ...)
 	if (fps_only && strncmp(line + n, "30s: ", 5) == 0) {
 		const char *what = line + n + 5;
 		if (strncmp(what, "from ", 5) != 0 && strncmp(what, "command buffers by the refreshes", 32) != 0 &&
-		    strncmp(what, "GPU busy", 8) != 0 && strncmp(what, "at ", 3) != 0)
+		    strncmp(what, "GPU busy", 8) != 0 && strncmp(what, "at ", 3) != 0 && strstr(what, "late frames") == NULL &&
+		    strncmp(what, "GPU by pass kind", 16) != 0 && strncmp(what, "attachments at", 14) != 0)
 			memmove(line, line + 2, strlen(line + 2) + 1);   /* (not kept: without the "!!") */
 	}
 #ifndef RWA_HOST_FAKE
@@ -1421,6 +1423,11 @@ sec_pipe_note(void)
 }
 static pthread_cond_t gq_cond = PTHREAD_COND_INITIALIZER;
 static uint64_t gpu_busy_ns, gpu_latency_ns, gpu_passes, gpu_last_done, gpu_latency_max;
+static uint64_t gpu_busy_all_ns;   /* (gpu_busy_ns, never cleared: for the late frames' lines) */
+static uint64_t batches_all;       /* (stats.batches, never cleared) */
+/* the late frames of the 30 seconds (rwa_flush_seq): how many, in how many the GPU worked 60% of the gap or more, and
+ * their gaps, times before the first draw and drawing, the GPU's time and passes, in all (under gq_lock) */
+static uint64_t late_n, late_gpu, late_gap_ns, late_pre_ns, late_draw_ns, late_gpu_ns, late_passes;
 /* by kind (width >= 700, >= 300, >= 100, smaller; several targets; loaded): passes, draws, vertex+tiler and fragment
  * time */
 static uint64_t kind_passes[16], kind_draws[16], kind_vt_ns[16], kind_frag_ns[16];
@@ -1444,6 +1451,7 @@ static void *
 gpu_watch(void *arg)
 {
 	(void)arg;
+	km_wait_uncounted();   /* (its waits are the GPU's time, not a drawing thread's) */
 	for (;;) {
 		pthread_mutex_lock(&gq_lock);
 		while (gq_head == gq_tail)
@@ -1547,8 +1555,10 @@ gpu_watch(void *arg)
 		if (done > MAX2(vdone, from0))
 			kind_frag_ns[kind] += done - MAX2(vdone, from0);
 		uint64_t from = MAX2(submitted, gpu_last_done);
-		if (done > from)
+		if (done > from) {
 			gpu_busy_ns += done - from;
+			gpu_busy_all_ns += done - from;
+		}
 		gpu_latency_ns += done - submitted;
 		gpu_latency_max = MAX2(gpu_latency_max, done - submitted);
 		gpu_passes++;
@@ -2487,6 +2497,7 @@ submit_batch(struct batch *b, uint64_t *seq_out, char *why, size_t why_size)
 		}
 	}
 	stats.batches++;
+	batches_all++;
 	stats.flush_ns += now_ns() - began;
 	if (boot_arg("mali_native_sync=1"))
 		km_wait(seq, 2000000000);
@@ -2766,10 +2777,12 @@ batch_for(struct rwa_texture *const *color, const unsigned *level, unsigned colo
 			stats.multiload_cleared++;
 		}
 	}
-	/* the store actions: the pass's last draw's (one Metal pass, or passes merged into one batch, the last says) */
+	/* the store actions: the pass's last draw's (one Metal pass, or passes merged into one batch, the last says); an
+	 * attachment the caller says is not kept (discard_mask: DontCare, or a memoryless texture) is not written back
+	 * either */
 	if (open_batch && actions)
 		for (unsigned i = 0; i < color_count && i < 8; i++) {
-			if (dr->color_store[i] == 0)
+			if (dr->color_store[i] == 0 || (dr->discard_mask & (1u << i)))
 				open_batch->discard |= 1u << i;
 			else
 				open_batch->discard &= ~(1u << i);
@@ -4237,6 +4250,52 @@ rwa_flush_seq(struct rwa_device *device)
 			if (sec >= sec_base && sec - sec_base < 32 && sec_frames[sec - sec_base] < 0xffff)
 				sec_frames[sec - sec_base]++;
 		}
+		/*
+		 * A frame late in something that moves (45 to 250 ms after the one before, which came less than 120 ms
+		 * after its own): a kept line (the first 40; all of them in the 30-second line) with where the time between the two
+		 * went -- before this frame's first draw (CoreAnimation and the application, or the processor's being
+		 * busy elsewhere), drawing it (of which in the kernel's submit, and waiting for the GPU), and how much
+		 * of the gap the GPU worked (boot-arg rwn_late=0: not)
+		 */
+		{
+			static uint64_t last_gap, at_submit, at_wait, at_busy, at_batches;
+			static int late_on = -1;
+			static unsigned late_said;
+			uint64_t submit_ns, wait_ns;
+
+			if (late_on < 0)
+				late_on = !boot_arg("rwn_late=0");
+			km_spent(&submit_ns, &wait_ns);
+			if (late_on && was && now - was > 45000000ull && now - was < 250000000ull && last_gap &&
+			    last_gap < 120000000ull) {
+				/* every one counted for the 30-second line (under gq_lock) */
+				uint64_t pre = tl_begin > was ? tl_begin - was : 0, gpu = gpu_busy_all_ns - at_busy;
+				late_n++;
+				late_gpu += gpu * 10 >= (now - was) * 6;
+				late_gap_ns += now - was;
+				late_pre_ns += pre;
+				late_draw_ns += (now - was) - pre;
+				late_gpu_ns += gpu;
+				late_passes += batches_all - at_batches;
+			}
+			if (late_on && was && now - was > 45000000ull && now - was < 250000000ull && last_gap &&
+			    last_gap < 120000000ull && late_said < 40) {
+				late_said++;
+				keep("late frame at %llu s: %.0f ms after the one before = %.1f before its first draw + %.1f "
+				     "drawing it (%.1f in submits, %.1f waiting for the GPU); the GPU worked %.1f ms of it, "
+				     "%llu passes, %s at the first draw", (unsigned long long)((now - lib_up_ns) / 1000000000ull),
+				     (now - was) / 1e6, tl_begin > was ? (tl_begin - was) / 1e6 : 0.0,
+				     tl_begin > was ? (now - tl_begin) / 1e6 : (now - was) / 1e6, (submit_ns - at_submit) / 1e6,
+				     (wait_ns - at_wait) / 1e6, (gpu_busy_all_ns - at_busy) / 1e6,
+				     (unsigned long long)(batches_all - at_batches),
+				     tl_begin_busy ? "the GPU busy" : "the GPU idle");
+			}
+			last_gap = was ? now - was : 0;
+			at_submit = submit_ns;
+			at_wait = wait_ns;
+			at_busy = gpu_busy_all_ns;
+			at_batches = batches_all;
+		}
 		if (was && now - was < 80000000ull && tl_begin && tl_begin < now) {
 			tl_frames++;
 			tl_span_ns += now - tl_begin;
@@ -4422,6 +4481,13 @@ report(void)
 				memset(sec_pipes, 0, sizeof(sec_pipes));
 				sec_base = now_sec;
 			}
+			if (late_n)
+				keep("30s: %llu late frames in motion (45 to 250 ms after the one before), the GPU working 60%% of "
+				     "the gap or more in %llu; each %.1f ms = %.1f before its first draw + %.1f drawing; the GPU "
+				     "%.1f ms of it, %.1f passes", (unsigned long long)late_n, (unsigned long long)late_gpu,
+				     late_gap_ns / 1e6 / late_n, late_pre_ns / 1e6 / late_n, late_draw_ns / 1e6 / late_n,
+				     late_gpu_ns / 1e6 / late_n, (double)late_passes / late_n);
+			late_n = late_gpu = late_gap_ns = late_pre_ns = late_draw_ns = late_gpu_ns = late_passes = 0;
 			if (tl_frames)
 				keep("30s: %llu frames in motion: the first draw with the GPU at the frame before %llu, after it went "
 				     "idle %llu (%.1f ms after); first draw to commit %.1f ms", (unsigned long long)tl_frames,

@@ -642,6 +642,33 @@ km_surface(uint32_t surface_id, struct km_surface_info *info, char *why, size_t 
 	return bo;
 }
 
+/* the time the threads that draw spent in the kernel's submit (waiting while its queue of jobs is full) and waiting for
+ * the GPU; the GPU's watcher thread (km_wait_uncounted) is not counted (km_spent) */
+static uint64_t spent_submit_ns, spent_wait_ns;
+static __thread bool wait_uncounted;
+
+static uint64_t
+mono_ns(void)
+{
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+}
+
+void
+km_wait_uncounted(void)
+{
+	wait_uncounted = true;
+}
+
+void
+km_spent(uint64_t *submit_ns, uint64_t *wait_ns)
+{
+	*submit_ns = __atomic_load_n(&spent_submit_ns, __ATOMIC_RELAXED);
+	*wait_ns = __atomic_load_n(&spent_wait_ns, __ATOMIC_RELAXED);
+}
+
 int
 km_submit(uint64_t jc, bool fragment, struct km_bo *const *bos, unsigned count, uint64_t *seq)
 {
@@ -672,7 +699,9 @@ km_submit(uint64_t jc, bool fragment, struct km_bo *const *bos, unsigned count, 
 	s.bo_handles = (uint64_t)(uintptr_t)handles;
 	s.bo_handle_count = count;
 	s.requirements = fragment ? 1 : 0;   /* PANFROST_JD_REQ_FS */
+	uint64_t t0 = mono_ns();
 	int error = call(KM_SUBMIT, &s, sizeof(s));
+	__atomic_add_fetch(&spent_submit_ns, mono_ns() - t0, __ATOMIC_RELAXED);
 	if (handles != stack)
 		free(handles);
 	if (error == 0 && s.jc == 0)
@@ -694,7 +723,10 @@ km_wait(uint64_t seq, int64_t timeout_ns)
 	if (seq == 0 || fake || seq <= __atomic_load_n(&known_done, __ATOMIC_RELAXED))
 		return 0;
 	struct km_wait_req w = { seq, timeout_ns };
+	uint64_t t0 = wait_uncounted ? 0 : mono_ns();
 	int e = call(KM_WAIT, &w, sizeof(w));
+	if (!wait_uncounted)
+		__atomic_add_fetch(&spent_wait_ns, mono_ns() - t0, __ATOMIC_RELAXED);
 	if (e == 0) {
 		/* done, and so is every job before it (done) */
 		uint64_t was = __atomic_load_n(&known_done, __ATOMIC_RELAXED);

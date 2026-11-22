@@ -6,6 +6,10 @@
  * psgrep -sysctl NAME [TIMES]: a string sysctl, TIMES times a second apart (the system has no sysctl command).
  * psgrep -kill WORD...: the same, and each sent SIGTERM.
  * psgrep -cpu SECONDS: the ten processes that used the most CPU in the next SECONDS, as % of one core.
+ * psgrep -bg SECONDS WORD...: in the background, for as long as the system runs: every SECONDS each process whose path
+ *   has one of the words in it, and that is not yet, put in Darwin's background (setpriority PRIO_DARWIN_BG: the lowest
+ *   priority, its I/O throttled) -- the home screen's widget extensions, which otherwise take whole cores for minutes
+ *   after each start while the window server waits for a processor (runs 595-676).
  */
 #include <errno.h>
 #include <signal.h>
@@ -98,6 +102,80 @@ cpu_top(int seconds)
 	return 0;
 }
 
+/* the path of a process, or its name */
+static void
+path_of(const struct kinfo_proc *proc, char *path, size_t size)
+{
+	if (proc_pidpath(proc->kp_proc.p_pid, path, (uint32_t)size) <= 0) {
+		strlcpy(path, proc->kp_proc.p_comm, size);
+	}
+}
+
+static int
+has_word(const char *path, char *const *words, int count)
+{
+	for (int w = 0; w < count; w++) {
+		size_t n = strlen(words[w]);
+
+		for (const char *at = path; *at; at++) {
+			if (strncasecmp(at, words[w], n) == 0) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+/* -bg SECONDS WORD...: forked off; the job list goes on */
+static int
+background(int seconds, char *const *words, int count)
+{
+	enum { MOST = 256 };
+	static pid_t done[MOST];
+	unsigned ndone = 0, next = 0, said = 0;
+	pid_t child = fork();
+
+	if (child != 0) {
+		printf("psgrep: -bg every %d s %s\n", seconds, child > 0 ? "started" : strerror(errno));
+		return child > 0 ? 0 : 1;
+	}
+	for (;;) {
+		unsigned count_all;
+		struct kinfo_proc *procs = all_processes(&count_all);
+
+		for (unsigned i = 0; i < count_all; i++) {
+			char path[PROC_PIDPATHINFO_MAXSIZE] = "";
+			pid_t pid = procs[i].kp_proc.p_pid;
+			unsigned k = 0;
+
+			while (k < ndone && done[k] != pid) {
+				k++;
+			}
+			if (k < ndone || pid == getpid()) {
+				continue;
+			}
+			path_of(&procs[i], path, sizeof(path));
+			if (!has_word(path, words, count)) {
+				continue;
+			}
+			int e = setpriority(PRIO_DARWIN_PROCESS, pid, PRIO_DARWIN_BG) == 0 ? 0 : errno;
+			if (said++ < 12) {
+				/* (kept: the console's middle is not in the host's log) */
+				const char *name = strrchr(path, '/');
+				char line[200];
+
+				snprintf(line, sizeof(line), "!!psgrep: %s[%d] in the background%s%s", name ? name + 1 : path, pid,
+					 e ? ": " : "", e ? strerror(e) : "");
+				sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+			}
+			done[next++ % MOST] = pid;   /* (the oldest forgotten when full: put back once more, harmless) */
+			ndone = ndone < MOST ? ndone + 1 : MOST;
+		}
+		free(procs);
+		sleep((unsigned)seconds);
+	}
+}
+
 int
 main(int argc, char **argv)
 {
@@ -106,6 +184,9 @@ main(int argc, char **argv)
 	 * kernel has brought Bluetooth up after it started and found no controller, run 649) */
 	int killing = argc > 1 && strcmp(argv[1], "-kill") == 0;
 
+	if (argc > 3 && strcmp(argv[1], "-bg") == 0) {
+		return background(atoi(argv[2]) > 0 ? atoi(argv[2]) : 2, argv + 3, argc - 3);
+	}
 	if (argc > 2 && strcmp(argv[1], "-cpu") == 0) {
 		return cpu_top(atoi(argv[2]) > 0 ? atoi(argv[2]) : 10);
 	}
