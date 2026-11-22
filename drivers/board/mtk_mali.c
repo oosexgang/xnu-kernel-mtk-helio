@@ -675,20 +675,28 @@ static LCK_MTX_DECLARE(mali_job_lock, &mali_lock_group);
 static int mali_wait_event;
 static LCK_MTX_DECLARE(mali_wait_lock, &mali_lock_group);
 
+/* `want` 0: any of the bits of `mask` (a job that is done or failed -- a failure used to be seen only when the
+ * second for a job was over: 65 failed chains, a second each, made run 270's frames one a second) */
+static inline bool
+job_bits_are(uint32_t value, uint32_t mask, uint32_t want)
+{
+	return want != 0 ? (value & mask) == want : (value & mask) != 0;
+}
+
 static bool
 wait_job(uint32_t at, uint32_t mask, uint32_t want, uint32_t ms)
 {
 	uint64_t deadline;
 
 	for (int i = 0; i < 20; i++) {
-		if ((rd(mali, at) & mask) == want) {
+		if (job_bits_are(rd(mali, at), mask, want)) {
 			return true;
 		}
 		delay(10);
 	}
 	clock_interval_to_deadline(ms, NSEC_PER_MSEC, &deadline);
 	while (mach_absolute_time() < deadline) {
-		if ((rd(mali, at) & mask) == want) {
+		if (job_bits_are(rd(mali, at), mask, want)) {
 			return true;
 		}
 		uint64_t nap;
@@ -698,7 +706,7 @@ wait_job(uint32_t at, uint32_t mask, uint32_t want, uint32_t ms)
 		(void)lck_mtx_sleep_deadline(&mali_wait_lock, LCK_SLEEP_DEFAULT, (event_t)&mali_wait_event, THREAD_UNINT, nap);
 		lck_mtx_unlock(&mali_wait_lock);
 	}
-	return (rd(mali, at) & mask) == want;
+	return job_bits_are(rd(mali, at), mask, want);
 }
 
 #define MMU_INT_RAWSTAT     0x2000
@@ -1062,6 +1070,126 @@ mtk_mali_mapped(void)
 
 /* The entries of each level for GPU address `gpu`, as far as there are tables (with the lock held). */
 static void walk_tables(uint64_t gpu, uint64_t walk[3]);
+
+/*
+ * `bytes` of GPU memory at `gpu` into the host's kept lines, 64 a line ("mali dump WHAT +OFFSET: HEX"), read through the
+ * GPU's own tables (with mali_lock held): a failed job's descriptors, for tools/log/mali-dump.py to decode with the
+ * descriptions of the Mali's v7 (the 27 release's Mali failing fragment chains with status 0x58 and 0x5b from some
+ * moment on, runs 256 to 283, and nothing else said what was wrong in them). False when a page is not mapped.
+ */
+static bool
+gpu_read(uint64_t gpu, void *out, uint32_t bytes)
+{
+	uint8_t *to = (uint8_t *)out;
+
+	while (bytes != 0) {
+		uint64_t entry, phys;
+		uint32_t in_page = 4096 - (uint32_t)(gpu & 4095), n = bytes < in_page ? bytes : in_page;
+
+		if (pt_top == NULL || !((entry = pt_top[(gpu >> 30) & 31]) & 1)) {
+			return false;
+		}
+		entry = ((uint64_t *)phystokv(entry & PTE_ADDRESS))[(gpu >> 21) & 511];
+		if (!(entry & 1)) {
+			return false;
+		}
+		if ((entry & 3) == 1) {
+			phys = (entry & PTE_ADDRESS & ~0x1fffffull) + (gpu & 0x1fffff);  /* a 2 MB block */
+		} else {
+			entry = ((uint64_t *)phystokv(entry & PTE_ADDRESS))[(gpu >> 12) & 511];
+			if (!(entry & 1)) {
+				return false;
+			}
+			phys = (entry & PTE_ADDRESS) + (gpu & 4095);
+		}
+		vm_offset_t kva = phystokv(phys);
+
+		FlushPoC_DcacheRegion(kva, n);  /* (what the GPU read is in memory, not in this alias's cache lines) */
+		memcpy(to, (const void *)kva, n);
+		to += n;
+		gpu += n;
+		bytes -= n;
+	}
+	return true;
+}
+
+static void
+dump_gpu(const char *what, uint64_t gpu, uint32_t bytes)
+{
+	uint8_t row[64];
+
+	for (uint32_t off = 0; off < bytes; off += sizeof(row)) {
+		char hex[2 * sizeof(row) + 1];
+
+		if (!gpu_read(gpu + off, row, sizeof(row))) {
+			hakios_host_keep_add("mali dump %s +%#x at %#llx: not mapped", what, off, gpu + off);
+			return;
+		}
+		for (unsigned i = 0; i < sizeof(row); i++) {
+			static const char digits[] = "0123456789abcdef";
+
+			hex[2 * i] = digits[row[i] >> 4];
+			hex[2 * i + 1] = digits[row[i] & 15];
+		}
+		hex[2 * sizeof(row)] = 0;
+		hakios_host_keep_add("mali dump %s %#llx +%#x: %s", what, gpu, off, hex);
+	}
+}
+
+/* a fragment job and the framebuffer it names: the job's 128 bytes, then 1024 of the descriptor (parameters, the
+ * ZS/CRC extension, render targets) */
+static void
+dump_fragment(const char *what, uint64_t chain)
+{
+	uint64_t fbd = 0;
+	char name[24];
+
+	snprintf(name, sizeof(name), "%s-job", what);
+	dump_gpu(name, chain, 128);
+	/* and what the job's header names as the fault: 128 bytes before it and 128 from it (runs 284, 286 and 329 had
+	 * it at the same place in each batch's pool, +0x3b60 from the framebuffer descriptor, 32 bytes aligned) */
+	{
+		uint64_t fault = 0;
+
+		if (gpu_read(chain + 8, &fault, sizeof(fault)) && fault != 0) {
+			hakios_host_keep_add("mali dump %s: fault pointer %#llx", what, fault);
+			snprintf(name, sizeof(name), "%s-fault", what);
+			dump_gpu(name, (fault & ~31ull) - 128, 256);
+		}
+	}
+	if (gpu_read(chain + 40, &fbd, sizeof(fbd))) {
+		uint64_t params[8] = { 0 };
+
+		hakios_host_keep_add("mali dump %s: framebuffer pointer %#llx", what, fbd);
+		snprintf(name, sizeof(name), "%s-fbd", what);
+		dump_gpu(name, fbd & ~63ull, 1024);
+		/* and what it points at: the tiler's context, and the frame shaders that load what the targets held (the
+		 * failed jobs of run 284 were full-screen passes of three targets loading them, the good one loaded none):
+		 * their draw descriptors, the first one's render state, shader, textures, samplers and thread storage */
+		if (gpu_read(fbd & ~63ull, params, sizeof(params))) {
+			uint64_t dcd[16] = { 0 }, rsd0 = 0;
+
+			snprintf(name, sizeof(name), "%s-tiler", what);
+			dump_gpu(name, params[7], 128);
+			if (params[3] != 0 && gpu_read(params[3], dcd, sizeof(dcd))) {
+				snprintf(name, sizeof(name), "%s-dcd", what);
+				dump_gpu(name, params[3], 384);
+				snprintf(name, sizeof(name), "%s-rsd", what);
+				dump_gpu(name, dcd[7] & ~63ull, 256);
+				if (gpu_read(dcd[7] & ~63ull, &rsd0, sizeof(rsd0))) {
+					snprintf(name, sizeof(name), "%s-shader", what);
+					dump_gpu(name, rsd0 & ~15ull, 128);
+				}
+				snprintf(name, sizeof(name), "%s-tex", what);
+				dump_gpu(name, dcd[4], 128);
+				snprintf(name, sizeof(name), "%s-smp", what);
+				dump_gpu(name, dcd[5], 64);
+				snprintf(name, sizeof(name), "%s-tls", what);
+				dump_gpu(name, dcd[14], 64);
+			}
+		}
+	}
+}
 static void
 walk_tables(uint64_t gpu, uint64_t walk[3])
 {
@@ -1281,6 +1409,10 @@ scan_all_pages(uint64_t lo, uint64_t hi)
  * fault or 0xff for no answer within a second -- and then the GPU is reset, so the next one finds
  * it working.
  */
+static uint64_t last_good_fragment;        /* the last fragment chain that finished (dump_fragment) */
+static uint64_t last_good_preload;         /* ... the last of them with a frame shader loading the targets */
+static bool dumped_bad;
+
 uint32_t
 mtk_mali_submit(uint64_t chain, bool fragment)
 {
@@ -1297,8 +1429,10 @@ mtk_mali_submit(uint64_t chain, bool fragment)
 	wr(mali, js + JS_CONFIG_NEXT, JS_CONFIG);
 	wr(mali, js + JS_COMMAND_NEXT, 1);
 	lck_mtx_unlock(&mali_lock);
-	finished = wait_job(JOB_INT_RAWSTAT, (1u << slot) | (1u << (slot + 16)), 1u << slot, 1000);
+	finished = wait_job(JOB_INT_RAWSTAT, (1u << slot) | (1u << (slot + 16)), 0, 1000);
 	lck_mtx_lock(&mali_lock);
+	raw = rd(mali, JOB_INT_RAWSTAT);
+	finished = finished && (raw & (1u << slot)) != 0 && (raw & (1u << (slot + 16))) == 0;
 	if (!finished) {
 		raw = rd(mali, JOB_INT_RAWSTAT);
 		status = (raw & (1u << (slot + 16))) ? rd(mali, js + JS_STATUS) : 0xff;
@@ -1314,6 +1448,26 @@ mtk_mali_submit(uint64_t chain, bool fragment)
 		walk_tables(last_failure.fault_address | ((uint64_t)rd(mali, AS0 + 0x24) << 32), last_failure.walk);
 		printf("mali: a job on slot %u did not finish: interrupts %#x, status %#x, MMU %#x fault %#x at %#x\n", slot, raw,
 		    last_failure.status, last_failure.mmu, last_failure.fault, last_failure.fault_address);
+		/* the first two failed fragment jobs, and the last one that finished before them, for the host to decode */
+		{
+			static unsigned dumped;
+
+			if (fragment && dumped < 2) {
+				char what[16];
+
+				snprintf(what, sizeof(what), "bad%u", dumped);
+				hakios_host_keep_add("mali dump %s: status %#x, chain %#llx", what, last_failure.status, chain);
+				dump_fragment(what, chain);
+				if (dumped == 0 && last_good_fragment != 0) {
+					dump_fragment("good", last_good_fragment);
+				}
+				if (dumped == 0 && last_good_preload != 0) {
+					dump_fragment("goodload", last_good_preload);
+				}
+				dumped++;
+				dumped_bad = true;
+			}
+		}
 		{
 			int freed = describe_address(last_failure.fault_address | ((uint64_t)rd(mali, AS0 + 0x24) << 32));
 
@@ -1348,6 +1502,17 @@ mtk_mali_submit(uint64_t chain, bool fragment)
 		(void)wait_for(mali, SHADER_READY, shader_mask, shader_mask, 50);
 		as0_update(pt_top_phys, TRANSCFG_AARCH64_4K);
 		wr(mali, MMU_INT_CLEAR, 0xffffffffu);
+	}
+	if (finished && fragment) {
+		uint64_t fbd = 0;
+		uint32_t word0 = 0;
+
+		last_good_fragment = chain;
+		/* ... and the last one that loaded its targets by a frame shader, until the first failure is dumped */
+		if (!dumped_bad && gpu_read(chain + 40, &fbd, sizeof(fbd)) && gpu_read(fbd & ~63ull, &word0, sizeof(word0)) &&
+		    (word0 & 7) != 0) {
+			last_good_preload = chain;
+		}
 	}
 	wr(mali, JOB_INT_CLEAR, (1u << slot) | (1u << (slot + 16)));
 	lck_mtx_unlock(&mali_lock);

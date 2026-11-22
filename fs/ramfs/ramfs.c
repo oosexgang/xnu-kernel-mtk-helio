@@ -1694,6 +1694,16 @@ ramfs_xattr_find(struct ramfs_node *node, const char *name)
 	return NULL;
 }
 
+/*
+ * The copy is made with Z_WAITOK and without the mount's lock, then filled under it, again if the attribute grew
+ * meanwhile. It was Z_NOWAIT under the lock, which fails whenever the zone would have to grow, and the read was then
+ * ENOMEM. This file system has extended security (ramfs_mount) and keeps no ACL itself, so VFS reads a node's ACL,
+ * com.apple.system.Security, through here (vnode_getattr -> vnode_get_filesec), the authorization of a lookup too:
+ * the one ENOMEM a stat or a mkdir can meet on ramfs. Run 342: stat and mkdir said errno 12 of SpringBoard's
+ * container directories in /private/var/containers/Data/System that were there, and a failed mkdir there is what
+ * stops SpringBoard in the BSAssert of -[BSUIMappedImageCache initWithUniqueIdentifier:options:] (runs 301, 326, 337,
+ * 338; userland/src/inject_sb.c).
+ */
 static int
 ramfs_getxattr(struct vnop_getxattr_args *ap)
 {
@@ -1701,27 +1711,37 @@ ramfs_getxattr(struct vnop_getxattr_args *ap)
 	struct ramfs_mount *rm = node->rn_mount;
 	struct ramfs_xattr *xa;
 	void *copy = NULL;
-	size_t size = 0;
-	int error = 0;
+	size_t size = 0, room = 0;
+	int error;
 
-	lck_mtx_lock(&rm->rm_lock);
-	xa = ramfs_xattr_find(node, ap->a_name);
-	if (xa == NULL) {
-		error = ENOATTR;
-	} else {
+	for (;;) {
+		error = 0;
+		lck_mtx_lock(&rm->rm_lock);
+		xa = ramfs_xattr_find(node, ap->a_name);
+		if (xa == NULL) {
+			error = ENOATTR;
+			break;
+		}
 		size = xa->rx_size;
-		if (ap->a_uio != NULL) {
-			if ((size_t)uio_resid(ap->a_uio) < size) {
-				error = ERANGE;
-			} else if (size != 0) {
-				/* copied out after the lock is dropped: the attribute may be replaced meanwhile */
-				copy = kalloc_data(size, Z_NOWAIT);
-				if (copy == NULL) {
-					error = ENOMEM;
-				} else {
-					memcpy(copy, xa->rx_data, size);
-				}
-			}
+		if (ap->a_uio == NULL || size == 0) {
+			break;
+		}
+		if ((size_t)uio_resid(ap->a_uio) < size) {
+			error = ERANGE;
+			break;
+		}
+		if (copy != NULL && room >= size) {
+			memcpy(copy, xa->rx_data, size);
+			break;
+		}
+		lck_mtx_unlock(&rm->rm_lock);
+		if (copy != NULL) {
+			kfree_data(copy, room);
+		}
+		room = size;
+		copy = kalloc_data(room, Z_WAITOK);
+		if (copy == NULL) {
+			return ENOMEM;
 		}
 	}
 	lck_mtx_unlock(&rm->rm_lock);
@@ -1729,12 +1749,12 @@ ramfs_getxattr(struct vnop_getxattr_args *ap)
 	if (!error) {
 		if (ap->a_uio == NULL) {
 			*ap->a_size = size;
-		} else if (copy != NULL) {
+		} else if (size != 0) {
 			error = uiomove(copy, (int)size, ap->a_uio);
 		}
 	}
 	if (copy != NULL) {
-		kfree_data(copy, size);
+		kfree_data(copy, room);
 	}
 	return error;
 }
@@ -1827,23 +1847,40 @@ ramfs_listxattr(struct vnop_listxattr_args *ap)
 	struct ramfs_mount *rm = node->rn_mount;
 	struct ramfs_xattr *xa;
 	char *copy = NULL;
-	size_t total = 0, at = 0;
-	int error = 0;
+	size_t total, room = 0, at;
+	int error;
 
-	lck_mtx_lock(&rm->rm_lock);
-	TAILQ_FOREACH(xa, &node->rn_xattrs, rx_link) {
-		total += xa->rx_namelen + 1;
-	}
-	if (ap->a_uio != NULL && total != 0) {
+	/* (as ramfs_getxattr: the copy made waiting and without the lock, filled under it) */
+	for (;;) {
+		error = 0;
+		total = 0;
+		lck_mtx_lock(&rm->rm_lock);
+		TAILQ_FOREACH(xa, &node->rn_xattrs, rx_link) {
+			total += xa->rx_namelen + 1;
+		}
+		if (ap->a_uio == NULL || total == 0) {
+			break;
+		}
 		if ((size_t)uio_resid(ap->a_uio) < total) {
 			error = ERANGE;
-		} else if ((copy = kalloc_data(total, Z_NOWAIT)) == NULL) {
-			error = ENOMEM;
-		} else {
+			break;
+		}
+		if (copy != NULL && room >= total) {
+			at = 0;
 			TAILQ_FOREACH(xa, &node->rn_xattrs, rx_link) {
 				memcpy(copy + at, xa->rx_name, xa->rx_namelen + 1);
 				at += xa->rx_namelen + 1;
 			}
+			break;
+		}
+		lck_mtx_unlock(&rm->rm_lock);
+		if (copy != NULL) {
+			kfree_data(copy, room);
+		}
+		room = total;
+		copy = kalloc_data(room, Z_WAITOK);
+		if (copy == NULL) {
+			return ENOMEM;
 		}
 	}
 	lck_mtx_unlock(&rm->rm_lock);
@@ -1851,12 +1888,12 @@ ramfs_listxattr(struct vnop_listxattr_args *ap)
 	if (!error) {
 		if (ap->a_uio == NULL) {
 			*ap->a_size = total;
-		} else if (copy != NULL) {
+		} else if (total != 0) {
 			error = uiomove(copy, (int)total, ap->a_uio);
 		}
 	}
 	if (copy != NULL) {
-		kfree_data(copy, total);
+		kfree_data(copy, room);
 	}
 	return error;
 }

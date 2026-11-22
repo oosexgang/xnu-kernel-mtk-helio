@@ -160,6 +160,7 @@ F:	drivers/iokit/MiniIOSurface.h
 F:	arch/arm64/boot/mtkmali.h
 F:	tools/run/gpu-probe.sh
 F:	tools/log/texshot.py
+F:	tools/log/mali-dump.py
 F:	userland/src/mali/
 F:	userland/src/metal/
 F:	userland/src/hakiosmetal.m

@@ -396,6 +396,7 @@ public:
 	void shot(MiniIOSurface * s);
 	void keepShot(void);
 	void frameShot(uint32_t when);
+	void frameShotScatter(uint32_t when, const uint8_t * from, uint32_t cy, uint32_t ch);
 	bool grab(uint8_t * out, uint32_t max, uint32_t * width, uint32_t * height, uint32_t * stride);
 	uint32_t        fShotStats;
 	bool            fShotKept;      /* the fbshot_keep picture taken */
@@ -1412,6 +1413,8 @@ extern "C" const uint32_t hakios_host_frames_size;
 static uint32_t gFrameTimes[6];
 static unsigned gFrameCount = (unsigned) -1;
 static uint32_t gFrameStep;
+static uint32_t gFrameCY, gFrameCH;          /* fbframes_cy, fbframes_ch */
+static uint32_t gFrameScatter;               /* fbframes_scatter */
 
 static void
 frames_parse(void)
@@ -1454,6 +1457,71 @@ frames_parse(void)
 	if (PE_parse_boot_argn("fbframes_step", &step, sizeof(step)) && step >= 1 && step <= 16) {
 		gFrameStep = step;
 	}
+	/* fbframes_cy=ROW fbframes_ch=ROWS: only that band of the panel's rows -- the dump zone holds 570640 bytes, the
+	 * whole panel at every pixel 2.3 MB: at fbframes_step=1 a band of 396 rows a run, at 2 all but 40 rows */
+	PE_parse_boot_argn("fbframes_cy", &gFrameCY, sizeof(gFrameCY));
+	PE_parse_boot_argn("fbframes_ch", &gFrameCH, sizeof(gFrameCH));
+	PE_parse_boot_argn("fbframes_scatter", &gFrameScatter, sizeof(gFrameScatter));
+}
+
+/*
+ * fbframes_scatter=1: the band in pieces, each in a stretch of the dump zone that Android's boot leaves alone. mtkloader
+ * cuts hakios_host_frames into records of 4066 bytes (dmesg-ramoops-N); Android overwrote record 9, often 8, and 80
+ * to 99, sometimes from 78, in every run of 311 to 320 -- so a picture over them came back cut. Each piece has a head of
+ * its own ("HKFQ": width, height, uptime, bytes, and the panel row it starts at) and tools/log/fbframes.py puts the rows
+ * back where they belong, from several runs into one picture.
+ */
+static const struct { uint32_t from, to; } gFrameStretches[] = {
+	{ 0, 8 * 4066 }, { 10 * 4066, 78 * 4066 }, { 100 * 4066, 570256 },
+};
+
+void
+IOMobileFramebuffer::frameShotScatter(uint32_t when, const uint8_t * from, uint32_t cy, uint32_t ch)
+{
+	struct __attribute__((packed)) {
+		char mark[4];
+		uint16_t width, height;
+		uint32_t uptime, bytes, row;
+	} head = { { 'H', 'K', 'F', 'Q' }, 0, 0, when, 0, 0 };
+	const uint32_t width = fPanelWidth / gFrameStep, row_bytes = width * 2;
+	uint32_t row = 0, rows = ch / gFrameStep, end = 0;
+
+	IOLockLock(fLock);
+	for (unsigned k = 0; k < sizeof(gFrameStretches) / sizeof(gFrameStretches[0]) && row < rows; k++) {
+		uint32_t room = gFrameStretches[k].to > hakios_host_frames_size ? hakios_host_frames_size : gFrameStretches[k].to;
+		uint32_t n = room > gFrameStretches[k].from + sizeof(head) ? (room - gFrameStretches[k].from - sizeof(head)) / row_bytes : 0;
+
+		n = n < rows - row ? n : rows - row;
+		if (n == 0) {
+			continue;
+		}
+		uint8_t * out = (uint8_t *) hakios_host_frames + gFrameStretches[k].from;
+
+		head.width = (uint16_t) width;
+		head.height = (uint16_t) n;
+		head.bytes = n * row_bytes;
+		head.row = cy + row * gFrameStep;
+		memcpy(out, &head, sizeof(head));
+		out += sizeof(head);
+		for (uint32_t y = row; y < row + n; y++) {
+			const uint32_t * src = (const uint32_t *) (from + (size_t) (y * gFrameStep + gFrameStep / 2) * fRowBytes);
+
+			for (uint32_t x = 0; x < width; x++) {
+				uint32_t pixel = src[x * gFrameStep + gFrameStep / 2];
+				uint32_t r = (pixel >> 16) & 0xff, g = (pixel >> 8) & 0xff, b = pixel & 0xff;
+				uint16_t v = (uint16_t) ((r >> 3) << 11 | (g >> 2) << 5 | (b >> 3));
+
+				*out++ = (uint8_t) (v & 0xff);
+				*out++ = (uint8_t) (v >> 8);
+			}
+		}
+		end = gFrameStretches[k].from + (uint32_t) sizeof(head) + head.bytes;
+		row += n;
+	}
+	hakios_host_frames_len = end > hakios_host_frames_len ? end : hakios_host_frames_len;
+	IOLockUnlock(fLock);
+	hakios_host_keep_add("fbframes: at %u s, panel rows %u to %u of %u wanted, in pieces past the records Android overwrites",
+	    when, cy, cy + row * gFrameStep, cy + ch);
 }
 
 void
@@ -1470,8 +1538,16 @@ IOMobileFramebuffer::frameShot(uint32_t when)
 		hakios_host_keep_add("fbframes: no picture on the panel at %u s", when);
 		return;
 	}
+	uint32_t cy = gFrameCY < fPanelHeight ? gFrameCY : 0;
+	uint32_t ch = gFrameCH != 0 && cy + gFrameCH <= fPanelHeight ? gFrameCH : fPanelHeight - cy;
+
+	from += (size_t) cy * fRowBytes;
+	if (gFrameScatter) {
+		frameShotScatter(when, from, cy, ch);
+		return;
+	}
 	head.width = (uint16_t) (fPanelWidth / gFrameStep);
-	head.height = (uint16_t) (fPanelHeight / gFrameStep);
+	head.height = (uint16_t) (ch / gFrameStep);
 	head.bytes = (uint32_t) head.width * head.height * 2;
 	IOLockLock(fLock);
 	if (hakios_host_frames_len + sizeof(head) + head.bytes > hakios_host_frames_size) {
@@ -1498,8 +1574,8 @@ IOMobileFramebuffer::frameShot(uint32_t when)
 	}
 	hakios_host_frames_len += (uint32_t) sizeof(head) + head.bytes;
 	IOLockUnlock(fLock);
-	hakios_host_keep_add("fbframes: a picture at %u s, %ux%u RGB565, %u bytes kept of %u", when, head.width,
-	    head.height, hakios_host_frames_len, hakios_host_frames_size);
+	hakios_host_keep_add("fbframes: a picture at %u s, %ux%u RGB565 (panel rows %u to %u), %u bytes kept of %u", when,
+	    head.width, head.height, cy, cy + ch, hakios_host_frames_len, hakios_host_frames_size);
 }
 
 static void
@@ -1902,6 +1978,21 @@ IOMobileFramebuffer::show(const uint8_t * swap, MiniIOSurface ** surfaces)
 
 			measured++;
 			hakios_keep("MiniIOMobileFramebuffer: core %d runs at %u MHz", core, mhz);
+		}
+		/* boot-arg fbstats=1: the same, short, into the host's kept lines (the first 60): frames a second while the
+		 * picture moves, for a run nobody watches (17 November) */
+		{
+			static int keep = -1;
+			static unsigned kept;
+
+			if (keep < 0) {
+				keep = PE_parse_boot_argn("fbstats", &keep, sizeof(keep)) ? keep : 0;
+			}
+			if (keep == 1 && kept < 60) {
+				kept++;
+				hakios_keep("fbstats: %u frames in %llu ms, %llu us each waiting for the GPU", fStatFrames,
+				    nanos / NSEC_PER_MSEC, (unsigned long long)(waiting / fStatFrames / NSEC_PER_USEC));
+			}
 		}
 		IOLog("MiniIOMobileFramebuffer: %u frames in %llu ms (%llu a second), %llu us each in the driver, after %llu us "
 		    "waiting for the GPU and, %u of them, %llu us for the next refresh; %u swaps waited for the frame before, "

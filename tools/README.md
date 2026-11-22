@@ -53,4 +53,5 @@ file's `[boot] android_device`, and stop when the phone is not on slot `a`.
 | `frames.py`, `latency.py` | How evenly a run's frames came and what held up the slow ones; how far behind a finger the screen is |
 | `recording.py`, `sound.py` | A video of a screen recording (`rec_secs=`); a WAV of a sound recording (`rec_sound=`) |
 | `texshot.py`, `passpipes.py` | Textures read back by the Metal device (`rwm_texshot=`); the frame log of `rwm_passlog` with each pass's pipelines |
+| `mali-dump.py` | The descriptors of a failed GPU fragment job (and of the last finished one) the kernel kept, decoded field by field with Mesa's description of the Mali's v7 |
 | `camraw.py`, `camthumb.py` | Pictures of the frames the camera driver left in memory, and of the thumbnail it logs |
