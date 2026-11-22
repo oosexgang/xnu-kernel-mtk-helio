@@ -201,7 +201,7 @@ rwm_render_begin(struct rwm_render_state *s, struct rwa_device *device)
 /*
  * What the pass draws into, and whether it begins by clearing: Metal keeps it in the pass descriptor and not in the
  * pipeline, so it belongs to the encoder. A resolve is the one thing a multisample pass asks for that this driver
- * cannot do, and it is said rather than ignored: the library renders into multisample attachments (docs/metal.md
+ * cannot do, and it is said rather than ignored: the library renders into multisample attachments (userland/docs/metal.md
  * 10.34) and resolves nothing, so the one-sample texture an application means to READ would come back holding what it
  * held before -- a pass that seems to have drawn nothing. (MTLStoreActionMultisampleResolve is 2, ...AndStore... 3.)
  */

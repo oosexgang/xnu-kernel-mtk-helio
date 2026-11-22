@@ -1,13 +1,13 @@
 #!/bin/bash
-# The frontend's whole test run, in the order of what it proves (docs/air.md
+# The frontend's whole test run, in the order of what it proves (userland/docs/air.md
 # section 4): first that the bitcode reader agrees with LLVM on every module of
 # the corpus, then how far every module gets through translation and ir3.
 #
 # This is the project's CI. There is no hosted one -- the corpus is Apple's
 # code and stays off the network -- so this runs before every commit that
-# touches the frontend, and docs/air-report.md is the report of that commit.
+# touches the frontend, and userland/docs/air-report.md is the report of that commit.
 #
-#   userland/tools/air/check.sh            check, and write docs/air-report.md
+#   userland/tools/air/check.sh            check, and write userland/docs/air-report.md
 #   userland/tools/air/check.sh -q         only the numbers, write nothing
 set -e
 ROOT=$(cd "$(dirname "$(readlink -f "$0")")/../../.." && pwd)
@@ -23,7 +23,7 @@ LIBS=(
 	"$SYSFILES/rootfs/System/Library/CoreImage/PortraitFilters.cifilter/default.metallib"
 	"$SYSFILES/rootfs/System/Library/CoreImage/PortraitFilters.cifilter/portrait_filters.metallib"
 )
-# SafariSharedUI's default.metallib is in the corpus list of docs/air.md and is
+# SafariSharedUI's default.metallib is in the corpus list of userland/docs/air.md and is
 # deliberately not here: it is 118 bytes and holds no functions at all.
 for f in "${LIBS[@]}"; do
 	[ -f "$f" ] || { echo "check.sh: missing $f"; exit 1; }
@@ -49,7 +49,7 @@ if [ "$QUIET" = 1 ]; then
 else
 	python3 "$ROOT/userland/tools/air/corpus.py" --ir3 \
 		--md "$ROOT/docs/air-report.md" --json "$ROOT/build/air-report.json" "${LIBS[@]}"
-	echo "check.sh: wrote docs/air-report.md"
+	echo "check.sh: wrote userland/docs/air-report.md"
 fi
 
 echo

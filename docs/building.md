@@ -1,26 +1,25 @@
 # From a clone to the home screen
 
-Every command between `git clone` and the system's home screen on a phone whose package is on the `devices` branch (the first one: `x6826b`), in order, with what each one needs and how long it took.
-It was done so on 11 and 12 November 2026: a new clone of this repository in an empty directory, on an Intel Mac with macOS 14.0, Apple clang 15.0.0,
-Command Line Tools 15.3, no Homebrew. Whatever stopped that clone is fixed in the scripts or said here. On Linux the steps are the same and the
-packages are those of [kernel/README.md](../kernel/README.md); that side was not run again for this page.
-
-For a phone that is not the first phone, read [porting.md](porting.md) first: this page is the last step of that one.
+Every command between `git clone` and Darwin 27's home screen on a phone whose package is on the
+`devices` branch (the first one: `x6826b`), in order, with what each one needs. It is done on an Intel
+Mac with macOS 14, the Command Line Tools and no Homebrew; the kernel's build fetches its own LLVM.
+For a phone that is not the first phone, read [porting.md](porting.md) first: this page is the last
+step of that one. In Russian, step by step: [darwin27.ru.md](darwin27.ru.md).
 
 ## What you need before the first command
 
 | | |
 | --- | --- |
 | The phone | bootloader unlocked, Android rooted (Magisk), on slot `a`, USB debugging allowed for this computer |
-| A partition `xnusys` | 4 GB, for the system image. The first phone's was cut out of `userdata` once (`tools/gpt-carve.py`, step 8 of porting.md). Without it there is no root to boot |
+| A partition for the system | 4.3 GB on the first phone (`xnusys`, cut out of `userdata` once: `tools/gpt-carve.py`, step 8 of porting.md); its name is the board file's `[loader] system_partition`. The image takes all but its last 96 MiB, which are the payload's |
 | `backup/boot_a_magisk.img` | **your own** rooted boot image, the one that is in `boot_a` when Android boots. The loader is packed into it. Never in the repository |
 | `adb`, `fastboot` in `PATH` | Android's platform-tools |
-| A compiler | macOS: the Command Line Tools. Linux: see kernel/README.md |
-| The system image 20F66 SDK | `~/theos/sdks/iPhoneOS16.5.sdk` (or `$THEOS/sdks`), from github.com/theos/sdks; the command is in kernel/README.md |
-| 7-Zip 23 or newer | as `7z` or `7zz` in `PATH`. It reads APFS disk images. 7-zip.org's own macOS build is `7zz`; of its two archives `-mac` is for Apple silicon and `-mac-x64` for Intel |
-| `python3` | 3.9 was enough; no modules beyond the standard ones |
-| Disk | 20 GB: 1 GB kernel sources and build, 8 GB while the system is fetched (5.6 GB after), 2.3 GB each for the image and the tree it is made of |
-| Network | 7.4 GB from Apple's CDN (the two disk images of the reference phone's the system image 20F66), 47 MB of zig, the sources `kernel/assemble.sh ../xnu-8796-hakios` and `kernel/deps/setup.sh` clone |
+| The SDK | `iPhoneOS16.5.sdk` in `$THEOS/sdks` (github.com/theos/sdks); the user space is built against it |
+| 7-Zip 23 or newer | as `7zz` or `7z` in `PATH`: it reads APFS and the system's disk images |
+| `python3` 3.9 or newer, meson, ninja, bison, flex | the tools; Mesa's builds |
+| The 27.2 IPSW, unpacked | `rootfs/`, `cryptex/os/`, `cryptex/app/`, `dyld/` in one directory, `REL` (default `build/ios27/ios27`). How: [darwin27-boot.md](darwin27-boot.md#the-kernel-and-the-build) |
+| The phone's firmware | for Wi-Fi and Bluetooth, CONNSYS's files in `kernel/deps/build/connsys-fw/firmware`; for the touch controller, `fw-touch/hdl_firmware.img`. The package's journals say which files; never in the repository |
+| Disk and network | about 40 GB; Apple's XNU and the build's sources, LLVM 19.1.7, the earlier system's two disk images (7.4 GB, below), Mesa's release |
 
 The path of the clone must have no spaces in it.
 
@@ -28,99 +27,93 @@ The path of the clone must have no spaces in it.
 
 ```sh
 export HAKIOS_SERIAL=<your phone's adb serial>     # only ever in the environment, never in a file
+export REL=$PWD/build/ios27/ios27                  # the unpacked IPSW
 
-make check                               # 16 s    everything that needs no phone
-tools/device.py add x6826b               #         the phone's package: what the kernel's table and the loader are built from
-kernel/assemble.sh ../xnu-8796-hakios    #         Apple's xnu-8796.121.2 + kernel/overlay + kernel/patches, next to the clone
-kernel/deps/setup.sh                     # 40 s    what the kernel's build needs: sources, host tools, the SDK's overlay, two libraries
-kernel/build.sh -j8 -k                   # 2 min 48 s the kernel. -k is needed: one harmless error (lldbmacros) ends make with code 2
-tools/get-zig.sh                         #         zig 0.13.0 into build/zig: its ld.lld links the loader (not needed where ld.lld is installed)
-darwin/system/fetch.sh                          # ~30 min at 4 MB/s: the files of the system image (20F66) from Apple's server; a broken download is taken up again
-userland/build.sh                        # 4 min   our programs and libraries, userland/root.apfs (4 MB) and userland/system.apfs (2.4 GB)
-tools/run/mkpayload.sh                       # 1 s     build/payload.bin = the kernel + the small root
-mkdir -p backup fw-touch && cp <your rooted boot image> backup/boot_a_magisk.img && cp <the touch firmware> fw-touch/hdl_firmware.img
-tools/run/system-flash.sh                    # ~2 min  system.apfs into xnusys (Android must be up; 2.4 GB free on /data for the way there)
-XNU_LOG_OUT=logs/run1.log tools/run/xnu-cycle.sh   # 5 min   the board file's [boot]: 120 s, cpus=4 touchscreen=2 mali=1 fbscale=2 fbfit=3
+make check                               # everything that needs no phone
+tools/device.py add x6826b               # the phone's package: what the kernel's table and the loader are built from
+
+# the kernel (about 4 minutes once its dependencies are there)
+kernel/assemble.sh ../xnu-12377-hakios   # Apple's xnu-12377.121.6 + kernel/overlay + kernel/patches, next to the clone
+kernel/deps/setup.sh                     # LLVM 19.1.7, mig 138, the iig headers of macOS 26.5's SDK, the build's sources
+kernel/build.sh -j8 -k                   # -k: one harmless error (lldbmacros) ends make with code 2
+tools/get-zig.sh                         # zig's ld.lld links the loader (not needed where ld.lld is installed)
+
+# the earlier system's small root, where the 27 release's small image starts
+darwin/system/fetch.sh                   # the 20F66 system's files from Apple's server (about 30 min at 4 MB/s)
+userland/build.sh                        # our programs; userland/root
+
+# the 27 release's images
+darwin/mtk27.sh env                      # the link trees, ldid, darwin/tools/pacstrip
+darwin/tools/pacstrip cache "$REL/dyld-strip" "$REL"/dyld/dyld_shared_cache_arm64e{,.[0-9]*}
+python3 darwin/tools/fips26.py "$REL/dyld-strip" STORED COMPUTED   # the build's two values: the script's head says where
+darwin/mtk27.sh all                      # Mesa for arm64e (10 to 20 min the first time), libraries, Metal, images
+darwin/mtk27.sh mali                     # the native Mali library
+
+# the stage cache: the window server's shaders compiled on this Mac
+userland/tools/air/mk-host-mac-llvm.sh   # Mesa for this Mac, once
+export MESA_HOST_BUILD=$PWD/build/mesa-host-mac-llvm/build
+userland/tools/rwacache.sh build/rwa-cache.bin          # about a minute
+RWA_CACHE_BIN=$PWD/build/rwa-cache.bin RC_JOBS=$PWD/userland/jobs/rc.jobs.nativeui darwin/mtk27.sh root
+
+# the phone
+HAKIOS_PAYLOAD=flash tools/run/system-flash.sh "$REL/system27-prune.apfs"   # once an image; Android must be up
+HAKIOS_RAMDISK="$REL/root26-sys.apfs" tools/run/mkpayload.sh               # every run: the kernel + the small image
+HAKIOS_PAYLOAD=flash XNU_SECS=300 XNU_LOG_OUT=logs/run1.log XNU_ARGS="cpus=7 touchscreen=2 buttons=2 mtkbatt=1 \
+  mali=1 mtk_cpufreq=3 mali_mhz=950 metal=1 camtl=1 fb_queue=1 fb_flip=1 metal_profile=4 fbscale=2 fbfit=3 \
+  launchd_unsecure_cache=1 mali_native=1 thid_should_crash=0" tools/run/xnu-cycle.sh
 ```
 
-The times are those of a clone of this repository built on 12 November 2026 on the Intel Mac named above;
-where none is given, the step was run but its time was not kept.
+The last command builds the loader, packs it with Android's kernel into `build/boot_a.img`, writes the
+payload into the tail of the system partition and reads it back, flashes `boot_a`, lets Android come
+up, asks it for one XNU boot, and reads the log when Android is back. Only `boot_a` and the system
+partition are written; slot `b` never. The phone goes back to Android by itself `XNU_SECS` after the
+kernel starts.
 
-The last command builds the loader, packs it with Android's kernel and the payload into `build/boot_a.img` (30 MB; `boot_a` holds 32),
-flashes `boot_a`, lets Android come up, asks it for one XNU boot, and reads the log when Android is back. The phone shows the home screen about
-100 seconds after the kernel starts and goes back to Android by itself `XNU_SECS` after. Only `boot_a` and `xnusys` are written; slot `b` never.
+With the radios and the accelerometer, add `connsys_step=17 connsys_wake=0 connsys_bt=2 scp_step=7`
+to the arguments and `JOBCACHE=1 ALLOW="wifi WiFi"` to the `root` step (the network to join is
+`fw-wifi/network`: its name, then its passphrase; never in the repository). The camera is `mtkcam=5`,
+without CONNSYS. Never `aks_keys=1` with the 27 release: launchd reboots at once.
 
 ## What a good run looks like
 
 In `logs/run1.log`, in this order:
 
-- `boot-args: debug=0x8 serial=3 rd=md0 emmc_root=1 cpus=4 touchscreen=2 mali=1 ...`
-- `touch: TD4160-... is up` (the loader gave the touch controller its firmware)
-- `Darwin Kernel Version 22.5.0: <the time you built it>`
-- `mali: came up to step 6 of 6`
-- `load_init_program: attempting to load /sbin/launchd`, then `=== 36 checks, 0 failed ===` from our init
-- every five seconds, once SpringBoard draws: `MiniIOMobileFramebuffer: 51 frames in 5012 ms (10 a second)` and
-  `this frame on average red 118 green 151 blue 148; 100% of it not black`
+- `boot-args: debug=0x8 serial=3 rd=md0 emmc_root=1 cpus=7 touchscreen=2 ...`
+- `board: x6826b (...)`, and the features the board lists
+- `Darwin Kernel Version 12377.121.6`
+- our init's `=== 36 checks, 0 failed ===`
+- every five seconds, the GPU's `mali: GPU busy N% of 5 s: ...`
+- every 30 s, once the window server draws, the native library's lines `rwn backboardd: 30s: ...`:
+  the stage cache's hits (`stage cache: N stages taken from it, M compiled`), the command buffers of
+  each second, and `fragment jobs N checked, 0 failed`
 - `=== end of XNU log ===`, `starting Android`
 
-Ten frames a second is the CPU drawing: this build has no Mesa in it. The GPU path is `GL=1` (and `METAL=1`) of `userland/build.sh`, which needs
-`userland/tools/mk-mesa.sh` and for that meson and ninja; it was not part of this test.
+A long run loses the middle of its log: what is early and was not kept for the host is gone.
 
-To see the screen without looking at the phone, add `fbshot=20` to `XNU_ARGS` and give the run ten seconds more (`XNU_SECS=130`): the kernel
-prints a small picture of the frame into the log and `python3 tools/log/fbshot.py logs/run1.log shot.png` makes a PNG of it. `fbshot=N` counts the
-five-second frame reports, N/5 of them, and those start only when SpringBoard draws (about 85 s in): `fbshot=20` is a picture at about 125 s.
-The log keeps its last 256 KB, so a picture wider than the default 60 pixels, or one taken long before the end, falls out of it.
+To see the screen without looking at the phone, a job list takes pictures (`fbgrab -keep NAME`) and
+`python3 tools/log/fbjpg.py logs/run1.log shot.jpg NAME` makes them into files; `fbshot=SECONDS` is the
+kernel's own picture of the panel (`tools/log/fbshot.py`). The log keeps its start and its last 256 KB;
+lines a program says with `!!` go into what the kernel keeps for the host (64 KB) and survive the
+middle.
 
-## What is not in a run made this way
+## The earlier system (20F66)
 
-- No Wi-Fi, Bluetooth, sensors, camera or sound: their firmware is your phone's own and is not fetched (`build.sh: fw/: 0 files ... absent`),
-  and each wants its boot-args and jobs; see that subject's journal in [README.md](README.md).
-- The five test programs that want an entitlement are unsigned without `ldid` (`build.sh: no ldid: ...`). `LDID=$PWD/userland/tools/ldid-codesign.sh ./userland/build.sh` signs
-  them with macOS's `codesign`.
-- `lsd` fills the log with `denied attempt to escape CPU monitor`, twenty lines a second. It is harmless and it is why the log's beginning is lost.
-
-## The payload in the system partition instead of boot_a
-
-`boot_a` holds Android's own kernel and ramdisk besides ours; on the first phone it is 32 MB, and with
-the kernel and the small root in it 2 MB were left. With `HAKIOS_PAYLOAD=flash` the boot image carries
-only the loader in front of Android (23.9 MB on the first phone), and the payload goes into the last
-96 MiB of the system partition, written and read back by `tools/run/payload-flash.sh` (the run cycle calls
-it). The loader reads it from there (1.6 s for 19 MB), checks its sum and starts it; a missing or
-damaged one sends the phone to Android, as a boot image without a payload always did.
+The first generation of this port ran the 20F66 system, from the same repository; its pieces are still
+here and its small root is the 27 release's starting point. Its own run:
 
 ```sh
-HAKIOS_PAYLOAD=flash XNU_LOG_OUT=logs/run1.log tools/run/xnu-cycle.sh
+userland/build.sh                        # also userland/system.apfs (2.4 GB), the earlier system's image
+tools/run/system-flash.sh                # system.apfs into the partition
+tools/run/mkpayload.sh                   # the payload with userland/root.apfs
+XNU_LOG_OUT=logs/run1.log tools/run/xnu-cycle.sh   # the board file's [boot]
 ```
 
-`tools/run/system-flash.sh` refuses a system image that would reach those 96 MiB. A loader built before
-this change cannot read the tail: the first such run needs the new loader in `boot_a`, which every run
-of `xnu-cycle.sh` writes anyway.
-
-## Wi-Fi, Bluetooth and Metal
-
-Each needs more in the images than the plain boot, and the phone's CONNSYS firmware in
-`kernel/deps/build/connsys-fw/firmware` (the files are listed in the package's Wi-Fi journal; never in the
-repository). `tools/run/image.sh` makes both images and the payload; the system image changes, so write it
-before the run.
-
-```sh
-tools/run/image.sh wifi && tools/run/system-flash.sh       # and fw-wifi/network: your network's name, then its passphrase
-XNU_ARGS="cpus=4 touchscreen=2 buttons=2 mali=1 fbscale=2 fbfit=3 scp_step=7 connsys_step=17 connsys_wake=0 mtkbatt=1" \
-  XNU_SECS=210 tools/run/xnu-cycle.sh
-
-tools/run/image.sh bluetooth && tools/run/system-flash.sh  # the same arguments and connsys_bt=2 aks_keys=1, XNU_SECS=300
-QC_METALLIB=<QuartzCore's shaders> tools/run/image.sh metal && tools/run/system-flash.sh   # and metal=1 fb_queue=1 fb_flip=1
-```
-
-What was seen on 12 November 2026 from this repository: Wi-Fi joined the network given (WPA2, its keys
-in) and Settings showed it ticked; the status bar had the battery's percentage; `bt_test` saw 19 BLE
-devices through CoreBluetooth; with Metal the plug-in `HakiosMetalDevice` was on `IOAcceleratorES` and
-CoreAnimation drew through the GPU, up to 17 frames a second with the payload in `boot_a` (`35 checks,
-4 failed`: the files of init's four tests that the cut image leaves out) and up to 40 with the payload in
-the system partition and nothing cut (`36 checks, 0 failed`). The pictures come from the job lists'
-`fbgrab -log NAME`: `python3 tools/log/fbjpg.py LOG OUT.jpg NAME`.
+`tools/run/image.sh wifi|bluetooth|metal` makes its images for those runs; it was not run with the
+12377 kernel of this branch.
 
 ## If it does not come back
 
-A kernel that hangs costs a power cycle: the image boots Android unless asked for XNU, once. If `boot_a` itself is broken, the way back is the boot
-ROM's download mode (mtkclient, `mtk.py w boot_a backup/boot_a_magisk.img`); check that you can reach it before the first flash.
+A kernel that hangs costs a power cycle: the image boots Android unless asked for XNU, once. If
+`boot_a` itself is broken, the way back is the boot ROM's download mode (mtkclient,
+`mtk.py w boot_a backup/boot_a_magisk.img`); check that you can reach it before the first flash.
+[troubleshooting.md](troubleshooting.md) has what a message in the log means.

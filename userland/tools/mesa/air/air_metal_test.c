@@ -32,9 +32,9 @@
  *
  * The .metallib is taken apart here rather than by the library, because that is how it
  * goes on the device too: Metal has already parsed the container and -[_MTLFunction
- * bitcodeData] hands the driver one module (docs/metal.md 10.12, where those bytes were
+ * bitcodeData] hands the driver one module (userland/docs/metal.md 10.12, where those bytes were
  * checked against this frontend's own reader over all eleven functions of AV1SW --
- * same lengths, same FNV-1a, 11 of 11). The container's layout is docs/metal.md section
+ * same lengths, same FNV-1a, 11 of 11). The container's layout is userland/docs/metal.md section
  * 9, and userland/tools/metallib.py reads the same fields from Python.
  *
  * The screen is softpipe, through RWA_SOFTWARE=1, which this program sets itself unless
@@ -1857,7 +1857,7 @@ run_ms(const char *path, const char *func, const char *samplespec, const char *f
    /* The fill shader, out of the same container: on the device both stages' bytes come
     * from two -[_MTLFunction bitcodeData] calls on one MTLLibrary, which is these two
     * find_function calls. clearFragment20 by default because its colour is already
-    * attested -- it is the shader of docs/metal.md 10.22, whose pixel is the four words
+    * attested -- it is the shader of userland/docs/metal.md 10.22, whose pixel is the four words
     * 2458616957 2930221209 3401825461 3873429713 in a RGBA32Uint attachment.
     */
    char fname[256];
@@ -2112,7 +2112,7 @@ run_ms(const char *path, const char *func, const char *samplespec, const char *f
     * A depth attachment only if the shader stores to [[depth]], which is asked by
     * trying without one: texturedFragment2DDepthMultisample writes depth and nothing to
     * colour, and this library refuses such a pipeline by name when there is nowhere for
-    * the store to go (docs/metal.md 10.30). Refusing first and retrying is how the
+    * the store to go (userland/docs/metal.md 10.30). Refusing first and retrying is how the
     * question gets asked without a table in this program saying which shaders they are.
     */
    struct rwa_render_shape shape = { .color_count = 4, .sample_count = 1 };
@@ -2176,7 +2176,7 @@ run_ms(const char *path, const char *func, const char *samplespec, const char *f
 
    /* Pass 2's own attachments: four colour, one sample, and a depth one if the shader
     * writes depth -- in which case the depth buffer IS the result and the colour is
-    * not, as in docs/metal.md 10.30. */
+    * not, as in userland/docs/metal.md 10.30. */
    struct rwa_texture *color[4] = { 0 };
    for (unsigned i = 0; i < 4; i++) {
       const struct rwa_texture_shape cts = {
@@ -2711,7 +2711,7 @@ run_index(const char *path, const char *func, const char *vfunc)
        * is at (1,1). Where those land in memory is the viewport's business, and the
        * viewport changed after this check was written: `air_metal_test --draw-index`
        * came in on 21 October at 11:37 and the NEGATIVE y scale -- clip y = +1 in memory
-       * row 0, which is Metal's rule and not OpenGL's (docs/metal.md 10.28) -- came in at
+       * row 0, which is Metal's rule and not OpenGL's (userland/docs/metal.md 10.28) -- came in at
        * 13:49 the same day. So clip (-1,-1) is the BOTTOM-left pixel now where it used to
        * be the top-left one, and a check that asks for the first triangle's right angle
        * at (0, 0) is asking for the picture OpenGL would have drawn.
@@ -3048,7 +3048,7 @@ run_index(const char *path, const char *func, const char *vfunc)
  *
  * This is the half of the contract the phone's window server asked for and did not get:
  * 120 of its render pipelines were refused because rwa_render_shape carried no formats,
- * strides or offsets (docs/metal.md 10.44). What is hard to measure about a layout is
+ * strides or offsets (userland/docs/metal.md 10.44). What is hard to measure about a layout is
  * not getting a picture -- a quad drawn out of a float4 at offset 0 of a 16-byte element
  * is the same quad the library's own generated stage draws, so on its own it proves
  * nothing. What makes this a measurement is that EVERY NUMBER IN THE LAYOUT IS WRONG FOR
@@ -3064,7 +3064,7 @@ run_index(const char *path, const char *func, const char *vfunc)
  *     bytes that hold a different texture coordinate. An element array built by
  *     attribute index, or built over all three attributes in order, feeds attribute 1's
  *     layout to attribute 3's fetch, and then the picture is flat where it should be a
- *     gradient. That is the one thing in docs/air.md 3.1 that cannot be re-derived, and
+ *     gradient. That is the one thing in userland/docs/air.md 3.1 that cannot be re-derived, and
  *     it is the only wrong answer here that still draws the right geometry;
  *   - the same four vertices are then drawn a second time with the SAME numbers in
  *     different formats -- UChar4Normalized and Short4Normalized where the first draw
@@ -3858,7 +3858,7 @@ run_attrib(const char *vpath, const char *vfunc, const char *fpath, const char *
 
    /*
     * 9. THE FUNCTION-CONSTANT GATE, which nothing above touches and which is the one rule in
-    *    docs/air.md 3.1 a runtime cannot derive from the module alone: an attribute the
+    *    userland/docs/air.md 3.1 a runtime cannot derive from the module alone: an attribute the
     *    module reads only when an implicit predicate is true is FETCHED either way -- the
     *    parameter exists whatever the predicate says -- so its bit is in
     *    vertex_attributes_read, and a pipeline whose function constants make the predicate
@@ -3973,7 +3973,7 @@ run_attrib(const char *vpath, const char *vfunc, const char *fpath, const char *
              gated_ok ? "the gate is honoured: a gated attribute needs no configuration and "
                         "an ungated one does, and the refusal named the ungated one -- which "
                         "is the fifth attribute in AIR's list, not the second"
-                      : "THE GATE IS NOT HONOURED as docs/air.md 3.1 requires");
+                      : "THE GATE IS NOT HONOURED as userland/docs/air.md 3.1 requires");
       if (!gated_ok)
          ok = false;
    } else {
@@ -4198,7 +4198,7 @@ run_attrib_sweep(const char *vpath, const char *fpath, const char *ffunc)
     * vertex function at all. A child that DIES says something no status could: softpipe
     * asserts on a 16-bit NIR opcode instead of declining it, and a `half` attribute's
     * narrowing is exactly that opcode -- so those modules are measurable on the Adreno
-    * and not here, which is the same boundary docs/air.md draws around softpipe.
+    * and not here, which is the same boundary userland/docs/air.md draws around softpipe.
     */
    enum { SWEPT_ATTRIBS = 0, SWEPT_REFUSED = 1, SWEPT_NOT_VERTEX = 2, SWEPT_PLAIN = 3 };
    unsigned built = 0, fetching = 0, refused = 0, not_vertex = 0, died = 0;
@@ -4273,7 +4273,7 @@ run_attrib_sweep(const char *vpath, const char *fpath, const char *ffunc)
 /*
  * --surface: rwa_texture_from_surface, and the refusals it owes.
  *
- * This is the drawable path of the Metal driver, from the library's side (docs/metal.md
+ * This is the drawable path of the Metal driver, from the library's side (userland/docs/metal.md
  * 10.46): CoreAnimation makes an IOSurface and asks the device for a texture over it, and
  * the one call that can answer is this one. The test exists because the answer is a NULL
  * and a sentence, and a sentence is only worth anything if the right one comes out of the
@@ -4473,7 +4473,7 @@ run_argbufs(const char *path, const char *only)
  *     [[buffer(0)]], [[sampler(0)]], [[texture(0)]], [[texture(1)]], [[sampler(1)]].
  *     So "the encoder works" needs no oracle: the two draws must produce the same
  *     pixel, and the direct draw is a path this library has drawn 255 shaders through
- *     (docs/air.md section 5).
+ *     (userland/docs/air.md section 5).
  *   - THE WRONG RECORDS. A differential that only ever passes says nothing about what
  *     would have failed, so every member is also encoded WRONG once -- the two samplers
  *     exchanged, the two textures exchanged, the buffer member at another offset -- and
@@ -5387,7 +5387,7 @@ run_pixel_formats(const char *path, const char *func)
  * tell apart. A case that cannot distinguish a mistake is counted as not distinguishing
  * it, and the run FAILS if any mistake is distinguished by no case at all -- a test that
  * cannot fail for the right reason is the thing this project has been bitten by before
- * (docs/air.md: "ask what else would have given the same answer").
+ * (userland/docs/air.md: "ask what else would have given the same answer").
  *
  * THE NUMBERS. Source (0.25, 0.5, 0.125, 0.25) over destination (0.5, 0.25, 0.75, 0.5),
  * all dyadic rationals, so every product, sum and difference in these equations is EXACT
@@ -6247,7 +6247,7 @@ main(int argc, char **argv)
       return run_argbufs(argv[2], argc > 3 ? argv[3] : NULL);
    }
 
-   /* --draw-argbuf is the runtime half of docs/air.md 8.2: the same picture through an
+   /* --draw-argbuf is the runtime half of userland/docs/air.md 8.2: the same picture through an
     * MTLArgumentEncoder's records as through direct arguments, and a named different
     * picture for each record that is deliberately wrong. Two modules, because the
     * measurement IS the comparison between them.
@@ -6427,7 +6427,7 @@ main(int argc, char **argv)
    }
 
    /* What every buffer is filled with, 0xa5 unless the fourth argument says. This is
-    * air_run's --zero and --ones in one byte and for the same reason (docs/air.md
+    * air_run's --zero and --ones in one byte and for the same reason (userland/docs/air.md
     * section 5): a kernel whose buffers carry counts, bounds or sentinels does nothing
     * at all on a byte pattern, and which fill gets it to the end says what it was
     * reading them as. Zero is the degenerate input that makes a bounds check pass;
@@ -6532,7 +6532,7 @@ main(int argc, char **argv)
    /* One buffer per binding the pipeline says it reads, each filled with a byte the
     * kernel could not have produced itself, so that a dispatch which wrote nothing is
     * distinguishable from one that wrote zeros -- the mistake air_run made first and
-    * docs/air.md section 5 records.
+    * userland/docs/air.md section 5 records.
     */
    struct rwa_buffer *buffers[16] = { 0 };
    unsigned count = info.buffers < COUNT_OF(buffers) ? info.buffers
@@ -6552,7 +6552,7 @@ main(int argc, char **argv)
     * pattern in it. A slot the kernel only writes gets the pattern too, which is the
     * same argument as the buffers' 0xa5: a kernel that writes nothing has to be
     * distinguishable from one that writes zeros, and InitMinMax writing zeros would
-    * look identical to a dispatch that never ran (docs/air.md section 5).
+    * look identical to a dispatch that never ran (userland/docs/air.md section 5).
     */
    const unsigned origin[3] = { 0, 0, 0 };
    struct rwa_texture *textures[16] = { 0 };

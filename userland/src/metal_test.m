@@ -551,7 +551,7 @@ main(int argc, char **argv)
 	/*
 	 * The ones that matter go first: a session can run out before the end, and these are the
 	 * answer everything else is waiting for. The default context is known to crash in
-	 * CI::GLContext::init() with no GL context to work with (see docs/metal.md), so the question
+	 * CI::GLContext::init() with no GL context to work with (see userland/docs/metal.md), so the question
 	 * is whether giving it one -- ours, Mesa behind src/eagl.c -- is enough.
 	 */
 	in_a_new_process("a CIContext over an EAGLContext (the GPU)", "ci-eagl", 120);

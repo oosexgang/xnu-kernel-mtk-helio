@@ -77,7 +77,7 @@
 
 /* Two seconds, the same wait air_run uses, and for the same reason: a dispatch nobody
  * waited for is not a result, and on this GPU one timeout wedges the core for the rest
- * of the boot, so every later dispatch would be vacuous too (docs/air.md section 5).
+ * of the boot, so every later dispatch would be vacuous too (userland/docs/air.md section 5).
  */
 #define RWA_FENCE_TIMEOUT_NS 2000000000ull
 
@@ -85,7 +85,7 @@
  * is where air_run stops, by name, and that refusal is what keeps freedreno's own
  * view_seqno[16] out of reach of its textures[32] -- a fragility a peer session found
  * in fd6_texture_state and which this path must not become the one to reach
- * (docs/air.md section 5). No kernel of the corpus binds a tenth texture, let alone a
+ * (userland/docs/air.md section 5). No kernel of the corpus binds a tenth texture, let alone a
  * seventeenth.
  */
 #define RWA_MAX_TEXTURES 16
@@ -149,7 +149,7 @@ struct rwa_device {
  * Metal's encoder writes an 8-byte handle per member into the destination buffer; this
  * library binds by index and the frontend has already resolved every member to one, so
  * there is nothing to write and the handles would say nothing if there were (air_metal.h,
- * docs/air.md 8.2). So a -setTexture:atIndex: lands here: one slot per Metal `[[id(n)]]`,
+ * userland/docs/air.md 8.2). So a -setTexture:atIndex: lands here: one slot per Metal `[[id(n)]]`,
  * in one encoding, in the DESTINATION BUFFER -- because Metal's object model allows one
  * buffer to hold several encodings at several offsets and to reuse each across many
  * draws, so neither the encoder nor the pipeline is a place a record could live.
@@ -471,7 +471,7 @@ finalize_for_gallium(nir_shader *nir, struct pipe_screen *screen)
    /* A fragment shader's [[position]]: the frontend hands it over as a system-value
     * variable, because that is the one form both of the drivers behind this library can
     * be served from (the long version is beside air.position in air_to_nir.c and in
-    * docs/metal.md 10.28). freedreno sets pipe_caps.fs_position_is_sysval and wants the
+    * userland/docs/metal.md 10.28). freedreno sets pipe_caps.fs_position_is_sysval and wants the
     * intrinsic; softpipe does not set it and reads (0,0,0,0) from the intrinsic, because
     * nothing fills TGSI's system values for a fragment shader. For such a screen the
     * variable becomes an input varying here -- and then needs a driver_location, which
@@ -507,7 +507,7 @@ finalize_for_gallium(nir_shader *nir, struct pipe_screen *screen)
    /*
     * nir_lower_io_use_interpolated_input_intrinsics, and WITHOUT it every varying this
     * library drew was FLAT on the Adreno while softpipe interpolated it -- the mistake
-    * that looked like a vertically flipped picture for three boots (docs/metal.md 10.26,
+    * that looked like a vertically flipped picture for three boots (userland/docs/metal.md 10.26,
     * 10.32). Mesa's own comment on the flag says why: without it nir_lower_io "generates
     * regular load_input intrinsics and interpolation information must be inferred from
     * the list of input nir_variables", and the two consumers infer it from different
@@ -761,7 +761,7 @@ rwa_device_open(char *why, size_t why_size)
    }
 
    /* The two numbers Metal requires of every pipeline and its own base class answers
-    * with nothing (docs/metal.md 10.8). They are properties of the screen, asked once.
+    * with nothing (userland/docs/metal.md 10.8). They are properties of the screen, asked once.
     *
     * max_threads_per_group: freedreno answers 1024, which is threadsize_base (64) times
     * max_waves (16) for the a635, and softpipe answers 1024 as well.
@@ -876,7 +876,7 @@ rwa_buffer_create(struct rwa_device *device, size_t size, char *why, size_t why_
    if (!buffer->res) {
       say(why, why_size, "the GPU driver would not allocate %zu bytes. After a few dozen "
                          "allocations in one boot this driver starts refusing outright "
-                         "(docs/air.md section 4)", size);
+                         "(userland/docs/air.md section 4)", size);
       free(buffer);
       return NULL;
    }
@@ -885,7 +885,7 @@ rwa_buffer_create(struct rwa_device *device, size_t size, char *why, size_t why_
     * driver holds one pointer and writes through it whenever it likes. That is cheap
     * rather than clever here -- for a linear buffer freedreno's map is the kernel's own
     * mapping of the GEM object, write combined, with no cache of this processor between
-    * the program and what the GPU reads (docs/metal.md 10.11), so there is nothing to
+    * the program and what the GPU reads (userland/docs/metal.md 10.11), so there is nothing to
     * flush and nothing to copy, and -[MTLBuffer didModifyRange:] has nothing to do.
     *
     * READ as well as WRITE: it is what tells the driver this mapping must be the real
@@ -994,7 +994,7 @@ texture_type_name(unsigned type)
  * What is deliberately absent is everything packed into a 32-bit word -- RGB10A2Unorm,
  * RG11B10Float, RGB9E5, the XR formats. Those names order their channels by one
  * convention and Gallium's by another, and a mistake there does not fail: it shifts a
- * channel by two bits in a texture that still looks like a texture. docs/air.md has
+ * channel by two bits in a texture that still looks like a texture. userland/docs/air.md has
  * both shapes of that already -- zero printed as clamp_to_border by one of Apple's own
  * binaries while it means clamp_to_zero (3.3), and three shaders that "passed" against
  * a 2D texture bound where they sample a 3D one (5). A declined format is one sentence;
@@ -1353,7 +1353,7 @@ texture_of_shape(struct rwa_device *device, const struct rwa_texture_shape *shap
     * chain, an array, a cube or a second sample would need this side and the allocator to
     * have agreed on where the extra levels live -- and no such agreement exists. A
     * drawable is none of those things: -[CAMetalLayer nextDrawable] asks for a plain 2D
-    * texture, mipmapped: NO, one slice (docs/metal.md 10.46).
+    * texture, mipmapped: NO, one slice (userland/docs/metal.md 10.46).
     */
    if (import) {
       if (shape->type != RWA_TYPE_2D) {
@@ -1448,7 +1448,7 @@ texture_of_shape(struct rwa_device *device, const struct rwa_texture_shape *shap
       array_size = shape->type == RWA_TYPE_2D_MULTISAMPLE ? 1 : layers;
       break;
    case RWA_TYPE_TEXTURE_BUFFER:
-      /* The frontend refuses a texture buffer by name as well (docs/air.md section 5);
+      /* The frontend refuses a texture buffer by name as well (userland/docs/air.md section 5);
        * it is a buffer with a texture's interface, and rwa_buffer_create is where one
        * comes from.
        */
@@ -1554,7 +1554,7 @@ texture_of_shape(struct rwa_device *device, const struct rwa_texture_shape *shap
     * takes access::read and nothing else -- and freedreno refuses
     * PIPE_BIND_SHADER_IMAGE outright for any sample count above zero
     * (a6xx/fd6_screen.cc, "if (sample_count > 0) return false"), which is the check
-    * that once held eighteen kernels on the wrong question (docs/metal.md 10.21). So an
+    * that once held eighteen kernels on the wrong question (userland/docs/metal.md 10.21). So an
     * explicit MTLTextureUsageShaderWrite is refused by name, and usage 0 -- Metal's
     * "assume anything" -- simply does not assume the write.
     */
@@ -1743,7 +1743,7 @@ texture_of_shape(struct rwa_device *device, const struct rwa_texture_shape *shap
    if (!texture->res) {
       say(why, why_size, "the GPU driver would not allocate a %ux%ux%u %s of %s. After a few "
                          "dozen allocations in one boot this driver starts refusing outright "
-                         "(docs/air.md section 4)", width, height, depth, type_name,
+                         "(userland/docs/air.md section 4)", width, height, depth, type_name,
           fmt->name);
       free(texture);
       return NULL;
@@ -2396,7 +2396,7 @@ rwa_depth_read(struct rwa_texture *texture, unsigned level, unsigned layer,
 /* MTLCompareFunction as PIPE_FUNC_x. It lives with the depth/stencil state further
  * down, because a depth test is where a compare function was first needed; the sampler
  * needs the same translation now that the shader's own `constexpr sampler` word carries
- * one, and the whole argument of docs/air.md 3.3 is that the two paths speak ONE
+ * one, and the whole argument of userland/docs/air.md 3.3 is that the two paths speak ONE
  * vocabulary. So it is declared here rather than copied.
  */
 static bool compare_function_from_metal(unsigned f, unsigned *out, const char *what,
@@ -2407,7 +2407,7 @@ static bool compare_function_from_metal(unsigned f, unsigned *out, const char *w
  * reaches this library: the API's (MTLSamplerDescriptor, through rwa_sampler_state) and
  * the shader's own `constexpr sampler` word, which sampler_state_from_air turns into
  * the first. Keeping one mapping is what makes the two comparable, which is the whole
- * argument of air_metal.h's comment on rwa_sampler_state and of docs/air.md 3.3's 15
+ * argument of air_metal.h's comment on rwa_sampler_state and of userland/docs/air.md 3.3's 15
  * cases.
  *
  * Metal's clamp_to_zero is a wrap mode and not a border colour: outside the texture it
@@ -2415,7 +2415,7 @@ static bool compare_function_from_metal(unsigned f, unsigned *out, const char *w
  * not configurable for it. Gallium has no such mode, so it becomes CLAMP_TO_BORDER with
  * a zero border -- which is the same thing and is worth writing down, because the
  * obvious reading of that enum value is clamp_to_border with a default border, and one
- * of Apple's own binaries prints it that way (nir_air.h, docs/air.md 3.3).
+ * of Apple's own binaries prints it that way (nir_air.h, userland/docs/air.md 3.3).
  *
  * rwa_sampler_state carries no border colour, so clamp_to_border gets Metal's own
  * default, MTLSamplerBorderColorTransparentBlack -- the same thing clamp_to_zero reads.
@@ -2519,7 +2519,7 @@ sampler_state_from_metal(const struct rwa_sampler_state *st, struct pipe_sampler
     * are undefined" -- and this library does not enforce that, on purpose: one of
     * Apple's own shaders in the corpus is sampler(coord::pixel, filter::linear,
     * address::clamp_to_zero), and sampcheck.py measured what that must return against
-    * Apple's rules, 15 cases exact (docs/air.md 3.3). Refusing it here would refuse a
+    * Apple's rules, 15 cases exact (userland/docs/air.md 3.3). Refusing it here would refuse a
     * shader that has been checked.
     */
    return true;
@@ -2529,10 +2529,10 @@ sampler_state_from_metal(const struct rwa_sampler_state *st, struct pipe_sampler
  *
  * The two enumerations are not the same, and that is the whole reason this goes through
  * rwa_sampler_state instead of mapping the word straight to Gallium: in the 64-bit word
- * a shader carries, 0 is clamp_to_zero and 1 clamp_to_edge (nir_air.h, docs/air.md
+ * a shader carries, 0 is clamp_to_zero and 1 clamp_to_edge (nir_air.h, userland/docs/air.md
  * 3.3); in MTLSamplerAddressMode 0 is clampToEdge and 4 clampToZero. One table indexed
  * by "the address mode" would be right for one of them and silently wrong for the other
- * -- the commonest field in the corpus, and the same trap docs/air.md 3.3 records about
+ * -- the commonest field in the corpus, and the same trap userland/docs/air.md 3.3 records about
  * Apple's own printer.
  */
 static bool
@@ -2557,7 +2557,7 @@ sampler_state_from_air(const struct air_sampler_state *a, unsigned index,
       /* The word has a border colour and this contract has not, so a border that is
        * not Metal's default has nowhere to go. Refused rather than sampled as
        * transparent black: no module of the corpus attests clamp_to_border at all
-       * (docs/air.md 3.3 lists it among the decoded and unexercised fields), so this
+       * (userland/docs/air.md 3.3 lists it among the decoded and unexercised fields), so this
        * is a shader nobody has seen asking for a colour nobody can bind.
        */
       if (a->address[i] == AIR_SAMPLER_CLAMP_TO_BORDER && a->border_color != 0) {
@@ -2572,7 +2572,7 @@ sampler_state_from_air(const struct air_sampler_state *a, unsigned index,
    /* Bicubic is a Metal filter with no MTLSamplerMinMagFilter and no Gallium
     * equivalent. air_run samples it as linear and says so in its own line; a library
     * hands a driver a result, so it refuses instead. No module of the corpus carries
-    * it (docs/air.md 3.3).
+    * it (userland/docs/air.md 3.3).
     */
    if (a->mag_filter == AIR_SAMPLER_BICUBIC || a->min_filter == AIR_SAMPLER_BICUBIC) {
       say(why, why_size, "the shader's own sampler at index %u asks for filter::bicubic, "
@@ -2687,7 +2687,7 @@ sampler_state_from_air(const struct air_sampler_state *a, unsigned index,
       .normalized_coordinates = !a->pixel_coord,
       /* halves, as their bits, which is how the word carries them: the corpus's
        * samplers all come out as [0, 65504], and that range is two separate 16-bit
-       * fields a wrong layout would not land on (docs/air.md 3.3).
+       * fields a wrong layout would not land on (userland/docs/air.md 3.3).
        */
       .lod_min = _mesa_half_to_float(a->lod_min),
       .lod_max = _mesa_half_to_float(a->lod_max),
@@ -3378,7 +3378,7 @@ rwa_compute_create(struct rwa_device *device, const void *bitcode, size_t size,
    /* Function constants are taken as zero. There is nothing to take them from: Metal's
     * specialization goes through -[MTLFunction newFunctionWithConstantValues:], which
     * is one of the methods that run inside Metal's own classes through a nil compiler
-    * and return nil before a driver sees them (docs/metal.md 10.7). A module that needs
+    * and return nil before a driver sees them (userland/docs/metal.md 10.7). A module that needs
     * real values will say so -- the translator refuses what it cannot fold.
     */
    struct air_constant_value *constants;
@@ -3559,8 +3559,8 @@ rwa_compute_destroy(struct rwa_compute *compute)
  * The size is baked in rather than left variable, and that is not optional: softpipe
  * reads the block size from TGSI_PROPERTY_CS_FIXED_BLOCK_*, and with a variable size
  * those are zero, so it runs ZERO threads and the output buffer comes back exactly as
- * it went in. That looked like a kernel that did nothing (docs/air.md section 7.4). It
- * is also the only path with evidence behind it: every number in docs/air.md was
+ * it went in. That looked like a kernel that did nothing (userland/docs/air.md section 7.4). It
+ * is also the only path with evidence behind it: every number in userland/docs/air.md was
  * measured through a fixed size, so this does what has been measured and not what the
  * hardware might also accept.
  *
@@ -3644,7 +3644,7 @@ compute_state_for(struct rwa_compute *compute, const unsigned block[3],
  * every dispatch for the rest of that boot was accepted, returned, and did nothing.
  * air_run did not wait on a fence, so it printed the buffer it had filled itself as
  * though the GPU had answered: 21 of the 47 kernels of one run were vacuous that way
- * before anyone noticed (docs/air.md section 5). A driver that returned such a buffer
+ * before anyone noticed (userland/docs/air.md section 5). A driver that returned such a buffer
  * to an application would be worse off than air_run, because nobody is reading the
  * numbers.
  *
@@ -3678,7 +3678,7 @@ finish_or_say_why(struct rwa_device *device, bool required, const char *what,
                          "kernel whose buffers carry counts, indices or sentinels, "
                          "given values it was never written for, loops on a condition "
                          "that never comes -- both kernels measured this way turned out "
-                         "to be exactly that (docs/air.md section 5). And one timeout "
+                         "to be exactly that (userland/docs/air.md section 5). And one timeout "
                          "wedges this GPU for the rest of the boot, so every later "
                          "dispatch in it is vacuous too", what);
       return -1;
@@ -3795,7 +3795,7 @@ slot_element(const struct rwa_slot *s, nir_alu_type *type, const char **word,
  *
  * Metal checks this itself: a texture2d<float> parameter takes neither a 3D texture nor
  * an integer format, and a driver that let either through would be the lenient one. The
- * reason to check rather than trust is in docs/air.md section 5 -- with a 2D texture
+ * reason to check rather than trust is in userland/docs/air.md section 5 -- with a 2D texture
  * bound where three shaders sample a 3D one, all three "passed", and only a real 4x4x4
  * texture turned their answers into evidence. A shape that is almost right is the
  * failure that reads like a result.
@@ -3951,7 +3951,7 @@ argbuf_mask_of(const struct air_shader_info *info, const char *name, unsigned *m
  *
  * A stage dispatched with nothing in a slot it reads does not fail: it reads whatever
  * the slot holds and writes a plausible answer, which is the one outcome worse than an
- * error (docs/air.md section 4). The buffer sizes are checked against air.buffer_size,
+ * error (userland/docs/air.md section 4). The buffer sizes are checked against air.buffer_size,
  * which Apple's own metadata carries for most arguments -- a shader handed a buffer
  * shorter than it declares writes past the end of it, and on this GPU that is not a
  * fault but another shader's memory.
@@ -4406,7 +4406,7 @@ bind_stage(struct rwa_device *device, enum pipe_shader_type stage,
             /* The shader's own word, built once and kept with the pipeline. It goes
              * through Metal's vocabulary on the way (sampler_state_from_air), which is
              * what makes this sampler and one a driver creates from
-             * MTLSamplerDescriptor the same object -- the argument of docs/air.md 3.3
+             * MTLSamplerDescriptor the same object -- the argument of userland/docs/air.md 3.3
              * and of air_metal.h.
              */
             bool compares = compare_sampler && compare_sampler[r->index];
@@ -4702,7 +4702,7 @@ rwa_finish(struct rwa_device *device, char *why, size_t why_size)
  * Drawing.
  *
  * air_run draws every fragment shader of the corpus and 255 of them have been compared
- * pixel by pixel (docs/air.md): a quad vertex shader built by hand in NIR plus the real
+ * pixel by pixel (userland/docs/air.md): a quad vertex shader built by hand in NIR plus the real
  * fragment shader, a framebuffer of plain textures, clear, draw_vbo of a TRIANGLE_STRIP
  * of four, and the pixel read back. This is that path as the three contract calls, and
  * the code and its WHY comments are lifted from air_run.c because each is a mistake
@@ -4711,7 +4711,7 @@ rwa_finish(struct rwa_device *device, char *why, size_t why_size)
  * Where it differs from a dispatch is only the stage: a draw binds the fragment shader's
  * resources with the very same bind_stage the dispatch uses, and when a vertex module is
  * supplied binds its resources too. The reconnaissance that fixed the contract's shape
- * is docs/metal.md 10.18 -- nothing in Apple's Metal reads MTLRenderPassDescriptor, the
+ * is userland/docs/metal.md 10.18 -- nothing in Apple's Metal reads MTLRenderPassDescriptor, the
  * render target is a plain texture, and the render path adds no kernel ABI over compute.
  */
 
@@ -5068,7 +5068,7 @@ rwa_module_textures(struct rwa_device *device, const void *bitcode, size_t size,
  * `encoded_length` is 8 bytes per member the set DECLARES, used by this shader or not,
  * and that is Apple's number rather than a convenience of ours: `air.arg_type_size` on
  * the set's own node says 8 x members in every one of Resident Evil 4's 7 857 sets, and
- * `air.arg_type_align_size` says 8 in all of them (docs/air.md 8.2.1). The frontend
+ * `air.arg_type_align_size` says 8 in all of them (userland/docs/air.md 8.2.1). The frontend
  * keeps every member in the resource list for exactly this reason -- a numbering that
  * skipped the unread ones would differ between two shaders sharing one set, and an
  * application that allocated from the shorter number would overlap its own encodings.
@@ -5455,7 +5455,7 @@ rwa_depth_stencil_destroy(struct rwa_depth_stencil *state)
  * at Half (53): FloatRG11B10 and FloatRGB9E5 are another system release's, and nothing on this device
  * can name them.
  *
- * The mapping is one rule, as docs/air.md 3.1 says: Char/Short/Int and their unsigned
+ * The mapping is one rule, as userland/docs/air.md 3.1 says: Char/Short/Int and their unsigned
  * forms are R8/R16/R32 _SINT/_UINT of the same channel count, `...Normalized` is
  * _SNORM/_UNORM instead, Half is _FLOAT at 16 bits and Float at 32, and
  * UChar4Normalized_BGRA is B8G8R8A8_UNORM -- whose channel order rides in
@@ -5630,7 +5630,7 @@ attribute_type_name(enum air_attribute_base_type t)
  * would shift every later driver_location by one. The placeholder fetches from the
  * library's own quad buffer with a stride of 0, so it reads sixteen bytes this library
  * owns at every vertex instead of whatever address an empty VFD slot points at -- which
- * on this hardware is 0 (docs/metal.md 10.18 found what a NULL vertex state does).
+ * on this hardware is 0 (userland/docs/metal.md 10.18 found what a NULL vertex state does).
  */
 struct rwa_vertex_state {
    struct pipe_vertex_element element[16];   /* NIR's sixteen generic slots */
@@ -5681,7 +5681,7 @@ build_vertex_state(const struct air_shader_info *vinfo,
       if (d->format == 0) {
          /* Not configured. Legal only for an attribute the module gates with a
           * function-constant predicate, whose value is the pipeline's and not this
-          * library's to know (docs/air.md 3.1): the parameter exists either way, so the
+          * library's to know (userland/docs/air.md 3.1): the parameter exists either way, so the
           * attribute is in vertex_attributes_read either way, and a pipeline whose
           * constants make the predicate false may configure nothing here.
           */
@@ -5785,7 +5785,7 @@ build_vertex_state(const struct air_shader_info *vinfo,
          /* The offset's twelve bits are in this tree's own register header; the stride's
           * width is not -- fd6_context.cc writes VFD_FETCH_STRIDE as a whole word with
           * no mask and no assert in Mesa 25.0.7, and Gallium's own src_stride is
-          * "technically only uint16_t". So 4095 here is the hardware field docs/air.md
+          * "technically only uint16_t". So 4095 here is the hardware field userland/docs/air.md
           * 3.1 read, taken conservatively: a refusal can be lifted by a measurement on
           * the phone, and a stride truncated in the ringbuffer cannot be seen at all.
           */
@@ -6170,7 +6170,7 @@ make_stage_cso(struct rwa_device *device, nir_shader *nir, struct air_shader_inf
 /* Whether a vertex shader reads vertex attributes, which used to be the one thing the
  * contract could not feed it -- rwa_render_shape carried no formats, strides or offsets,
  * and a [[stage_in]] shader was refused by name rather than drawn over garbage. The
- * layout is in the shape now (docs/metal.md 10.44), so this is no longer a refusal: it
+ * layout is in the shape now (userland/docs/metal.md 10.44), so this is no longer a refusal: it
  * is the NIR half of a cross-check against air_shader_info's table, because the elements
  * are built from that table and a disagreement between the two would mean an element
  * array that does not describe the fetches. Apple's own three vertex shaders in the GL
@@ -7142,7 +7142,7 @@ rwa_render_create(struct rwa_device *device,
    bool unlocked = pthread_mutex_unlock(&rwa_lock) == 0;
 
    /* The fragment shader first. Its AIR -> NIR errors surface here, at creation, which
-    * is the half of docs/metal.md 10.18 a driver must put in the right NSError: a link
+    * is the half of userland/docs/metal.md 10.18 a driver must put in the right NSError: a link
     * error between the stages cannot surface until the draw, because ir3 compiles and
     * links at draw time (ir3_cache_lookup), so the two belong to two different calls.
     */
@@ -7206,7 +7206,7 @@ rwa_render_create(struct rwa_device *device,
 
    /* The vertex stage: translated when a module was supplied, generated otherwise. The
     * generated stage is the road with evidence behind it -- 255 fragment shaders drawn
-    * over a hand-built quad (docs/air.md) -- and the only one this library has run end
+    * over a hand-built quad (userland/docs/air.md) -- and the only one this library has run end
     * to end. A supplied module is translated and bound, but a vertex shader that reads
     * vertex attributes is refused, because the contract carries no layout to feed them.
     */
@@ -7248,7 +7248,7 @@ rwa_render_create(struct rwa_device *device,
        * The vertex attributes, which used to be the end of this road: a shader with a
        * [[stage_in]] input was refused by name because the contract carried no layout,
        * and that refusal is what the phone's window server ran into 120 times
-       * (docs/metal.md 10.44). Now the layout is in the shape and the elements are built
+       * (userland/docs/metal.md 10.44). Now the layout is in the shape and the elements are built
        * from the module's own interface.
        *
        * The two readings of "does this stage fetch anything" are compared rather than
@@ -7428,7 +7428,7 @@ rwa_render_create(struct rwa_device *device,
     * It is worth saying what the old state did on the phone, because it was not a
     * refusal: CoreAnimation composites with premultiplied alpha, so a label layer whose
     * background is transparent black was drawn as OPAQUE BLACK -- every icon label in a
-    * black box and the Search pill a black rectangle (docs/air.md section 5 has the
+    * black box and the Search pill a black rectangle (userland/docs/air.md section 5 has the
     * measurement and userland/jobs/rc.jobs.blend the greps, and the photograph is the test).
     *
     * The tables' own shape is checked first, here rather than at a draw, so that a row
@@ -7508,7 +7508,7 @@ rwa_render_create(struct rwa_device *device,
     * clipped a primitive on that boundary, every one of those draws would stop drawing.
     * So the proven path keeps the state it was proven with, and the new one gets the
     * convention it needs; if the depth draw comes back having drawn nothing at all, this
-    * boundary is the first thing to look at (docs/metal.md 10.30).
+    * boundary is the first thing to look at (userland/docs/metal.md 10.30).
     */
    /*
     * `multisample` is set from the pass's own sample count, and what it actually
@@ -8155,7 +8155,7 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
       /* The y scale is NEGATIVE, and that is Metal's rule rather than a convention picked
        * here. Metal's render-target origin is the top left and its NDC y points up, so clip
        * y = +1 belongs in memory row 0; a positive y scale puts clip y = -1 there, which is
-       * OpenGL's drawable rule and what this code did until now (docs/metal.md 10.28). Mesa
+       * OpenGL's drawable rule and what this code did until now (userland/docs/metal.md 10.28). Mesa
        * negates y in exactly this place, for exactly this reason, when it draws to a window.
        *
        * It is landed only now because until the varying was fixed (10.32) nothing could see
@@ -8374,7 +8374,7 @@ rwa_render_draw(struct rwa_render *render, const struct rwa_draw *draw,
 
    /* Waited for here, on the same grounds as a dispatch: a picture that was never drawn
     * must not read as a result, and this is the call that can say which draw did not
-    * come back (docs/air.md section 5). A link error between the stages, which ir3 only
+    * come back (userland/docs/air.md section 5). A link error between the stages, which ir3 only
     * finds now, surfaces as this not finishing.
     */
    /* ...was. Waiting for every draw kept the GPU and the CPU taking turns, and a frame of

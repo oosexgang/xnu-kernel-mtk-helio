@@ -6,7 +6,7 @@
 /*
  * The MTLB container of a .metallib: a header, a function list of tagged
  * fields, and one LLVM module per function. Worked out against the files of
- * the system image 20F66 (docs/metal.md, section 9.1; userland/tools/metallib.py is the same in
+ * the system image 20F66 (userland/docs/metal.md, section 9.1; userland/tools/metallib.py is the same in
  * Python).
  */
 

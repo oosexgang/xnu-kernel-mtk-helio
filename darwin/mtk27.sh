@@ -4,22 +4,22 @@
 # darwin-renoir, beside them; what they take from it is in this repository, so this script makes that
 # tree out of links to it (build/ios27/darwin-renoir), with theos (build/ios27/theos), ldid and pacstrip.
 #
-#   darwin/mtk27.sh env       the trees above, and darwin/tools/pacstrip
-#   darwin/mtk27.sh gl        Mesa with panfrost for arm64e (userland/tools/mk-mesa.sh MESA_ARCH=arm64e), and gl26.sh's
-#                          libhakios-gl.dylib and gl_test over it
-#   darwin/mtk27.sh libs      inj26.sh: our libraries for the system's processes, arm64e (BUILD=24B119)
-#   darwin/mtk27.sh metal     metal27.sh: the Metal driver over that Mesa
-#   darwin/mtk27.sh mali      mali27.sh: hakios-mali (our own Mali job descriptors) and mali-probe, into $OBJ/mali
-#   darwin/mtk27.sh root      root26-sys.sh: the small image, $REL/root26-sys.apfs, with the Metal driver
-#                          (and mali-probe, when the mali step has made it)
-#   darwin/mtk27.sh system    mkimage26.py --prune: the system image, $REL/system27-prune.apfs
-#   darwin/mtk27.sh all       all six, in this order
+#   darwin/mtk27.sh env      the trees above, and darwin/tools/pacstrip
+#   darwin/mtk27.sh gl       Mesa with panfrost for arm64e (userland/tools/mk-mesa.sh MESA_ARCH=arm64e), and gl26.sh's
+#                        libhakios-gl.dylib and gl_test over it
+#   darwin/mtk27.sh libs     inj26.sh: our libraries for the system's processes, arm64e (BUILD=24B119)
+#   darwin/mtk27.sh metal    metal27.sh: the Metal driver over that Mesa
+#   darwin/mtk27.sh mali     mali27.sh: hakios-mali (our own Mali job descriptors) and mali-probe, into $OBJ/mali
+#   darwin/mtk27.sh root     root26-sys.sh: the small image, $REL/root26-sys.apfs, with the Metal driver
+#                        (and mali-probe, when the mali step has made it)
+#   darwin/mtk27.sh system   mkimage26.py --prune: the system image, $REL/system27-prune.apfs
+#   darwin/mtk27.sh all      all six, in this order
 #
 # REL: the extracted IPSW (iPhone12,1_27.2_24B119: rootfs/, cryptex/os/, cryptex/app/, dyld/, dyld-strip/);
 # default build/ios27/ios27. RC_JOBS=FILE: the run's job list (root). Needs: userland/build.sh run once
 # (its root/ is the small image's start), kernel/deps/setup.sh, theos's iPhoneOS16.5.sdk ($THEOS).
 # Then: HAKIOS_PAYLOAD=flash tools/run/system-flash.sh $REL/system27-prune.apfs, HAKIOS_RAMDISK=$REL/root26-sys.apfs
-# tools/run/mkpayload.sh, and tools/run/xnu-cycle.sh with HAKIOS_PAYLOAD=flash (docs/release27.md).
+# tools/run/mkpayload.sh, and tools/run/xnu-cycle.sh with HAKIOS_PAYLOAD=flash (docs/darwin27-boot.md, docs/building.md).
 set -e -o pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$ROOT/kernel/env.sh"

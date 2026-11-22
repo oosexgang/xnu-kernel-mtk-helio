@@ -11,7 +11,7 @@
 #
 # What this does NOT check is anything that depends on Metal's own sampler
 # state: the two modules of the corpus that declare a `constexpr sampler`
-# carry it as a 64-bit word that is not decoded (docs/air.md). Here the API
+# carry it as a 64-bit word that is not decoded (userland/docs/air.md). Here the API
 # chooses the sampler, so what is verified is the texture operation and not
 # Apple's filtering or addressing.
 #

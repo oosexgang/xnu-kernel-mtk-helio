@@ -9,7 +9,7 @@
  * be read, and refused, without reading the 865 answers next to it.
  *
  * That method is NOT only a drawable's, and believing it was cost a wrong sentence in a real
- * boot (docs/metal.md 10.46). Five call sites in QuartzCore send it; one is
+ * boot (userland/docs/metal.md 10.46). Five call sites in QuartzCore send it; one is
  * allocate_drawable_texture, the other four are the window server's Metal compositor
  * (CA::OGL::MetalContext::set_destination_iosurface, ::update_surface, ::get_surface,
  * ::create_surface_from_iosurface). So this file serves "a texture over an IOSurface",
@@ -173,7 +173,7 @@ int rwd_format_of_metal(unsigned metal_pixel_format, uint32_t *fourcc,
  *
  * It refuses BY NAME when the library has no `rwa_texture_from_surface` -- an image built
  * before that call existed -- rather than returning a bare nil, because CoreAnimation does
- * not test the texture it gets back (docs/metal.md 10.46): a nil becomes a drawable whose
+ * not test the texture it gets back (userland/docs/metal.md 10.46): a nil becomes a drawable whose
  * -texture is nil and the application finds out three frames later, as a Metal assertion
  * about a nil colour attachment.
  */

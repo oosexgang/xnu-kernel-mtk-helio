@@ -1,6 +1,6 @@
 # The kernel
 
-Apple's `xnu-8796.121.2` (Darwin 22.5.0), kept as three things:
+Apple's `xnu-12377.121.6`, the 27 release's kernel, kept as three things:
 
 | | |
 | --- | --- |
@@ -11,15 +11,16 @@ Apple's `xnu-8796.121.2` (Darwin 22.5.0), kept as three things:
 An *assembled tree* is a checkout of the release with the overlay copied in and the patches applied:
 what is compiled, and where the kernel is worked on. It is a git repository of its own (tag `upstream`
 is Apple's release, tag `assembled` what the scripts put there, branch `hakios` the work) and lives
-next to this repository, in `../xnu-8796-hakios` unless `XNU_SRC` says otherwise.
+next to this repository, in `../xnu-12377-hakios` unless `XNU_SRC` says otherwise.
 
 ## Building
 
 What it needs is in [docs/building.md](../docs/building.md). In short:
 
 ```sh
-kernel/assemble.sh ../xnu-8796-hakios    # Apple's release + overlay + patches
-kernel/deps/setup.sh                     # what the build needs beside the tree: sources, host tools, the SDK's overlay, two libraries
+kernel/assemble.sh ../xnu-12377-hakios   # Apple's release + overlay + patches
+kernel/deps/setup.sh                     # what the build needs beside the tree: LLVM 19.1.7, mig 138, the iig headers of
+                                         # macOS 26.5's SDK, sources, host tools, the SDK's overlay, two libraries
 kernel/build.sh -j8 -k                   # -k is needed: one harmless error (lldbmacros) ends make with code 2
 ```
 
@@ -40,11 +41,11 @@ Things to know:
 
 - **A file of ours**: edit it in `kernel/overlay/`, run `kernel/build.sh` (which updates the tree).
 - **In the tree**, the only way for Apple's own files: edit there, build, then
-  `kernel/export.sh ../xnu-8796-hakios`. `git diff` in this repository then shows the work: new files
+  `kernel/export.sh ../xnu-12377-hakios`. `git diff` in this repository then shows the work: new files
   under `overlay/`, changed topic patches. A changed file of Apple's that no line of `patches/series`
   claims stops the export: give it a topic there.
 
-`kernel/syntax-check.sh --tree ../xnu-8796-hakios` (or `make syntax-check`) puts every C file of
+`kernel/syntax-check.sh --tree ../xnu-12377-hakios` (or `make syntax-check`) puts every C file of
 the overlay through the machine's clang with `-fsyntax-only` and the format check, in about ten
 seconds instead of a kernel build; `kernel/syntax-check.skip` lists the few files that need the real
 build's generated headers.

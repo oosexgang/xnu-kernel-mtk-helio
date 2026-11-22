@@ -288,7 +288,7 @@ if [ -d $SYSFILES/rootfs/usr/lib ]; then
 			$DYN -framework CoreFoundation -framework IOKit $M/libOSMesa.8.dylib -o obj/gl_test src/gl_test.c
 			cp $M/libOSMesa.8.dylib obj/
 			# air_run draws with a Metal shader translated by the AIR frontend
-			# and reads the pixels back (docs/air.md). It is built inside the
+			# and reads the pixels back (userland/docs/air.md). It is built inside the
 			# Mesa build, because it needs Gallium itself and not the gl*
 			# entry points this library exports; AIR=1 userland/tools/mk-mesa.sh makes
 			# it, and it is copied in when it is there.

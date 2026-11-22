@@ -1,14 +1,14 @@
 # Bluetooth on another MediaTek phone
 
-What the first phone (the first phone, MT6768, MT6631 in CONNSYS) taught, as an order of work for another MediaTek phone. The code that is the same on every
+What the first phone (an MT6768, with an MT6631 in CONNSYS) taught, as an order of work for another MediaTek phone. The code that is the same on every
 phone is `kernel/overlay/bsd/dev/mtk_bt_skel.c`; what is different is a table of operations (`struct mtkbt_platform`) you fill in. The proven
-sequence for one phone is the Bluetooth part of `kernel/overlay/bsd/dev/mtk_connsys.c`; how it was found, run by run, is `the first phone's journal (bluetooth)`
+sequence for one phone is the Bluetooth part of `kernel/overlay/bsd/dev/mtk_connsys.c`; how it was found, run by run, is the Bluetooth journal of the first phone's device package
 (in Russian).
 
 ## The path, and which part is yours
 
 ```
-an app's CoreBluetooth ──XPC── bluetoothd (the system image 20F66, the real one)
+an app's CoreBluetooth ──XPC── bluetoothd (the system's own)
    bluetoothd ──getsockopt── kernel control "com.apple.uart.sk.bluetooth"      the skeleton
    bluetoothd ──os_channel── Skywalk kernel pipe                               mtk_btsk.c (as it is)
    kernel: whole H4 packets ⇄ YOUR TRANSPORT ⇄ the combo chip                  struct mtkbt_platform

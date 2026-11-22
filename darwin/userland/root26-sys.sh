@@ -1,5 +1,5 @@
 #!/bin/bash
-# The small image (/hakios) for an the 26 release boot towards SpringBoard: darwin-renoir's root with our
+# The small image (/hakios) for a boot of the 26 or 27 release towards SpringBoard: darwin-renoir's root with our
 # arm64e libraries; and the launchd jobs, made from the 26 release's own plists (darwin-renoir's mkjobs.py: the
 # named jobs as they are, every other job with Mach services on demand only) into ios26/jobs26, for
 # the system image (LAUNCHDAEMONS=.../jobs26 mkimage26.py): the 26 release's launchd takes a job for a system

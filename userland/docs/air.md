@@ -9,7 +9,7 @@ object graph (AGXMetalA11 alone is 53 classes and 1158 methods, IOGPU.framework 
 kernel ABI that submits work. Where a decision below constrains them it says so, and section 7
 collects those constraints in one list.
 
-Why this is worth doing at all, and what it costs, is argued in `docs/metal.md` section 9. This
+Why this is worth doing at all, and what it costs, is argued in `userland/docs/metal.md` section 9. This
 document assumes those measurements and records the decisions taken on top of them.
 
 ## 1. Where the frontend lives: inside Mesa, as `src/compiler/air`
@@ -97,11 +97,11 @@ metadata, fast-math flags, alignments, calling conventions, linkage — comes ba
 
 What would reverse this: if a later AIR (a newer `.metallib` corpus) turned out to need large
 parts of LLVM's auto-upgrade machinery, or if translation turned out to need LLVM's own passes
-before NIR. Neither is true of the system image 20F66.
+before NIR. Neither is true of the 20F66 system.
 
 ## 3. What a translation unit is
 
-A `.metallib` is a container of **one LLVM module per function** (`docs/metal.md` 9.1). The unit
+A `.metallib` is a container of **one LLVM module per function** (`userland/docs/metal.md` 9.1). The unit
 of translation is therefore **one module → one `nir_shader`**, and the stage of that shader is read
 from the module's named metadata, never from the container: the container's `TYPE` tag and the
 metadata are cross-checked by the corpus tool and disagreements are reported.
@@ -360,7 +360,7 @@ out of it, and it runs from `userland/tools/air/check.sh` (section 6). Two corpo
 
 - **the device image** — the five `.metallib` files the port installs (`darwin/system/rootfs` +
   `darwin/system/cryptex`): 456 modules. This is the corpus the milestones are stated against.
-- **the full IPSW** — all 134 MTLB libraries of the system image 20F66 root filesystem and cryptexes,
+- **the full IPSW** — all 134 MTLB libraries of the 20F66 system's root filesystem and cryptexes,
   16 841 functions, extracted from `rootfs.dmg` with 7-Zip. Reported alongside, because the
   device image is a selection and the system's own shaders are this set.
 
@@ -626,7 +626,7 @@ build/mesa-host/build/src/gallium/drivers/freedreno/air_run \
 
 There is no hosted CI: the corpus is Apple's code and stays out of the repository (and out of
 GitHub). `check.sh` is the CI; it takes 20 seconds, so it runs before every commit that touches
-the frontend, and the report it writes is committed as `docs/air-report.md` with the numbers of
+the frontend, and the report it writes is committed as `userland/docs/air-report.md` with the numbers of
 that commit.
 
 The frontend lives in `userland/tools/mesa/air/` and `mk-host.sh` links it into the pinned Mesa as

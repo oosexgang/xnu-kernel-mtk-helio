@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The CPU reference: run an AIR shader through LLVM on this machine.
 
-This is the strongest check the project has (docs/air.md section 4) and it
+This is the strongest check the project has (userland/docs/air.md section 4) and it
 needs no Apple hardware and no GPU. LLVM -- not our reader and not our
 translator -- decides what the shader means:
 

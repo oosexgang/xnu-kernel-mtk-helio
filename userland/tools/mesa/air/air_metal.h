@@ -3,7 +3,7 @@
  *
  * Subsystem (1) made an AIR front end inside Mesa; subsystem (2) is making the Metal object
  * graph in userland/src/hakiosmetal.m. They meet here. The measurement that decided the
- * shape of this header is in docs/metal.md 10.12: Metal hands a driver one function's LLVM
+ * shape of this header is in userland/docs/metal.md 10.12: Metal hands a driver one function's LLVM
  * module through -[_MTLFunction bitcodeData], and those bytes are -- checked over all eleven
  * functions of AV1SW.metallib -- exactly what this front end already reads. So the contract
  * is "AIR in, a pipeline out", and nothing in it mentions NIR, Gallium or ir3: the Metal
@@ -37,7 +37,7 @@ struct rwa_compute;
 
 /* What Metal must be told about a compiled compute pipeline. The first three are protocol
  * requirements of MTLComputePipelineState that Metal's own base class answers with nothing
- * (docs/metal.md 10.8), so they have to come from whoever compiled the shader. */
+ * (userland/docs/metal.md 10.8), so they have to come from whoever compiled the shader. */
 struct rwa_compute_info {
 	unsigned max_threads_per_group;    /* -maxTotalThreadsPerThreadgroup */
 	unsigned thread_execution_width;   /* -threadExecutionWidth */
@@ -89,7 +89,7 @@ void rwa_buffer_destroy(struct rwa_buffer *buffer);
  * inside the module; it may be NULL when the module holds exactly one.
  *
  * On failure returns NULL and writes a sentence into `why` -- and the sentences matter, as
- * docs/air.md says: 135 of the corpus's modules are refused for reasons a driver should
+ * userland/docs/air.md says: 135 of the corpus's modules are refused for reasons a driver should
  * repeat to the application rather than swallow.
  */
 struct rwa_compute *rwa_compute_create(struct rwa_device *device, const void *bitcode,
@@ -101,7 +101,7 @@ void rwa_compute_destroy(struct rwa_compute *compute);
  * A texture. The shape comes from Metal's own descriptor, in Metal's own terms, because that
  * is what a driver has in its hand when newTextureWithDescriptor: is called; translating it
  * into Gallium's terms is this library's job, and a format it cannot translate must be
- * refused BY NAME rather than approximated -- docs/air.md is full of reasons to distrust a
+ * refused BY NAME rather than approximated -- userland/docs/air.md is full of reasons to distrust a
  * pixel format that was almost right.
  *
  * `pixel_format` is MTLPixelFormat as Metal defines it. `type` is MTLTextureType. `usage` is
@@ -151,14 +151,14 @@ struct rwa_texture *rwa_texture_view_create(struct rwa_texture *parent, unsigned
 /*
  * The same texture, over memory somebody else allocated: an IOSurface of CoreAnimation's.
  *
- * This is what a drawable is (docs/metal.md 10.46). -[CAMetalLayer nextDrawable] makes an
+ * This is what a drawable is (userland/docs/metal.md 10.46). -[CAMetalLayer nextDrawable] makes an
  * IOSurface, builds an ordinary MTLTextureDescriptor and sends a device exactly one message,
  * -newTextureWithDescriptor:iosurface:plane:, and the texture that comes back has to BE that
  * surface's memory rather than a copy of it -- because the point of a drawable is that the
  * display controller already scans out what the pass wrote. Without this call the driver
  * reads the finished attachment back to the processor and hands it to the kernel, which is
  * measured at 15.46 ms a frame and caps the whole port at 64.7 frames a second with nothing
- * drawn (docs/metal.md 10.43).
+ * drawn (userland/docs/metal.md 10.43).
  *
  * `surface_id` is the IOSurface's ID, and it goes where Linux puts a dmabuf file descriptor:
  * the DRM shim of this port takes the ID there already (userland/tools/mesa/hakios-drm: the kernel's
@@ -308,7 +308,7 @@ int rwa_module_textures(struct rwa_device *device, const void *bitcode, size_t s
 
 /*
  * A sampler, as Metal describes one. These fields are deliberately the same ones the front
- * end already decodes out of a shader's `constexpr sampler` word (docs/air.md section 3.3),
+ * end already decodes out of a shader's `constexpr sampler` word (userland/docs/air.md section 3.3),
  * whose behaviour was checked against Apple's own rules in 15 cases: a driver that builds a
  * sampler from MTLSamplerDescriptor and a shader that declares its own must end up at the
  * same place, and keeping one vocabulary is what makes that checkable.
@@ -352,7 +352,7 @@ void rwa_sampler_destroy(struct rwa_sampler *sampler);
  * two-member set declaring `air.arg_type_size 16` and a ten-member set 80 -- and those
  * handles are an Apple GPU's descriptors. They mean nothing to a Gallium driver, which
  * binds by index; and this frontend has already resolved every member of every set to a
- * binding while translating (docs/air.md 8.2), so the handles are not needed either.
+ * binding while translating (userland/docs/air.md 8.2), so the handles are not needed either.
  *
  * So the encoder cannot be a writer here. It is a RECORDER: -setBuffer:offset:atIndex:,
  * -setTexture:atIndex: and -setSamplerState:atIndex: record (resource, Metal id) against
@@ -385,7 +385,7 @@ void rwa_sampler_destroy(struct rwa_sampler *sampler);
  * there is no residency for the application to arrange.
  */
 
-/* RE4's largest set has 43 members (docs/air.md 8.2) and Apple's own limit on an
+/* RE4's largest set has 43 members (userland/docs/air.md 8.2) and Apple's own limit on an
  * argument buffer's entries is higher than this; what this number bounds is the record,
  * and a set with more members than this is refused by name rather than recorded in part.
  */
@@ -427,7 +427,7 @@ struct rwa_argbuf_member {
  * way that is invisible until something runs out. They are 8 bytes per member the set
  * DECLARES -- used or not, which is why the member list below is never compacted -- and
  * 8 bytes, which is what `air.arg_type_size` and `air.arg_type_align_size` say in the
- * metadata of every one of Resident Evil 4's 7 857 sets (docs/air.md 8.2.1).
+ * metadata of every one of Resident Evil 4's 7 857 sets (userland/docs/air.md 8.2.1).
  */
 struct rwa_argbuf_layout {
 	unsigned metal_index;      /* the [[buffer(n)]] the SET is bound at */
@@ -576,7 +576,7 @@ struct rwa_bindings {
  * them, both as Metal counts them.
  *
  * Returns 0, or -1 with a sentence in `why`. A dispatch that the GPU does not finish is a
- * failure here and says so: air_run learned that the hard way (docs/air.md section 5) --
+ * failure here and says so: air_run learned that the hard way (userland/docs/air.md section 5) --
  * before it waited on a fence it printed its own fill pattern as a result, and 21 of 47
  * kernels in one run were vacuous.
  */
@@ -638,7 +638,7 @@ int rwa_surface_seq(uint32_t surface, uint64_t seq);
  * That is not a convenience: it is the road that already has evidence behind it. air_run
  * draws every fragment shader of the corpus that way -- a generated quad vertex shader plus
  * the real fragment shader -- and 255 of them have been drawn and compared pixel by pixel
- * (docs/air.md). A driver asked for a pipeline whose vertex function is one of Apple's own
+ * (userland/docs/air.md). A driver asked for a pipeline whose vertex function is one of Apple's own
  * three vertex shaders passes both modules instead, and then nothing is generated.
  */
 struct rwa_render;
@@ -676,7 +676,7 @@ struct rwa_depth_stencil;
  * "reads vertex attributes ([[stage_in]]), and this
  * contract carries no vertex attribute layout (rwa_render_shape has no formats, strides
  * or offsets)" -- because the shader's half of that match is all AIR carries
- * (docs/air.md 3.1: Apple's compiler flattens the stage-in struct and the format, the
+ * (userland/docs/air.md 3.1: Apple's compiler flattens the stage-in struct and the format, the
  * offset, the stride and the buffer are nowhere in the module) and the API's half had
  * nowhere to arrive.
  *
@@ -1048,7 +1048,7 @@ void rwa_depth_stencil_destroy(struct rwa_depth_stencil *state);
  *     predicate. The fetch would read a VFD slot nothing was set up for; the gated case
  *     is legal and is the one exception, because the parameter exists whatever the
  *     predicate says and a pipeline whose constants make it false may configure nothing
- *     there (docs/air.md 3.1, and six of QuartzCore's 46 attributes are such).
+ *     there (userland/docs/air.md 3.1, and six of QuartzCore's 46 attributes are such).
  *   - a format whose converted type is not the type the shader declared: an integer
  *     format for a `float` member or a normalised one for a `uint` member. This is what
  *     air_vertex_attribute.base_type is for, and why the frontend keeps INT and UINT

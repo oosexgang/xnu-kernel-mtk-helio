@@ -2,7 +2,7 @@
  * metal_props: put Metal's two discovery properties on the IOAcceleratorES service, read them
  * back, and take them off again.
  *
- * Metal finds a GPU in exactly one way (docs/metal.md 1): MTLRegisterDevices() enumerates
+ * Metal finds a GPU in exactly one way (userland/docs/metal.md 1): MTLRegisterDevices() enumerates
  * IOServiceMatching("IOAcceleratorES"), reads "MetalPluginName" off each service, composes
  * "/System/Library/Extensions/" + that + ".bundle", opens it with NSBundle and takes the class
  * "MetalPluginClassName" names. This port publishes such a service ("sgx",
@@ -15,7 +15,7 @@
  * (IORegistryEntry::setProperties is "return kIOReturnUnsupported").
  *
  * It deliberately does NOT link or call Metal. The conditions Metal puts on a device object are
- * asserts (docs/metal.md 10.2-10.3): asking it from the same process that flipped the switch
+ * asserts (userland/docs/metal.md 10.2-10.3): asking it from the same process that flipped the switch
  * would turn a measurement into an abort, and would say nothing about whether the properties took.
  * Asking Metal is bin/metal_drv_test's job, in a process of its own, afterwards.
  *

@@ -2362,11 +2362,11 @@ publishDisplayNode(void)
  * over by both, which leaves CoreAnimation with its software renderer, as before.
  *
  * With boot-arg metal=1 a user process may put those two properties here, which is the whole
- * of what keeps Metal from finding our driver; see setProperties below, and docs/metal.md 10.31
+ * of what keeps Metal from finding our driver; see setProperties below, and userland/docs/metal.md 10.31
  * (10.14 for the measurement that made it a boot-arg).
  */
 
-/* Metal's step 2 reads exactly these two, in this order, off this service (docs/metal.md 1). */
+/* Metal's step 2 reads exactly these two, in this order, off this service (userland/docs/metal.md 1). */
 #define kAcceleratorPluginNameKey      "MetalPluginName"
 #define kAcceleratorPluginClassNameKey "MetalPluginClassName"
 
@@ -2395,7 +2395,7 @@ OSDefineMetaClassAndStructors(IOAcceleratorES, IOService);
  * hook (bsd/kern/kern_minimac.c); and this service carries no property whitelist.
  *
  * Why it is gated on a boot-arg, which is a measured risk and not caution in general
- * (docs/metal.md 10.14): the conditions Metal puts on a device object are asserts, not soft
+ * (userland/docs/metal.md 10.14): the conditions Metal puts on a device object are asserts, not soft
  * refusals (10.2-10.3). A process that asks Metal and is handed a half-made device does not
  * degrade to another renderer -- it aborts ("Assertion failed: ([self
  * conformsToProtocol:@protocol(MTLDeviceSPI)])", "failed assertion _limits.maxColorAttachments

@@ -2,7 +2,7 @@
  * An IOSurface of CoreAnimation's, as a texture of this driver.
  *
  * WHY THIS EXISTS, in one measurement. Showing a frame on this port costs 15.46 ms
- * (docs/metal.md 10.43): -getBytes: pulls a finished attachment into the process (11.96 ms,
+ * (userland/docs/metal.md 10.43): -getBytes: pulls a finished attachment into the process (11.96 ms,
  * 867 MB/s) and kHakiosShow pushes it into the kernel (3.50 ms, 2962 MB/s). That is a
  * ceiling of 64.7 frames a second with nothing drawn, and about twelve of those
  * milliseconds exist for one reason only: there is nowhere else to put the picture. A
@@ -10,7 +10,7 @@
  * both copies go away, not get faster.
  *
  * WHAT COREANIMATION ACTUALLY ASKS FOR, read out of this phone's own cache (every address
- * below is in docs/metal.md 10.46 with what it was read from). -[CAMetalLayer nextDrawable]
+ * below is in userland/docs/metal.md 10.46 with what it was read from). -[CAMetalLayer nextDrawable]
  * (0x18829de60) ends in get_unused_drawable (0x18837cff8), which makes the surface itself
  * with CA::Render::create_iosurface_with_pixel_format (0x18833cfa8) and then calls
  * allocate_drawable_texture (0x1884b3470). That function sends a device exactly one message:
@@ -363,7 +363,7 @@ rwd_surface_fits_adreno(const struct rwd_surface *surface, unsigned bytes_per_pi
  * surface's FourCC from the number.
  *
  * But a drawable is NOT the only caller, and assuming it was cost a wrong sentence in a real
- * boot (docs/metal.md 10.46, "Формат 500"). Five call sites in QuartzCore send
+ * boot (userland/docs/metal.md 10.46, "Формат 500"). Five call sites in QuartzCore send
  * -newTextureWithDescriptor:iosurface:plane:, and four of them are the window server's Metal
  * compositor rather than the drawable path: CA::OGL::MetalContext::set_destination_iosurface
  * (0x188302550), ::update_surface (0x1883163e0), ::get_surface (0x18833e724) and
@@ -446,7 +446,7 @@ rwd_format_of_metal(unsigned metal_pixel_format, uint32_t *fourcc, unsigned *byt
 	if (metal_pixel_format >= 500 && metal_pixel_format <= 629) {
 		/* Kept short enough to fit a 512-byte buffer whole: a refusal that is cut off
 		 * mid-reason is a refusal nobody can act on, which is the failure this file
-		 * exists to avoid. The three things it needs are in docs/metal.md 10.46. */
+		 * exists to avoid. The three things it needs are in userland/docs/metal.md 10.46. */
 		rwd_say(why, why_size, "pixel format %u is %s: YCbCr in TWO PLANES, and this "
 		    "import serves one. Missing: per-plane offset and row length from the kernel "
 		    "(kHakiosSurface reports only the count, HakiosGPU.cpp:849), a Gallium "

@@ -121,7 +121,7 @@ pmic_write(uint32_t reg, uint32_t value)
 }
 
 /*
- * The processors' clock (boot-arg mtk_cpufreq=1: what it is, said; mtk_cpufreq=2: raised -- not cpufreq=, which is the Qualcomm port's and writes where this SoC has nothing of the kind). The boot loader
+ * The processors' clock (boot-arg mtk_cpufreq=1: what it is, said; mtk_cpufreq=2: the A75s raised to 2000 MHz; mtk_cpufreq=3: and the A55s to 1700 -- not cpufreq=, which is the Qualcomm port's and writes where this SoC has nothing of the kind). The boot loader
  * leaves both clusters at 1175 MHz and 0.8 V, and nothing under this kernel changes that: The system ran
  * at some 60 in 100 of what the phone can do (MiniIOMobileFramebuffer's measurement, 24 October).
  * Android's driver for this SoC (drivers/misc/mediatek/base/power/cpufreq_v1, mach/mt6768) has the

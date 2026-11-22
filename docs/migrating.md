@@ -1,10 +1,45 @@
-# Moving work from the old layout
+# Moving work from an earlier layout
+
+Two moves are described here: the repository's own layout as it was until 22 November 2026, and the
+working tree this repository was made from. This repository has a history of its own: nothing is
+rebased onto it, work is carried over.
+
+## The layout of 22 November 2026
+
+The top of the repository is laid out as xnu-kernel-qcom's: the Darwin user space in `darwin/`, the
+host tests in `workbench/`, the user space's tools beside its sources, and `tools/` for the project's
+own. A branch from before it carries over by moving its paths:
+
+<!-- paths of the layout before 22 November 2026 -->
+
+| Before | Now |
+| --- | --- |
+| `system27/` (`mtk27.sh`, `tools/`, `userland/`) | `darwin/` |
+| `system/` (`fetch.sh`, `select-system.py`, `mkvarskel.py`; what they fetch) | `darwin/system/` |
+| `tests/` | `workbench/` |
+| `tools/guard-test.sh`, `tools/guard_test.c` | `workbench/guard-measure.sh`, `workbench/guard_measure.c` |
+| `userland/rc.jobs`, `userland/rc.jobs.*` | `userland/jobs/` (`RC_JOBS=` of `userland/build.sh` takes a name in it or a path) |
+| `userland/com.hakios.*.plist` | `userland/launchd/` |
+| `tools/air/`, `tools/mesa/`, `tools/apfs/`, `tools/dsc/`, `tools/mk-mesa.sh`, `tools/rwacache.sh`, `tools/rwm-recipes.py`, `tools/rwm-variants.py`, `tools/metallib.py`, `tools/qc-metallib.py`, `tools/qc-simlib.py`, `tools/render-ca-wallpaper.m`, `tools/cache-name.py`, `tools/font_trim.py`, `tools/jb-preinstall.py`, `tools/mk-jb.sh`, `tools/ldid-codesign.sh` | `userland/tools/` |
+| `tools/xnu-cycle.sh`, `boot-xnu.sh`, `mkpayload.sh`, `payload-flash.sh`, `system-flash.sh`, `mksparse.py`, `image.sh`, `msdc-test.sh`, `touch-probe.sh`, `gpu-probe.sh`, `cam-probe.sh` | `tools/run/` |
+| `tools/fbshot.py`, `fbjpg.py`, `fbkept.py`, `fbrecv.py`, `fbframes.py`, `frames.py`, `latency.py`, `recording.py`, `sound.py`, `texshot.py`, `passpipes.py`, `camthumb.py`, `camraw.py` | `tools/log/` |
+| `docs/air.md`, `docs/air-report.md`, `docs/metal.md` | `userland/docs/` |
+| `docs/release27.md` | `docs/darwin27-boot.md` (with the rest of the 27 release's story) and `docs/building.md` |
+| `fw-wifi` (a link into one machine's home directory) | gone; `fw-wifi/` is yours and ignored, like every `fw-*` |
+
+<!-- end -->
+
+A script that found the repository from where it was (`$(dirname "$0")/..`) climbs one level more
+where it went one level deeper; one of your own must do the same. The build's outputs moved with
+their scripts: `darwin/tools/pacstrip`, `darwin/userland/obj26`, and what `darwin/system/fetch.sh`
+fetched (move `system/`'s ignored files into `darwin/system/`, or fetch again).
+
+## From the first working tree
 
 For people with a branch, a patch or a habit from branch `x6826b` of the working tree, or from branch
-`mtk` of hakios-xnu-kernel, which had the same tree. This repository has a history of its own: nothing
-is rebased onto it, work is carried over.
+`mtk` of hakios-xnu-kernel, which had the same tree.
 
-## Where things went
+### Where things went
 
 <!-- paths of the old layout -->
 
@@ -12,7 +47,7 @@ is rebased onto it, work is carried over.
 | --- | --- |
 | `xnu/<old>.patch`, `xnu/apply.sh`, `xnu/export.sh` | `kernel/patches/` (seven patches by topic, `patches/series`), `kernel/assemble.sh`, `kernel/export.sh`, `kernel/verify.sh` |
 | `xnu/files/` | `kernel/overlay/` |
-| `xnu-src/xnu-8796.121.2` (the tree, inside the repository's directory) | `../xnu-8796-hakios`, next to the repository, made by `kernel/assemble.sh` (or `$XNU_SRC`) |
+| `xnu-src/xnu-8796.121.2` (the tree, inside the repository's directory) | `../xnu-12377-hakios` (the release of `kernel/UPSTREAM`), next to the repository, made by `kernel/assemble.sh` (or `$XNU_SRC`) |
 | `xnu-build.sh`, `xnu-env.sh` | `kernel/build.sh`, `kernel/env.sh` |
 | `xnu-deps/` | `kernel/deps/` |
 | `xnu/README.md` | `kernel/README.md` |
@@ -23,7 +58,7 @@ is rebased onto it, work is carried over.
 | `XL_RAMDISK=userland/root.apfs ./xl_x6826b build` | `tools/run/mkpayload.sh` (the payload is the kernel and the small root; the UEFI loader is no longer packed into it) |
 | `build-payload.bin`, `xnu-flashed-slot_a.img` | `build/payload.bin`, `build/boot_a.img` |
 | `xnu-deps/host/zig` | `build/zig` (`tools/get-zig.sh`) |
-| `ios165/` | `system/` (the scripts and, ignored by git, what they fetch) |
+| `ios165/` | `darwin/system/` (the scripts and, ignored by git, what they fetch) |
 | `userland/rc.ios`, `rc.jobs.ios`, `/sbin/launchd.ios` in the image | `userland/rc.system`, `rc.jobs.system`, `/sbin/launchd.system` |
 | `docs/mtk-porting.md`, `docs/from-a-clone.md` | `docs/porting.md`, `docs/building.md` |
 | `docs/bluetooth-mtk-porting.md`, `docs/camera-mtk-porting.md` | `docs/bluetooth-porting.md`, `docs/camera-porting.md` |
@@ -33,7 +68,7 @@ is rebased onto it, work is carried over.
 
 <!-- end -->
 
-## What was not carried over
+### What was not carried over
 
 | What | Why | Where it still is |
 | --- | --- | --- |
@@ -55,7 +90,7 @@ only reads. `userland/build.sh` still has the branches that packed the Qualcomm 
 (`fw-gpu`, `fw-audio`, `fw-haptic`, `fw-camera`, `ADSP=1`, `FLASHBOOT=1`); they do nothing where those
 directories are absent.
 
-## Names
+### Names
 
 The working name of the first phone is gone from code, paths, interfaces and documents. Below it is
 written `<old>`, in the case the name had: `<old>` in lower case, `<Old>` capitalised, `<OLD>` in upper
@@ -91,7 +126,7 @@ kernel stands in for (`AppleKeyStore`, `IOMobileFramebuffer`, `IOSurface`, …),
 `mach.development.bcm2837` (an XNU configuration's name), entitlement keys. Boot arguments kept their
 names, including the short `rwm_*` of the Metal device.
 
-## Carrying a patch over
+### Carrying a patch over
 
 A patch against the old kernel tree applies to an assembled tree once its names are the new ones:
 replace the names by the tables above (in the patch's text and its file names), then
@@ -101,7 +136,7 @@ kernel/import-patch.sh my-change.patch
 git status                                          # new files under kernel/overlay, changed topic patches
 ```
 
-## What behaves differently
+### What behaves differently
 
 - **A MediaTek driver needs its feature in the board file.** `touchscreen=2`, `buttons=2`, `mali=1`,
   `connsys_step=`, `scp_step=`, `mtkcam=1`, `mtkbatt=1`, `emmc_root=1` and `fb_flip=1` now also need

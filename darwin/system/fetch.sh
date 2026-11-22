@@ -1,5 +1,5 @@
 #!/bin/bash
-# Get the files of the system image (20F66) that the system image is made of, straight from
+# Get the files of the 20F66 system that the system image is made of, straight from
 # Apple's servers, and lay them out the way ../userland/build.sh expects them:
 #
 #   rootfs/                  the chosen part of the root filesystem (see select-system.py)

@@ -53,7 +53,7 @@ is not built into the kernel.
    with `workbench/fakekernel`, and model the hardware (`workbench/pwrap_model.h` is the PMIC's). Write one
    scenario per behavior, including the failures: the part does not answer, the argument is not
    given, the board does not have the part. Add the test to the list in `workbench/run.sh`.
-5. **Build it in.** Assemble the tree (`kernel/assemble.sh ../xnu-8796-hakios`), add the file to
+5. **Build it in.** Assemble the tree (`kernel/assemble.sh ../xnu-12377-hakios`), add the file to
    `bsd/conf/files` there (`bsd/dev/NAME.c standard`, as `mtk_keys.c` is), and call its init from
    `hakios_input_init()` in `hakios_input.c`. Then `kernel/export.sh` writes the change back into
    `kernel/patches/` and `kernel/overlay/`.

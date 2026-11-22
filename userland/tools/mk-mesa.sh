@@ -51,7 +51,7 @@ fi
 # ours, kept in the repository: always the current ones
 rm -rf mesa-$VERSION/src/hakios-drm
 cp -r "$ROOT/userland/tools/mesa/hakios-drm" mesa-$VERSION/src/hakios-drm
-# the AIR frontend (docs/air.md): the Metal runtime will call it in this
+# the AIR frontend (userland/docs/air.md): the Metal runtime will call it in this
 # library's own process, and userland/tools/mesa/air-frontend.patch is the meson that
 # reaches it. Copied rather than linked, because this tree is cross-built.
 rm -rf mesa-$VERSION/src/compiler/air

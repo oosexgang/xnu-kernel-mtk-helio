@@ -2,16 +2,16 @@
 # Make the images of a run with more than the plain boot (userland/build.sh, then tools/run/mkpayload.sh):
 #
 #   tools/run/image.sh wifi        the system's Wi-Fi daemon, Settings' Wi-Fi page; fw/network (your network's name and
-#                              passphrase, fw-wifi/network) joined by the kernel. Boot args: connsys_step=17 connsys_wake=0
+#                                  passphrase, fw-wifi/network) joined by the kernel. Boot args: connsys_step=17 connsys_wake=0
 #   tools/run/image.sh bluetooth   ... and the key store (bluetoothd keeps its identity in the keychain), bluetoothd and
-#                              BlueTool with our library, src/bt_test.m's scan. Boot args: also connsys_bt=2 aks_keys=1
+#                                  BlueTool with our library, src/bt_test.m's scan. Boot args: also connsys_bt=2 aks_keys=1
 #   tools/run/image.sh metal       the GPU for CoreAnimation: Mesa's panfrost (userland/tools/mk-mesa.sh, built when missing) and the
-#                              Metal device; with the payload in boot_a, the cuts its 32 MB need: libOSMesa lives in the system
-#                              image and the small one has a link to it, the test programs and two unused libraries are
-#                              left out, our libraries are stripped (init then says 4 checks failed). With HAKIOS_PAYLOAD=flash
-#                              (the payload in the system partition) nothing is cut. Boot args: metal=1 fb_queue=1 fb_flip=1.
-#                              QC_METALLIB=FILE: QuartzCore's shaders in AIR (userland/tools/qc-simlib.py makes it from the
-#                              simulator's QuartzCore; never in the repository)
+#                                  Metal device; with the payload in boot_a, the cuts its 32 MB need: libOSMesa lives in the system
+#                                  image and the small one has a link to it, the test programs and two unused libraries are
+#                                  left out, our libraries are stripped (init then says 4 checks failed). With HAKIOS_PAYLOAD=flash
+#                                  (the payload in the system partition) nothing is cut. Boot args: metal=1 fb_queue=1 fb_flip=1.
+#                                  QC_METALLIB=FILE: QuartzCore's shaders in AIR (userland/tools/qc-simlib.py makes it from the
+#                                  simulator's QuartzCore; never in the repository)
 #
 # All three need the phone's CONNSYS firmware in kernel/deps/build/connsys-fw/firmware for Wi-Fi and Bluetooth, and
 # rebuild the system image (SYSTEM=1): write it with tools/run/system-flash.sh before the run. RC_JOBS=FILE (in userland/)

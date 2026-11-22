@@ -12,10 +12,10 @@ order it was needed, and where each thing is in the tree. Expect a step it does 
 
 | The same on every phone (already written) | Yours to find and write |
 | --- | --- |
-| The kernel: Apple's xnu-8796.121.2 + `kernel/patches/` + `kernel/overlay/`, built as `DEVELOPMENT_ARM64_BCM2837` | Your phone's package: `devices/NAME/board.toml` (the table below) |
+| The kernel: Apple's xnu-12377.121.6 + `kernel/patches/` + `kernel/overlay/`, built as `DEVELOPMENT_ARM64_BCM2837` | Your phone's package: `devices/NAME/board.toml` (the table below) |
 | GICv3, PSCI cores, the return to the loader, the platform expert | `soc/SOC.toml`, if your chip has none yet |
 | The loader, the image format and its packer (`loader/chainboot.py`), the run cycle (`tools/run/xnu-cycle.sh`, `tools/run/boot-xnu.sh`) | The storage driver if yours is not an eMMC on MSDC0 left ready by LK |
-| The user space side: `darwin/system/fetch.sh`, `userland/build.sh`, the inserted libraries | The touch controller, the GPU's power sequence, the keys, the radios, the camera: a driver each, with a feature |
+| The user space side: `darwin/mtk27.sh` for the 27 release, `userland/build.sh` and `darwin/system/fetch.sh` for the earlier system, the inserted libraries | The touch controller, the GPU's power sequence, the keys, the radios, the camera: a driver each, with a feature |
 | The log's road back through ramoops (`loader/mtkdbg.h`) | The addresses of the ramoops zones and of LK's framebuffer |
 
 A phone with the same chip and the same parts is a package and nothing else. A phone with another
@@ -144,10 +144,12 @@ Each step has the check that proves it. Do not start a step whose predecessor's 
 7. **The other cores.** Raise `cpus=` one at a time. `XNU_CORES` and `cpus=` must be the same number (`xnu-cycle.sh` keeps them so): the tree
    offers exactly that many, from the head of `core_order`, and the next one is the watcher's. A watcher on a core the kernel wants hangs every
    rendezvous. *Check:* each processor checks in, in the log.
-8. **The root.** `darwin/system/fetch.sh` (your own download of the system image 20F66, 20F66), `userland/build.sh` for `system.apfs`, the partition
+8. **The root.** `darwin/system/fetch.sh` (your own download of the 20F66 system), `userland/build.sh` for `system.apfs`, the partition
    (`tools/gpt-carve.py` writes a new GPT **to files**; putting it on the phone is your step and the one that can lose `userdata`), then
-   `tools/run/system-flash.sh`. With `emmc_root=1` the kernel reads the partition itself (`bsd/dev/mtk_emmc.c`, the measurements (the journal `x6826b-emmc.md` of the package `x6826b`):
-   holding the image in DRAM instead cost 2.5 GB wired and 203 s of every boot). *Check:* `launchd` starts; then the home screen appears on
+   `tools/run/system-flash.sh`. With `emmc_root=1` the kernel reads the partition itself (`bsd/dev/mtk_emmc.c`; the measurements are in the
+   eMMC journal of the first phone's package: holding the image in DRAM instead cost 2.5 GB wired and 203 s of every boot). For the 27 release the
+   image is `darwin/mtk27.sh system`'s, written with `HAKIOS_PAYLOAD=flash` so that the partition's last 96 MiB stay the payload's
+   ([building.md](building.md)). *Check:* `launchd` starts; then the home screen appears on
    LK's framebuffer, drawn by the CPU.
 9. **The screen as the system wants it.** LK's layer has per-pixel alpha on and the kernel's console writes pixels with alpha 0: nothing is seen. The
    loader switches the alpha off and the other LK layers too. If your panel is command mode and not video mode, pixels written into the
@@ -155,10 +157,11 @@ Each step has the check that proves it. Do not start a step whose predecessor's 
 10. **Touch.** Probe from the loader first (`tools/run/touch-probe.sh`, `-DTOUCH_PROBE=1`): a cycle is four minutes and no kernel is rebuilt. Then
     the kernel driver has one entry point, `hakios_touch_post(type, finger, x, y)`. The first phone's controller (TD4160, `mtk_tcm.c`) keeps its
     firmware in RAM, so the loader uploads it on the way (`tcm.h`); yours may not need that.
-11. **The keys and the clocks** (`mtk_keys.c`, through the PMIC wrapper), **the GPU** (`tools/run/gpu-probe.sh`, then `mtk_mali.c`, with Mesa's
-    panfrost in user space), **the sensor hub** (`mtk_scp.c`, [sensors](the journal of the first phone: sensors)).
+11. **The keys and the clocks** (`mtk_keys.c`, through the PMIC wrapper), **the GPU** (`tools/run/gpu-probe.sh`, then `mtk_mali.c`, with
+    the native Mali library in user space, [metal-glass.md](metal-glass.md)), **the sensor hub** (`mtk_scp.c`; the sensors' journal of the
+    first phone's package).
     `mtk_cpufreq=` and `mali_mhz=` change PLLs and, above some points, voltages: read your chip's table first.
-12. **The radios, the camera, the battery**: [Wi-Fi](the journal of the first phone: wifi) (CONNSYS from the phone's own firmware), [Bluetooth](bluetooth-porting.md),
+12. **The radios, the camera, the battery**: Wi-Fi (CONNSYS from the phone's own firmware; the Wi-Fi journal of the first phone's package), [Bluetooth](bluetooth-porting.md),
     [the camera](camera-porting.md), `mtk_battery.c` (the PMIC's gauge).
 
 ## One run
@@ -182,11 +185,11 @@ pmsg zone, 64 KB): a long run loses its beginning, so keep runs short and say le
 
 ## The kernel's side
 
-- A driver is a file `kernel/overlay/bsd/dev/hakios_<name>.c`, a line in `bsd/conf/files` (in `hakios.patch`), and a call to its `hakios_<name>_init()`
-  in `hakios_input.c`. There is no clock, pin, regulator or bus framework: a driver maps its registers and writes them, and says in its head comment
+- A driver is a file `kernel/overlay/bsd/dev/` (`mtk_<name>.c` for a MediaTek block, `hakios_<name>.c` for what any phone has), a line in
+  `bsd/conf/files` (in `kernel/patches/0001-build.patch`), and a call to its start function in `hakios_drivers.c`. There is no clock, pin, regulator or bus framework: a driver maps its registers and writes them, and says in its head comment
   which Linux source each layout was read from. GPL sources are read and named, never copied.
-- **Every driver is off without its boot-arg**, because the same kernel boots QEMU, the Qualcomm phone and this one, and every address in a driver
-  belongs to one phone. The first phone's: `emmc_root=1`, `touchscreen=2`, `buttons=2`, `mali=1`, `metal=1`, `connsys_step=17`, `mtkcam=1`, `mtkbatt=1`.
+- **Every driver is off without its boot-arg** and starts only on a board that lists its feature ([features.md](features.md)). The first
+  phone's: `emmc_root=1`, `touchscreen=2`, `buttons=2`, `mali=1`, `metal=1`, `connsys_step=17`, `scp_step=7`, `mtkcam=5`, `mtkbatt=1`.
   Give your phone's drivers their own values or names; do not reuse a value that maps another phone's registers.
 - Drivers that share the PMIC wrapper take `mtk_pwrap_lock()` around every transaction.
 - Two skeletons hold the phone-independent half of a subsystem and refuse to run until a table of operations is complete:
@@ -202,7 +205,7 @@ pmsg zone, 64 KB): a long run loses its beginning, so keep runs short and say le
 | A 15 minute run on the Apple logo | the watcher on a core the kernel was offered (step 7) |
 | Jetsam killing everything minutes in | the system image held in DRAM (step 8) |
 | The boot image does not fit | the loader is built `-Os`; `boot_a` is 32 MB here and the kernel plus the small root must fit |
-| `rootvp not authenticated`, or a reboot looking for a preboot volume | `rd=md0` must stay on the command line beside `emmc_root=1` (why (the journal `x6826b-emmc.md` of the package `x6826b`)) |
+| `rootvp not authenticated`, or a reboot looking for a preboot volume | `rd=md0` must stay on the command line beside `emmc_root=1` (why: the eMMC journal of the first phone's package) |
 | The phone boots only into a hung XNU | an image that always started XNU; the boot ROM was the way back |
 
 ## What is never in the tree

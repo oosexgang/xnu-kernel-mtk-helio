@@ -33,7 +33,7 @@ beside the code, so the file named in each heading has the full explanation.
 | `buttons` | Only with boot-arg buttons=2: every address below belongs to this phone; buttons=1 is the Qualcomm port's (xnu-kernel-qcom). |
 | `keylog` | keylog=1: a line for every change, to check the wiring against. |
 | `mali_mhz` | The GPU's clock (boot-arg mali_mhz=N, 375 to 950): the Mali-G52 runs from syspll_d3, 364 MHz, as mtk_mali.c's bring-up leaves it -- a third of what MediaTek's table has it do. |
-| `mtk_cpufreq` | The processors' clock (boot-arg mtk_cpufreq=1: what it is, said; mtk_cpufreq=2: raised -- not cpufreq=, which is the Qualcomm port's and writes where this SoC has nothing of the kind). |
+| `mtk_cpufreq` | The processors' clock (boot-arg mtk_cpufreq=1: what it is, said; mtk_cpufreq=2: the A75s raised to 2000 MHz; mtk_cpufreq=3: and the A55s to 1700 -- not cpufreq=, which is the Qualcomm port's and writes where this SoC has nothing of the kind). |
 
 ### `bsd/dev/mtk_mali.c`
 
@@ -86,7 +86,7 @@ beside the code, so the file named in each heading has the full explanation.
 | `fbtrace` | fbtrace=N: log the first N calls of every selector (default 3). |
 | `fbwidth` | fbwidth= and fbheight= change the size reported. |
 | `fbxr` | fbxr=1 (with fbscale=2): the screen of the reference phone's larger sibling (the XR) instead, 414 x 896 points at two pixels a point. |
-| `metal` | With boot-arg metal=1 a user process may put those two properties here, which is the whole of what keeps Metal from finding our driver; see setProperties below, and docs/metal.md 10.31 (10.14 for the measurement that made it a boot-arg). |
+| `metal` | With boot-arg metal=1 a user process may put those two properties here, which is the whole of what keeps Metal from finding our driver; see setProperties below, and userland/docs/metal.md 10.31 (10.14 for the measurement that made it a boot-arg). |
 | `rec_mb` | rec_secs=N [rec_start=S] [rec_mb=M]: from S seconds after the first frame, for N seconds, every frame that is shown is also kept -- one pixel of every REC_STEP in each direction, three bytes a pixel -- in a piece of memory of M megabytes (default 480, which is 520 frames) that is left in place when… |
 | `rec_ring` | rec_ring=1: when the memory is full the recording does not stop but goes on over its oldest frames, so that what it holds at the end is the last of the run: for something that happens once in a long session, the run is ended right after it (five fingers) and the frames before it are there. |
 | `rec_secs` | rec_secs=N [rec_start=S] [rec_mb=M]: from S seconds after the first frame, for N seconds, every frame that is shown is also kept -- one pixel of every REC_STEP in each direction, three bytes a pixel -- in a piece of memory of M megabytes (default 480, which is 520 frames) that is left in place when… |

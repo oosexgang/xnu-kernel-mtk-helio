@@ -1,7 +1,7 @@
 /*
  * An argument encoder: a RECORDER. Metal's encoder writes 8-byte handles into a buffer and those are an Apple
  * GPU's descriptors, so this records (resource, Metal id) against (destination buffer, destination offset) in the
- * compiler library instead, and the draw binds every member the pipeline's shaders declare (docs/air.md 8.2).
+ * compiler library instead, and the draw binds every member the pipeline's shaders declare (userland/docs/air.md 8.2).
  * The layout is the set's -- a shader's, or one the application described -- and the destination the buffer
  * -setArgumentBuffer:offset: named; which objects are the driver's own, and keeping the buffer alive, is the
  * plug-in's (HakiosMetalArgumentEncoder).
@@ -240,7 +240,7 @@ rwm_argenc_encode_sampler(struct rwm_argenc *e, size_t index, struct rwa_sampler
 /*
  * A VALUE member's place in the argument buffer -- an `int` or a `float4` inside the set -- which is what Metal
  * answers. Nothing of this driver reads those bytes (a shader reading a value out of a set is refused when it is
- * translated, docs/air.md 8.2.1), and that is said once; a real pointer is still the right answer, where NULL
+ * translated, userland/docs/air.md 8.2.1), and that is said once; a real pointer is still the right answer, where NULL
  * would be a crash in the application's memcpy.
  */
 extern "C" void *

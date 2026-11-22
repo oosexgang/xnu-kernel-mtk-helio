@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch one member of the system image 20F66 the reference phone firmware archive without downloading the rest.
+"""Fetch one member of the 20F66 system's firmware archive (the IPSW) without downloading the rest.
 
 usage: fetch-from-ipsw.py MEMBER OUTPUT
 

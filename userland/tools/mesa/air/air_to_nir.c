@@ -5,7 +5,7 @@
 
 /*
  * One AIR module -> one nir_shader. The mapping from AIR's named metadata to
- * NIR's variables, bindings and system values is the table in docs/air.md
+ * NIR's variables, bindings and system values is the table in userland/docs/air.md
  * section 3.1; this file is that table in code, and nothing here decides
  * anything the table does not state.
  */
@@ -434,7 +434,7 @@ air_get(struct air_ctx *c, const struct air_value *v)
        * [ -1, %22 ]` in MetalFaceMask_AddSeedPoint became `phi b3: %92,
        * b4: %0 (undefined)`: the -1 was the same constant as the one the
        * compare after the branch uses, so the store on the entry edge pointed
-       * at a def inside the branch (docs/air.md section 5).
+       * at a def inside the branch (userland/docs/air.md section 5).
        */
       bool outer = !c->in_const;
       nir_cursor use = c->b.cursor;
@@ -687,7 +687,7 @@ air_ptr_add(struct air_ctx *c, struct air_ptr ptr, nir_def *bytes)
     * Folding the pair removes the reference: a global's offset is always a
     * constant here, so the whole chain is one immediate built in the const
     * region with no operand at all. The latent ordering hazard it stands on is
-    * written down in docs/air.md rather than left to be rediscovered.
+    * written down in userland/docs/air.md rather than left to be rediscovered.
     */
    if (nir_src_is_const(nir_src_for_ssa(ptr.offset)) &&
        nir_src_is_const(nir_src_for_ssa(bytes)) &&
@@ -1536,7 +1536,7 @@ store_output(struct air_ctx *c, nir_variable *var, nir_def *v)
 }
 
 /* fragment inputs and vertex outputs take the slots in the order they appear;
- * the runtime links the two sides by name (docs/air.md section 7.5)
+ * the runtime links the two sides by name (userland/docs/air.md section 7.5)
  */
 static void
 add_varying(struct air_ctx *c, const char *name, unsigned slot, unsigned comps,
@@ -1994,7 +1994,7 @@ argbuf_members(struct air_ctx *c, const struct air_md *sti, const struct air_typ
  * Metal through SPIRV-Cross and how an MSL `[[id(n)]]` struct reaches it from
  * Metal itself. 7 620 of Resident Evil 4's 7 879 modules have one and 0 of
  * the system image 20F66's 671 do, so this is the one interface word that is invisible from
- * Apple's own libraries and is 97% of a game (docs/air.md section 8.2).
+ * Apple's own libraries and is 97% of a game (userland/docs/air.md section 8.2).
  *
  * The parameter does not become a buffer to read: it becomes a pointer of its
  * own class, and the member table built here is what a load through it
@@ -3444,7 +3444,7 @@ translate_instruction(struct air_ctx *c, const struct air_inst *in)
        * while translating -- and not an address, so it has no bytes. Naming
        * that here rather than letting air_get_ssa say "a pointer where a
        * number belongs" is the difference between a wall with a reason and a
-       * wall with a symptom; the reason is in docs/air.md section 3.
+       * wall with a symptom; the reason is in userland/docs/air.md section 3.
        */
       struct air_val *sv = air_get(c, in->operands[0]);
       if (!sv)
@@ -4486,7 +4486,7 @@ translate_body(struct air_ctx *c)
    const struct air_function *f = c->fn;
 
    /* phis first: each becomes a register, loaded where the phi is and stored
-    * at the end of every predecessor (docs/air.md: NIR's own
+    * at the end of every predecessor (userland/docs/air.md: NIR's own
     * nir_lower_goto_ifs does the same to make an unstructured CFG safe) --
     * except a phi of POINTERS, which has no bits and is resolved where it
     * stands (resolve_pointer_phi). It gets no register, and the store loop at
@@ -4829,7 +4829,7 @@ plan_globals(struct air_ctx *c)
           * sentinel: the Adreno's texture instruction holds the sampler in a
           * four-bit field, and ~0u there asserts in ir3's encoder. The index
           * goes after the API's samplers, and the runtime creates the sampler
-          * from the state word (docs/air.md section 7.7).
+          * from the state word (userland/docs/air.md section 7.7).
           */
          unsigned next = 0;
          for (unsigned k = 0; k < c->info->num_resources; k++)
@@ -5069,7 +5069,7 @@ air_to_nir(void *mem_ctx, const void *bitcode, size_t size, const char *entry_po
       return NULL;
    }
    /* air.visible: a library function, linked into its caller at pipeline time
-    * (docs/air.md section 7.5). Not an entry point, so not a shader -- unless
+    * (userland/docs/air.md section 7.5). Not an entry point, so not a shader -- unless
     * the caller asks for the generated wrapper, which makes one compute shader
     * whose only job is to call it (wrap_library_function).
     */

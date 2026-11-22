@@ -371,7 +371,7 @@ rwm_command_wait_scheduled(struct rwm_command *c)
 }
 
 /* The fence is the whole point: a dispatch that the GPU does not finish must not read as a result. air_run learned
- * that the expensive way (docs/air.md section 5). */
+ * that the expensive way (userland/docs/air.md section 5). */
 extern "C" int
 rwm_command_wait_completed(struct rwm_command *c, struct rwa_device *device, char *why, size_t why_size)
 {

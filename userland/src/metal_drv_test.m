@@ -14,7 +14,7 @@
  *   MTLAddDevice (0x181a1875c), then MTLCreateSystemDefaultDevice()
  *
  * Discovery is still bypassed, deliberately: no bundle, and the service still has neither
- * MetalPluginName nor MetalPluginClassName, because docs/metal.md section 7 measured what
+ * MetalPluginName nor MetalPluginClassName, because userland/docs/metal.md section 7 measured what
  * happens when the whole system takes the Metal road with nothing behind it.
  *
  * With --bundle it loads the driver the way Metal's own discovery would -- through NSBundle,
@@ -112,7 +112,7 @@ static struct rwa_device *air_device;
  *
  * It is the one thing about an encoder that cannot be seen from Metal's side: there is no
  * argument buffer to read back, because the frontend resolved every member of every set
- * to a binding and Metal's 8-byte handles mean nothing to a Gallium driver (docs/air.md
+ * to a binding and Metal's 8-byte handles mean nothing to a Gallium driver (userland/docs/air.md
  * 8.2), so what an encoder leaves behind is a RECORD in the library and not bytes. This
  * reaches it the way -mesaDevice is reached above: the driver's own accessor for the
  * `struct rwa_buffer` behind an MTLBuffer, and then the library's own count.
@@ -245,7 +245,7 @@ fnv1a(const unsigned char *bytes, size_t length)
  * function's module with LLVM's 0x0B17C0DE wrapper in front of it: Metal has already read
  * the container, found this function in it and kept the whole metallib mapped, so a driver
  * asks one declared selector and gets bytes. That is the junction with subsystem (1): the
- * frontend in docs/air.md reads exactly such a module.
+ * frontend in userland/docs/air.md reads exactly such a module.
  *
  * So this prints, for every function of the library, the wrapper's own idea of where the
  * module is and a checksum over it -- which userland/tools/metallib.py computes over the same
@@ -838,7 +838,7 @@ compute_path(id<MTLDevice> dev, id<MTLLibrary> library, const char *only)
  *
  * `clearFragment20` out of AppleMetalGLRenderer's library writes render target 2 (int4) and
  * reads a 48-byte constant buffer at index 14. It is one of the 255 fragment shaders air_run
- * has drawn and compared pixel by pixel (docs/air.md), so there is a reference to compare
+ * has drawn and compared pixel by pixel (userland/docs/air.md), so there is a reference to compare
  * against -- and these four words ARE that reference, computed by air_run on softpipe with
  * the same (i * 7 + 13) & 0xff fill this function uses:
  *
@@ -855,7 +855,7 @@ compute_path(id<MTLDevice> dev, id<MTLLibrary> library, const char *only)
  * float4 corners out of a constant buffer at index 14 and indexes them by air.vertex_id --
  * no vertex attributes, which is why it can be served at all: the contract carries no
  * attribute layout, and all three of the corpus's vertex shaders turn out to read a buffer
- * instead (docs/metal.md 10.24). The corners written below are the ones the generated stage
+ * instead (userland/docs/metal.md 10.24). The corners written below are the ones the generated stage
  * covers, so the two roads draw the same pixels and a difference is a shader difference. */
 static const char *vertex_function;
 static const char *fragment_function = "clearFragment20";
@@ -888,7 +888,7 @@ static unsigned draw_from, draw_count = 60;
 /* --seed-rows writes the draw's 4x4 texture one row at a time, at a non-zero region origin,
  * which is how this test used to do it always. It is a flag now because that made every
  * measurement of that texture depend on the driver's origin.y, and because four rows landing
- * in one place is the second explanation of the flip in docs/metal.md 10.26.
+ * in one place is the second explanation of the flip in userland/docs/metal.md 10.26.
  */
 /* Metal's own MTLCommandBufferStatus: NotEnqueued 0, Enqueued 1, Committed 2, Scheduled 3,
  * Completed 4, Error 5. This test used to compare against the literal 6, which is what the
@@ -1105,7 +1105,7 @@ static void draw_every(id<MTLDevice> dev, id<MTLLibrary> library, id<MTLCommandQ
 /*
  * The indexed draws, run after the ordinary one and over its pipeline, attachments and
  * bindings -- so that the only thing that differs between the reference picture and these
- * is the index buffer. docs/metal.md 10.35 is the experiment and air_metal_test
+ * is the index buffer. userland/docs/metal.md 10.35 is the experiment and air_metal_test
  * --draw-index is its reference implementation on softpipe, step for step.
  *
  * The index buffer holds 0 1 2 3 1 2 3. Three indices out of it make one triangle of the
@@ -1315,7 +1315,7 @@ index_draws(id<MTLDevice> dev, id<MTLCommandQueue> queue, MTLRenderPassDescripto
 /*
  * --draw-attrib: the vertex attribute layout ON THE HARDWARE, through Metal's own API.
  *
- * docs/metal.md 10.44 put MTLVertexDescriptor into the contract and measured it on this
+ * userland/docs/metal.md 10.44 put MTLVertexDescriptor into the contract and measured it on this
  * machine's softpipe: the offsets, the stride, the formats, the buffer index, the step
  * function and its rate each changed what came back, and the element order proved to be the
  * shader's driver_location order and not Metal's attribute order. What that measurement
@@ -2440,7 +2440,7 @@ draw_path(id<MTLDevice> dev, const char *metallib)
 	 * and the first version of this bound ONE buffer of corners at every index -- so
 	 * texturedVertex2D, which reads positions from buffer 0 and texture coordinates from
 	 * buffer 1, read positions as its coordinates and returned an honest answer to an input
-	 * nobody meant (103 200 303 400 on the device, docs/metal.md 10.25). A harness that
+	 * nobody meant (103 200 303 400 on the device, userland/docs/metal.md 10.25). A harness that
 	 * binds the same thing everywhere cannot be compared with anything.
 	 *
 	 * Positions go to index 0 and to index 14, because clearVertex declares its buffer at
@@ -2517,7 +2517,7 @@ draw_path(id<MTLDevice> dev, const char *metallib)
 		 * Per row it was four calls with a non-zero region origin, which made every
 		 * measurement of this texture depend on the driver getting origin.y right --
 		 * a thing this test is not about. It is also the second explanation of the
-		 * vertical flip in docs/metal.md 10.26, which one pixel could not separate
+		 * vertical flip in userland/docs/metal.md 10.26, which one pixel could not separate
 		 * from the first: four rows landing in one place would leave every texel
 		 * carrying the last row's y = 203, and pixel (0, 0) would then read
 		 * 100 203 303 400 with no flip anywhere.
@@ -2651,7 +2651,7 @@ draw_path(id<MTLDevice> dev, const char *metallib)
 	 * coordinate (0,1), so a FLAT varying puts texel (0,3) there -- exactly what a
 	 * mirrored picture would put there. And pixels (3,3) and (0,3) read the same under
 	 * flat and under smooth, so of the sixteen only fourteen can tell the two apart.
-	 * docs/metal.md 10.32 is the measurement that followed from printing them all.
+	 * userland/docs/metal.md 10.32 is the measurement that followed from printing them all.
 	 */
 	{
 		unsigned grid[4 * 4 * 4];
@@ -2801,7 +2801,7 @@ read_depth_buffer(id<MTLTexture> zt, float *depth, const char *what)
  *     "bufferIndex %lu does not identify an argument buffer" and returns nil. The driver
  *     answers it instead, through a category, by reading the function's own bitcode. So
  *     what this measures is WHOSE answer came back: Apple's shaders declare no argument
- *     buffer at all (0 of 456 modules, docs/air.md 8.2), so the answer must still be nil
+ *     buffer at all (0 of 456 modules, userland/docs/air.md 8.2), so the answer must still be nil
  *     -- but with the driver's own sentence, which names how many sets the function has.
  *     Metal's sentence and the driver's are told apart in the log by "this function
  *     declares".
@@ -3469,7 +3469,7 @@ depth_path(id<MTLDevice> dev, const char *metallib)
  * A program that faults on this port leaves nothing behind -- the kernel prints "Failed to
  * send exception EXC_CORPSE_NOTIFY" and that is all -- so the fault has to print itself. The
  * addresses that matter here are not in the shared cache but inside
- * /hakios/lib/libhakiosair.dylib, so the slide trick the other probes use (docs/metal.md
+ * /hakios/lib/libhakiosair.dylib, so the slide trick the other probes use (userland/docs/metal.md
  * section 6) is no help: dladdr gives the image and the offset within it, which
  * llvm-addr2line on the machine turns back into a line.
  */
@@ -3518,7 +3518,7 @@ fault(int sig, siginfo_t *info, void *uap)
 /*
  * Every fragment shader of a library, drawn, one line each.
  *
- * One shader drawn is an example; 255 of them have a reference each (docs/air.md: air_run
+ * One shader drawn is an example; 255 of them have a reference each (userland/docs/air.md: air_run
  * draws every fragment shader of the corpus and the pixel was compared), so drawing them all
  * turns an example into coverage. One process does the whole library because the loader keeps
  * only the first 256 KB and the last 1 MB of a boot's log: 271 processes would lose the middle
@@ -3713,7 +3713,7 @@ draw_every(id<MTLDevice> dev, id<MTLLibrary> library, id<MTLCommandQueue> queue,
  *                     texture over the whole 1080x648 attachment through a LINEAR
  *                     sampler. Every pixel of it is an interpolated texture coordinate
  *                     and a filtered texel, which is the one thing a 4x4 draw over a
- *                     constant coordinate cannot show at all (docs/metal.md 10.32).
+ *                     constant coordinate cannot show at all (userland/docs/metal.md 10.32).
  *   rows 1752..2399   the same draw with a NEAREST sampler. Blocky where the band above
  *                     is smooth, and that difference is the sampler state reaching the
  *                     hardware; it is also the band in which every pixel is exactly one
@@ -4611,7 +4611,7 @@ pic_bands(id<MTLDevice> dev, id<MTLLibrary> library, id<MTLCommandQueue> queue)
 	 *
 	 * Which way up it comes out is the viewport's, not this file's, and it has just
 	 * changed: the library now puts clip y = +1 in memory row 0, which is Metal's rule
-	 * (docs/metal.md 10.28, landed once 10.32 had fixed the flat varying that was
+	 * (userland/docs/metal.md 10.28, landed once 10.32 had fixed the flat varying that was
 	 * hiding it). The corner at clip (-1, +1) therefore lands in row 0 and carries the
 	 * coordinate v = 1, so the TOP of the band is texel row PIC_TEX-1 and the band is
 	 * the texture mirrored vertically.
@@ -4905,7 +4905,7 @@ picture_path(id<MTLDevice> dev, const char *metallib, int seconds)
  *
  * WHERE THE TIME GOES HERE, AND WHY IT IS NOT WHERE AN APPLICATION EXPECTS IT.
  *
- * -[HakiosMetalCommandBuffer commit] does the work (docs/metal.md 10.13). The encoder only
+ * -[HakiosMetalCommandBuffer commit] does the work (userland/docs/metal.md 10.13). The encoder only
  * RECORDS; commit walks the recorded list calling rwa_render_draw / rwa_dispatch, and each of
  * those flushes the Gallium context and WAITS ON ITS OWN FENCE before returning
  * (userland/tools/mesa/air/air_metal.c, finish_or_say_why with required = true). Three consequences,
@@ -4966,7 +4966,7 @@ picture_path(id<MTLDevice> dev, const char *metallib, int seconds)
  * HOW OUR COST IS SEPARATED FROM THE GPU's, AND WHERE IT CANNOT BE
  *
  * Three ways, in order of how much they can be trusted. The first did not exist when this mode
- * was written and was added because the other two were not enough (docs/metal.md 10.43):
+ * was written and was added because the other two were not enough (userland/docs/metal.md 10.43):
  *
  *   (0) ASK THE KERNEL. Request kHakiosGPUWorked (0x7d) on HakiosGPU answers
  *       hakios_gpu_worked()'s three numbers -- the microseconds the 3D core worked, on how
@@ -5235,7 +5235,7 @@ tm_make_pipeline(id<MTLDevice> dev, id<MTLFunction> vertex, id<MTLFunction> frag
  * kernel's `tl: q <fence> took <us>` lines for the rest -- and that turned out to be the
  * weakest part of it: those lines number every submission on the machine, this test is not the
  * only thing submitting, and aligning 1285 of them to four cases by eye is exactly the kind of
- * arithmetic that produces a confident wrong answer (docs/metal.md 10.43 shows the three
+ * arithmetic that produces a confident wrong answer (userland/docs/metal.md 10.43 shows the three
  * populations it did produce, and the ambiguity in their boundaries).
  *
  * So the kernel now hands the numbers over: request kHakiosGPUWorked (0x7d) on HakiosGPU
@@ -6793,7 +6793,7 @@ time_path(id<MTLDevice> dev, const char *metallib, unsigned repeats)
  *     phone's own shared cache by tools/metal/protometh.py; where the runtime does have a
  *     protocol it is asked instead, and the two counts are compared out loud.
  *
- *  2. AN ENTRY IN A METHOD TABLE IS NOT BEHAVIOUR (docs/metal.md 10.1). Apple writes an
+ *  2. AN ENTRY IN A METHOD TABLE IS NOT BEHAVIOUR (userland/docs/metal.md 10.1). Apple writes an
  *     abstract method as a real entry whose body is [self doesNotRecognizeSelector:_cmd];
  *     `respondsToSelector:` answers YES for it and the abort when it is called names the
  *     RECEIVER -- our class -- so in the log it is indistinguishable from a method that was
@@ -7506,7 +7506,7 @@ main(int argc, char **argv)
 	 * switch is on, Metal's own discovery has already registered our device, and a
 	 * program that then adds its own makes two and dies on the next probe -- which is
 	 * exactly what happened to triangle_app in the boot of 22 October 05:50, the only
-	 * process in the whole system that aborted (docs/metal.md 10.47).
+	 * process in the whole system that aborted (userland/docs/metal.md 10.47).
 	 *
 	 * Apple's daemons never meet this because none of them calls MTLAddDevice; neither
 	 * does a game. It is a hazard of our own test programs alone, and the fix is an

@@ -167,7 +167,7 @@ static bool library_fill = false;
  *
  * For the 14 kernels whose loops leave on a count or a sentinel read out of a
  * buffer, the pattern is not an input at all -- the loop never ends and the GPU
- * runs forever (docs/air.md section 5, userland/tools/air/kstruct.py). Zeros are a
+ * runs forever (userland/docs/air.md section 5, userland/tools/air/kstruct.py). Zeros are a
  * degenerate input but a *defined* one: a count of zero means the loop runs no
  * times, so the kernel reaches its end and the hardware answers. What that
  * proves is that the translated shader runs on the Adreno without hanging; it
@@ -463,7 +463,7 @@ finalize_for_gallium(nir_shader *nir, struct pipe_screen *screen)
     * What that cost: the one draw in this project whose varying actually varies --
     * Apple's texturedVertex2D handing a texcoord to texturedFragment2D* -- read the
     * provoking vertex's texcoord at every fragment on the phone, and the picture looked
-    * VERTICALLY FLIPPED for three boots (docs/metal.md 10.26, 10.32). It is not flipped.
+    * VERTICALLY FLIPPED for three boots (userland/docs/metal.md 10.26, 10.32). It is not flipped.
     * The quad's pixel (0,0) sits in the triangle whose last vertex carries uv (0,1), so
     * flat shading hands it texel (0,3) -- `100 203 303 400`, bit for bit the number the
     * device printed, and reproduced here on softpipe by forcing INTERP_MODE_FLAT.
@@ -528,7 +528,7 @@ finalize_for_gallium(nir_shader *nir, struct pipe_screen *screen)
  * 128x1x1 reduction. Under 4x4x1 four threads have tid == 0 -- Metal's scalar
  * thread_position_in_threadgroup is the x component, not the flattened index -- so four of
  * them run the whole reduction over the four entries this shape writes, and the word they
- * add up is a property of the dispatch rather than of the kernel (docs/air.md section 5).
+ * add up is a property of the dispatch rather than of the kernel (userland/docs/air.md section 5).
  */
 static unsigned block[3] = { GRID, GRID, 1 };
 
@@ -657,7 +657,7 @@ texture_shapes(nir_shader *cs, enum pipe_format fmt[MAX_IMG], bool isf[MAX_IMG],
  * the buffer it had filled itself as though the GPU had answered: a page of
  * numbers that were a statement about the harness and not about the shader.
  * 21 of the 47 kernels of one run were vacuous that way before anyone noticed
- * (docs/air.md section 5).
+ * (userland/docs/air.md section 5).
  *
  * The hang itself turned out to be this harness too: the kernels that did it
  * loop until a buffer value they were never given, and the fill is a byte
@@ -684,7 +684,7 @@ finish_or_say_why(struct pipe_screen *screen, struct pipe_context *pipe, const c
              "this harness: a kernel whose buffers carry counts, indices or sentinels is being "
              "given (i * 7 + 13) & 0xff, and a loop that leaves on a value it was never given "
              "does not leave at all -- both kernels measured this way turned out to be exactly "
-             "that (docs/air.md section 5). And one timeout wedges this GPU for the rest of the "
+             "that (userland/docs/air.md section 5). And one timeout wedges this GPU for the rest of the "
              "boot, so every later run in it is vacuous too.\n", what);
    return done;
 }
@@ -701,7 +701,7 @@ print_own_sampler(unsigned slot, const struct air_sampler_state *a, bool compare
                                        "mirrored_repeat", "clamp_to_border" };
    static const char *const filt[] = { "nearest", "linear", "bicubic" };
    /* Metal's compare_func, in its own order: `none` at 0 and `never` at 8, which is
-    * the value Apple's default carries (docs/air.md 3.3).
+    * the value Apple's default carries (userland/docs/air.md 3.3).
     */
    static const char *const cmp[] = { "none", "less", "less_equal", "greater",
                                       "greater_equal", "equal", "not_equal", "always",
@@ -933,7 +933,7 @@ dispatch_kernel(struct pipe_screen *screen, const struct air_shader_info *info,
                 nir_shader *cs, const char *name, const char *how)
 {
    /* Metal's threadgroup size is a dispatch argument, not a shader constant,
-    * so the frontend leaves it variable (docs/air.md section 7.4) and whoever
+    * so the frontend leaves it variable (userland/docs/air.md section 7.4) and whoever
     * dispatches has to fix it. air_run is that whoever. It is not optional:
     * softpipe reads the block size from TGSI_PROPERTY_CS_FIXED_BLOCK_*, and
     * with a variable size those are zero, so it runs ZERO threads and the
@@ -1231,7 +1231,7 @@ dispatch_kernel(struct pipe_screen *screen, const struct air_shader_info *info,
    printf("air_run: dispatching %ux%ux%u threads in one workgroup; %u device buffer%s bound, "
           "%u of them written, filled with %s\n",
           block[0], block[1], block[2], num_ssbo, num_ssbo == 1 ? "" : "s", num_written,
-          zero_fill ? "ZEROS (--zero: a degenerate input, see docs/air.md section 5)"
+          zero_fill ? "ZEROS (--zero: a degenerate input, see userland/docs/air.md section 5)"
                     : ones_fill ? "0xff BYTES (--ones: a degenerate input)"
                     : library_fill ? "the floats ((w * 13) % 29 - 14) / 4"
                                    : "(i * 7 + 13) & 0xff");
@@ -1297,7 +1297,7 @@ dispatch_kernel(struct pipe_screen *screen, const struct air_shader_info *info,
          printf("air_run: device buffer %u came back bit-identical to the fill, so this "
                 "dispatch wrote nothing visible. Either the shader writes elsewhere, or "
                 "the GPU has stopped making writes visible -- which it does after a few "
-                "dozen dispatches in one boot (docs/air.md section 4).\n", i);
+                "dozen dispatches in one boot (userland/docs/air.md section 4).\n", i);
       pipe_buffer_unmap(pipe, xfer);
    }
 
@@ -1606,7 +1606,7 @@ main(int argc, char **argv)
           * so the shader computed f32(x) while the reference computed f16(x)
           * and the comparison meant nothing. Ten declarations of the corpus
           * return half and every one of them was being reported as agreeing on
-          * the strength of a case that was never compared (docs/air.md,
+          * the strength of a case that was never compared (userland/docs/air.md,
           * section 4 item 4).
           *
           * The chain is still u32 -> f32 -> f16 rather than a single
@@ -1620,7 +1620,7 @@ main(int argc, char **argv)
           * a half output. It is here because the target was one of the two things
           * missing and is the half that belongs on this side; the other half needs
           * a half render target in the generator, whose air.arg_type_name the
-          * corpus does not attest (docs/air.md, section 4 item 4).
+          * corpus does not attest (userland/docs/air.md, section 4 item 4).
           */
          rt_format = PIPE_FORMAT_R16G16B16A16_FLOAT;
          rt_is_float = true;
@@ -1788,7 +1788,7 @@ main(int argc, char **argv)
       /* The y scale is NEGATIVE, and that is Metal's rule rather than a convention picked
        * here. Metal's render-target origin is the top left and its NDC y points up, so clip
        * y = +1 belongs in memory row 0; a positive y scale puts clip y = -1 there, which is
-       * OpenGL's drawable rule and what this code did until now (docs/metal.md 10.28). Mesa
+       * OpenGL's drawable rule and what this code did until now (userland/docs/metal.md 10.28). Mesa
        * negates y in exactly this place, for exactly this reason, when it draws to a window.
        *
        * It is landed only now because until the varying was fixed (10.32) nothing could see
@@ -1872,7 +1872,7 @@ main(int argc, char **argv)
        * -- 101 where a comparison must answer 0 or 1, and for `always` and `never`
        * too, which no compare function and no clamp can explain -- against
        * r32g32b32a32_float bound for a Metal depth2d<float>, which is the one thing
-       * in that run that was this harness's own doing (docs/air.md 3.3).
+       * in that run that was this harness's own doing (userland/docs/air.md 3.3).
        *
        * So a slot a shadow instruction reads gets a real depth texture, and its
        * texels are the only pattern that fits: (x + TEX*y) / 16, which is sixteen

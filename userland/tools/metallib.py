@@ -2,7 +2,7 @@
 """Take a .metallib apart: the MTLB container, its function list, and each function's LLVM bitcode.
 
 The container was worked out by hand against the files of the system image 20F66; what is in it, and what the
-numbers below mean, is written down in docs/metal.md (section 9). Every module of every .metallib
+numbers below mean, is written down in userland/docs/metal.md (section 9). Every module of every .metallib
 in the extracted system is ordinary LLVM bitcode in the standard 0x0B17C0DE wrapper, so after
 "metallib.py dump" an ordinary llvm-dis reads them.
 

@@ -2,7 +2,7 @@
  * The device object of a Metal driver for this port, as a real library.
  *
  * What Metal demands of a plugin's device class was measured rather than guessed
- * (docs/metal.md section 10): `MTLAddDevice` (0x181a1875c) wants an object that comes back
+ * (userland/docs/metal.md section 10): `MTLAddDevice` (0x181a1875c) wants an object that comes back
  * non-nil from -initWithAcceleratorPort:, conforms to MTLDevice and MTLDeviceSPI -- both
  * asserted, both fatal -- and answers -featureProfile, -maxBufferLength and
  * -supportsVertexAmplificationCount:. Four methods. Everything else in the registration
@@ -44,7 +44,7 @@
  * The compute path is here too, and it is where subsystem (1) finally carries something.
  * Metal hands a driver one function's LLVM module through -[_MTLFunction bitcodeData], and
  * those bytes were checked against our own AIR reader over all eleven functions of
- * AV1SW.metallib -- same lengths, same checksums (docs/metal.md 10.12). The front end that
+ * AV1SW.metallib -- same lengths, same checksums (userland/docs/metal.md 10.12). The front end that
  * reads them lives in Mesa, so the compiling and the dispatching are asked of
  * /hakios/lib/libhakiosair.dylib through the contract in userland/tools/mesa/air/air_metal.h.
  *
@@ -70,7 +70,7 @@
  * records (resource, Metal id) against (destination buffer, destination offset) instead
  * and the draw binds every member the pipeline's shaders declare. The buffer's contents
  * are never read, and an argument buffer the application did not fill through an encoder
- * is refused BY NAME (docs/air.md 8.2, and the MTLArgumentEncoder implementation at the
+ * is refused BY NAME (userland/docs/air.md 8.2, and the MTLArgumentEncoder implementation at the
  * end of this file).
  *
  * BUFFER OFFSETS are honoured, which they were not: Metal's own `offset:` is recorded at
@@ -81,7 +81,7 @@
  * it and a copy would lose the writes.
  *
  * What is NOT here, and is not pretended: heaps, blit encoders, events, multisample
- * resolve, and the rectangle half of a viewport -- the rest of docs/metal.md 10.8.
+ * resolve, and the rectangle half of a viewport -- the rest of userland/docs/metal.md 10.8.
  *
  * Every line this file writes carries the PROCESS it was written by
  * (`hakiosmetal[progname pid]:`, see rw_print): a driver is a library, four or five
@@ -723,7 +723,7 @@ gpu_param(io_connect_t gpu, uint32_t which, uint64_t *value)
 - (unsigned)vertexStreamCount;
 /* And the element array the compiler library built out of the descriptor and the module's
  * own interface: how many, and which Metal [[attribute(n)]] each one is. The order is the
- * shader's driver_location order and not Metal's attribute order (docs/metal.md 10.44), so
+ * shader's driver_location order and not Metal's attribute order (userland/docs/metal.md 10.44), so
  * these two are the only way a caller can read that mapping back instead of trusting it --
  * which is what metal_drv_test --draw-attrib prints beside its pixels. Not part of any
  * Metal protocol; Metal's own pipeline reflection would report the same thing. */
@@ -1169,7 +1169,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
  * to Apple2 (1002) which returns NULL when none answers. It never asks about Apple1 -- the
  * constant 0x3e9 is nowhere in that function -- so the one family we claim is the one family
  * it does not want, and the process aborts in MPSKernel with "Failed to get MPSDevice"
- * (docs/metal.md 10.47). Profile 1 is the lowest that pushes Apple2.
+ * (userland/docs/metal.md 10.47). Profile 1 is the lowest that pushes Apple2.
  *
  * So the profile is a boot-arg (metal_profile=N), not because it should stay configurable but
  * because the cost of each step up has to be measured rather than argued: every family claimed
@@ -1212,7 +1212,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
  * One asymmetry is deliberate and is the measured road rather than a shortcut. When the
  * descriptor names no vertex function, the compiler library supplies a pass-through vertex
  * stage over the whole attachment -- which is exactly how air_run has drawn every fragment
- * shader of the corpus, 255 of them compared pixel by pixel (docs/air.md). A descriptor that
+ * shader of the corpus, 255 of them compared pixel by pixel (userland/docs/air.md). A descriptor that
  * does name one passes both modules and nothing is generated.
  */
 /* every pipeline this device declines, by its label and the reason, in the kernel's kept lines:
@@ -1459,7 +1459,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 	 * THE VERTEX DESCRIPTOR, which is what the window server asked this driver for and
 	 * did not get: one pipeline specification was refused 80 times with "reads vertex
 	 * attributes ([[stage_in]]), and this contract carries no vertex attribute layout"
-	 * (docs/metal.md 10.44, 10.45), because the layout lives here and nowhere in the AIR.
+	 * (userland/docs/metal.md 10.44, 10.45), because the layout lives here and nowhere in the AIR.
 	 *
 	 * Both of Metal's arrays are read whole, index by index, and passed through as
 	 * Metal's own numbers -- the library decides what it can honour and refuses the
@@ -1684,7 +1684,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 
 /*
  * A texture over memory the CALLER allocated, which CoreAnimation's update_texture stores and
- * uses (docs/metal.md 10.48, selector 5 of the class-declared list). It is answered by name
+ * uses (userland/docs/metal.md 10.48, selector 5 of the class-declared list). It is answered by name
  * rather than left unrecognized, because an unrecognized selector is terminate() and a named nil
  * is a line in the log -- mediaserverd died 43 times on the one above this before it was
  * answered at all.
@@ -1786,7 +1786,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 /* The sampler's own base class exists and owes its protocol nothing, so this is the cheapest
  * object in the driver: the state goes to the compiler library, which maps it the same way it
  * maps a shader's own `constexpr sampler` word -- one vocabulary, so the two can be checked
- * against each other (docs/air.md 3.3). */
+ * against each other (userland/docs/air.md 3.3). */
 - (id)newSamplerStateWithDescriptor:(MTLSamplerDescriptor *)descriptor
 {
 	char why[256] = { 0 };
@@ -1946,7 +1946,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
  * this way records exactly as one made from a module does.
  *
  * Three shapes are refused BY NAME rather than encoded into something, each because the
- * frontend refuses the matching shader when it translates it (docs/air.md 8.2.1), so a
+ * frontend refuses the matching shader when it translates it (userland/docs/air.md 8.2.1), so a
  * record of ours could never be asked for:
  *
  *   - a member that is not a pointer, a texture or a sampler: a VALUE inside the set,
@@ -1982,7 +1982,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 
 /* The this system release form, which takes a reflection object (MTLBufferBinding) instead of
  * descriptors. Declined by name: every reflection object in this process comes from
- * Metal's own compiler, which is nil here (docs/metal.md 10.7), so an application that
+ * Metal's own compiler, which is nil here (userland/docs/metal.md 10.7), so an application that
  * has one did not get it from us and this driver has nothing to read out of it. */
 - (id)newArgumentEncoderWithBufferBinding:(id)binding
 {
@@ -2058,7 +2058,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
  * what keeps us out of Apple's compiler: the AIR comes from the function object and goes to
  * our own front end.
  *
- * The cost of that road, named in docs/metal.md 10.7: with -compiler still nil,
+ * The cost of that road, named in userland/docs/metal.md 10.7: with -compiler still nil,
  * -newFunctionWithName:constantValues: and -[MTLFunction reflectionWithOptions:] return nil,
  * because those go through the compiler inside Metal's own classes where we cannot reach.
  */
@@ -2190,7 +2190,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
  * The rest of what MTLDevice and MTLDeviceSPI require.
  *
  * Measured on the phone: 44 of the methods those two protocols require are answered by
- * nothing in the _MTLDevice chain (docs/metal.md 10.8). Until they are answered, any
+ * nothing in the _MTLDevice chain (userland/docs/metal.md 10.8). Until they are answered, any
  * application that asks one gets "unrecognized selector" and dies -- and that matters more
  * than it looks, because the gates inside Metal are assertions, so a process that asks a
  * question this device cannot answer does not degrade, it aborts, and launchd restarts it.
@@ -2254,7 +2254,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
  * One sample, STILL -- and this one needs its reason written down, because it is now the
  * narrower statement of the two this driver could make.
  *
- * The compiler library does make multisample textures since docs/metal.md 10.34: the
+ * The compiler library does make multisample textures since userland/docs/metal.md 10.34: the
  * Adreno gives 2 and 4 samples, a render pass of that count fills one, and a shader reads
  * one with read(coord, sample). So "count == 1" is no longer what this device CAN do with
  * a multisample texture.
@@ -2273,7 +2273,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
  * is one instruction in _MTLDevice (0x181a17890) that tail-calls -supportsSampleCount:,
  * which _MTLDevice itself does not implement at all -- so this method is the whole of
  * both, and without it that forward would die on an unrecognized selector naming OUR
- * class (docs/metal.md 10.1's trap).
+ * class (userland/docs/metal.md 10.1's trap).
  */
 - (BOOL)supportsSampleCount:(NSUInteger)count { return count == 1; }
 - (MTLSize)sparseTileSizeWithTextureType:(NSUInteger)type
@@ -2293,7 +2293,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 }
 
 /* These are bitfields of floating-point behaviours a device claims. Claiming none is the
- * honest answer while nothing has verified any of them on this hardware -- and docs/air.md
+ * honest answer while nothing has verified any of them on this hardware -- and userland/docs/air.md
  * is precisely the document that would have to grow the evidence first. */
 - (uint64_t)singleFPConfig { return 0; }
 - (uint64_t)halfFPConfig   { return 0; }
@@ -2343,7 +2343,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 	return [super newLibraryWithURL:url error:error];
 }
 /*
- * The one method -[CAMetalLayer nextDrawable] asks of a device (docs/metal.md 10.46):
+ * The one method -[CAMetalLayer nextDrawable] asks of a device (userland/docs/metal.md 10.46):
  * allocate_drawable_texture builds an ordinary MTLTextureDescriptor, sets its private
  * rotation/isDrawable/framebufferOnly/usage and sends this. The surface, its geometry and
  * every refusal live in src/metal/drawable.cpp, because they answer CoreAnimation rather than
@@ -2458,7 +2458,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 
 /* Without this the device inherits _MTLDevice's own answer, which is "Apple GPU" -- true of
  * the code and false of the hardware. The name is Mesa's renderer string for this chip
- * (docs/air.md: `Adreno 7c+ Gen 3, chip 0x06030500`), and the identifier beside it is asked
+ * (userland/docs/air.md: `Adreno 7c+ Gen 3, chip 0x06030500`), and the identifier beside it is asked
  * of the kernel rather than written down, so a different phone says something different.
  * Nothing in Metal's registration reads this; a person reading a log does. */
 - (NSString *)name
@@ -3310,7 +3310,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
 	return _compute;
 }
 
-/* The three the base class answers with nothing at all (docs/metal.md 10.8), so they can
+/* The three the base class answers with nothing at all (userland/docs/metal.md 10.8), so they can
  * only come from whoever compiled the shader -- which is why the contract carries them. */
 - (NSUInteger)maxTotalThreadsPerThreadgroup { return _info.max_threads_per_group; }
 - (NSUInteger)threadExecutionWidth          { return _info.thread_execution_width; }
@@ -3431,7 +3431,7 @@ rw_in_place(void *context, struct rwa_device *device, IOSurfaceRef surface, unsi
  * THE SLOT EVERY COMMAND BUFFER TAKES FROM THE QUEUE, AND WHY IT HAS TO BE GIVEN BACK.
  *
  * -[_MTLCommandBuffer initWithQueue:retainedReferences:synchronousDebugMode:] -- the
- * designated initialiser this driver's command buffer calls, because docs/metal.md 10.13
+ * designated initialiser this driver's command buffer calls, because userland/docs/metal.md 10.13
  * says to call the real one -- does this, at 0x181a1ea14 and on:
  *
  *     ldr  x8, [x19, _MTLCommandBuffer._queue]
@@ -5004,7 +5004,7 @@ rw_core_of(id texture)
  *
  * Tessellation: the library has no tessellator, so a patch draw records nothing. Said out
  * loud because a draw that silently does nothing is the one failure this driver has already
- * paid for twice (docs/metal.md 10.21, 10.26). */
+ * paid for twice (userland/docs/metal.md 10.21, 10.26). */
 - (void)hakiosNoTessellation
 {
 	RW_ONCE("tessellation is not implemented; this patch draw records "
@@ -5279,7 +5279,7 @@ controlPointIndexBufferOffset:(NSUInteger)controlPointOffset
  *
  * These 26 are not missing from the chain: _MTLCommandEncoder has an entry for every one of
  * them. Each entry is one of Apple's ABSTRACT methods -- a body that calls
- * doesNotRecognizeSelector: -- and that is the trap docs/metal.md 10.1 was written about:
+ * doesNotRecognizeSelector: -- and that is the trap userland/docs/metal.md 10.1 was written about:
  * `respondsToSelector:` answers YES, the method list lists it, and the abort when it is
  * called names the RECEIVER, so the log would read "-[HakiosMetalRenderEncoder
  * setMeshTexture:atIndex:]: unrecognized selector" and send the next reader looking for a
@@ -6067,7 +6067,7 @@ controlPointIndexBufferOffset:(NSUInteger)controlPointOffset
  * Metal's encoder writes one 8-byte handle per member into a plain buffer, and those
  * handles are an Apple GPU's descriptors: a Gallium driver, which binds by index, cannot
  * read them. It also does not need to -- the AIR frontend resolves every member of every
- * set to a binding while translating (docs/air.md 8.2) -- so each -setBuffer:atIndex:
+ * set to a binding while translating (userland/docs/air.md 8.2) -- so each -setBuffer:atIndex:
  * here RECORDS (resource, Metal id) against (the destination buffer, the destination
  * offset) in the compiler library, and the draw binds every member the pipeline's shaders
  * declare from those records. The buffer's contents are never read, and an argument
@@ -6306,7 +6306,7 @@ controlPointIndexBufferOffset:(NSUInteger)controlPointOffset
  * Nothing of this driver ever reads those bytes, and that is said here because it is the
  * kind of silence that costs a day: a shader that reads a value out of a set is refused
  * when it is TRANSLATED ("a value read out of the set instead of a descriptor",
- * docs/air.md 8.2.1), so an application writing here is writing into memory no shader of
+ * userland/docs/air.md 8.2.1), so an application writing here is writing into memory no shader of
  * ours will be compiled to read. Answering a real pointer is still the right answer --
  * the write lands in the application's own buffer and nothing is corrupted -- while
  * answering NULL would be a crash in the application's memcpy.
@@ -6416,7 +6416,7 @@ controlPointIndexBufferOffset:(NSUInteger)controlPointOffset
  *   -[_MTLFunction reflectionWithOptions:binaryArchives:] (0x181aef458) for the
  *   function's reflection -- and that one calls -compiler, which on this port is
  *   -[_MTLDevice compiler] (0x181aac128), a two-instruction stub answering nil
- *   (docs/metal.md 10.7: everything behind Metal's own compiler is nil here). The
+ *   (userland/docs/metal.md 10.7: everything behind Metal's own compiler is nil here). The
  *   builder then walks `[reflection arguments]`, finds a count of zero, and takes its
  *   failure path (0x181aef924):
  *
@@ -6428,7 +6428,7 @@ controlPointIndexBufferOffset:(NSUInteger)controlPointOffset
  *
  * So the choice is not between Apple's implementation and ours; it is between nil and an
  * encoder. And what Metal was missing is what this port HAS: -[_MTLFunction bitcodeData]
- * works (docs/metal.md 10.12, checked over all eleven functions of AV1SW.metallib), and
+ * works (userland/docs/metal.md 10.12, checked over all eleven functions of AV1SW.metallib), and
  * the frontend reads the set's layout straight out of those bytes. Resident Evil 4 sends
  * this selector; so does any application that writes `[[id(n)]]` structs in MSL instead
  * of building MTLArgumentDescriptors.

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="1200" height="420" role="img" aria-labelledby="t">
+  <title id="t">Device data: board.toml and the SoC file, through tools/boards.py gen, into the kernel's table and the loader's header.</title>
+  <defs>
+    <radialGradient id="g" cx="50%" cy="42%" r="75%">
+      <stop offset="0" stop-color="#666d4b"/>
+      <stop offset="1" stop-color="#3a402e"/>
+    </radialGradient>
+    <clipPath id="c"><rect width="1200" height="420" rx="28"/></clipPath>
+  </defs>
+  <g clip-path="url(#c)">
+    <rect width="1200" height="420" fill="url(#g)"/>
+    <path stroke="#fff" stroke-opacity=".055" stroke-width="2" d="M48 0V420M96 0V420M144 0V420M192 0V420M240 0V420M288 0V420M336 0V420M384 0V420M432 0V420M480 0V420M528 0V420M576 0V420M624 0V420M672 0V420M720 0V420M768 0V420M816 0V420M864 0V420M912 0V420M960 0V420M1008 0V420M1056 0V420M1104 0V420M1152 0V420M0 34H1200M0 82H1200M0 130H1200M0 178H1200M0 226H1200M0 274H1200M0 322H1200M0 370H1200M0 418H1200"/>
+    <g fill="#ece5d0" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">
+      <text x="60" y="58" font-size="18" letter-spacing="3" fill-opacity=".72">DEVICE DATA</text>
+      <g fill-opacity=".06" stroke="#ece5d0" stroke-width="3.5">
+        <rect x="60" y="92" width="330" height="96" rx="14"/>
+        <rect x="60" y="228" width="330" height="96" rx="14"/>
+        <rect x="470" y="160" width="260" height="96" rx="14"/>
+        <rect x="810" y="92" width="330" height="96" rx="14"/>
+        <rect x="810" y="228" width="330" height="96" rx="14"/>
+      </g>
+      <g font-size="21" font-weight="bold" text-anchor="middle">
+        <text x="225" y="132">NAME/board.toml</text>
+        <text x="225" y="268">soc/SOC.toml</text>
+        <text x="600" y="200">tools/boards.py</text>
+        <text x="975" y="132">the kernel's table</text>
+        <text x="975" y="268">the loader's header</text>
+      </g>
+      <g font-size="15" text-anchor="middle" fill-opacity=".8">
+        <text x="225" y="158">a phone: features, memory,</text>
+        <text x="225" y="177">ramoops, panel, cell, run</text>
+        <text x="225" y="294">a chip: where its blocks are,</text>
+        <text x="225" y="313">shared by every board with it</text>
+        <text x="600" y="226">check, status, gen,</text>
+        <text x="600" y="245">features</text>
+        <text x="975" y="158">hakios_board_table.h: every</text>
+        <text x="975" y="177">board; hakios_board() at boot</text>
+        <text x="975" y="294">hakios_platform.h: one board,</text>
+        <text x="975" y="313">its values as constants</text>
+      </g>
+      <path fill="none" stroke="#ece5d0" stroke-width="3.5" stroke-linecap="round" d="M398 140H430Q450 140 450 160V190Q450 208 462 208M398 276H430Q450 276 450 256V226Q450 208 462 208M738 208H760Q780 208 780 188V160Q780 140 800 140M780 228V256Q780 276 800 276"/>
+      <path fill="#e0a23a" stroke="#e0a23a" stroke-width="3" stroke-linejoin="round" d="M470 208l-14-9v18zM810 140l-14-9v18zM810 276l-14-9v18z"/>
+      <path stroke="#ece5d0" stroke-opacity=".3" stroke-width="2" stroke-linecap="round" d="M60 350H1140"/>
+      <text x="60" y="382" font-size="16">Board files live in device packages on the devices branch; nothing generated is committed.</text>
+    </g>
+  </g>
+</svg>

@@ -6,7 +6,7 @@ the contract in userland/tools/mesa/air/air_metal.h, which mentions nothing of N
 ir3: the Metal driver (userland/src/hakiosmetal.m) must not grow a dependency on Mesa's
 headers for it. On the device it is /hakios/lib/libhakiosair.dylib, which is where
 -newComputePipelineStateWithDescriptor: will compile the bitcode Metal hands it
-(docs/metal.md 10.12).
+(userland/docs/metal.md 10.12).
 
 Both targets are declared here rather than with the rest of the frontend for the reason
 air_run already is: they need libgallium, which meson has not defined when

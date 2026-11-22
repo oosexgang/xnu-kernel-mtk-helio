@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" width="1200" height="760" role="img" aria-labelledby="t">
+  <title id="t">The boot chain: boot ROM, preloader and LK, boot_a, the loader, the kernel, Darwin's user space; back to Android when the run ends.</title>
+  <defs>
+    <radialGradient id="g" cx="50%" cy="42%" r="75%">
+      <stop offset="0" stop-color="#666d4b"/>
+      <stop offset="1" stop-color="#3a402e"/>
+    </radialGradient>
+    <clipPath id="c"><rect width="1200" height="760" rx="28"/></clipPath>
+  </defs>
+  <g clip-path="url(#c)">
+    <rect width="1200" height="760" fill="url(#g)"/>
+    <path stroke="#fff" stroke-opacity=".055" stroke-width="2" d="M48 0V760M96 0V760M144 0V760M192 0V760M240 0V760M288 0V760M336 0V760M384 0V760M432 0V760M480 0V760M528 0V760M576 0V760M624 0V760M672 0V760M720 0V760M768 0V760M816 0V760M864 0V760M912 0V760M960 0V760M1008 0V760M1056 0V760M1104 0V760M1152 0V760M0 34H1200M0 82H1200M0 130H1200M0 178H1200M0 226H1200M0 274H1200M0 322H1200M0 370H1200M0 418H1200M0 466H1200M0 514H1200M0 562H1200M0 610H1200M0 658H1200M0 706H1200M0 754H1200"/>
+    <g fill="#ece5d0" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">
+      <text x="60" y="58" font-size="18" letter-spacing="3" fill-opacity=".72">THE BOOT CHAIN</text>
+      <g fill-opacity=".06" stroke="#ece5d0" stroke-width="3.5">
+        <rect x="60" y="88" width="360" height="64" rx="14"/>
+        <rect x="60" y="204" width="360" height="64" rx="14"/>
+        <rect x="60" y="320" width="360" height="64" rx="14"/>
+        <rect x="60" y="436" width="360" height="64" rx="14"/>
+        <rect x="60" y="552" width="360" height="64" rx="14"/>
+      </g>
+      <g font-size="23" font-weight="bold" text-anchor="middle">
+        <text x="240" y="129">boot ROM, preloader, LK</text>
+        <text x="240" y="245">boot_a</text>
+        <text x="240" y="361">loader</text>
+        <text x="240" y="477">kernel</text>
+        <text x="240" y="593">Darwin user space</text>
+      </g>
+      <path fill="none" stroke="#ece5d0" stroke-width="3.5" stroke-linecap="round" d="M240 161V181M240 277V297M240 393V413M240 509V529"/>
+      <path fill="#e0a23a" stroke="#e0a23a" stroke-width="3" stroke-linejoin="round" d="M240 194l-9-14h18zM240 310l-9-14h18zM240 426l-9-14h18zM240 542l-9-14h18z"/>
+      <text x="266" y="188" font-size="16" fill-opacity=".8">LK starts its "kernel"</text>
+      <g font-size="17">
+        <text x="450" y="115">the phone's own boot chain, untouched;</text>
+        <text x="450" y="137">LK loads boot_a as an Android boot image</text>
+        <text x="450" y="231">your own rooted boot image: the loader in</text>
+        <text x="450" y="253">front of Android's kernel (written every run)</text>
+        <text x="450" y="347">Android, unless one XNU boot was asked for;</text>
+        <text x="450" y="369">the payload from the system partition's tail</text>
+        <text x="450" y="463">Apple's XNU 12377 + overlay + patches: starts</text>
+        <text x="450" y="485">only the drivers the board lists</text>
+        <text x="450" y="579">the 27 release from xnusys, unmodified</text>
+        <text x="450" y="601">but for PAC: launchd → SpringBoard → apps</text>
+      </g>
+      <path fill="none" stroke="#ece5d0" stroke-width="3" stroke-linecap="round" stroke-dasharray="7 9" d="M60 468H40Q24 468 24 452V368Q24 352 40 352H48"/>
+      <path stroke="#ece5d0" stroke-width="3" stroke-linejoin="round" d="M58 352l-12-8v16z"/>
+      <path stroke="#ece5d0" stroke-opacity=".3" stroke-width="2" stroke-linecap="round" d="M60 652H1140"/>
+      <text x="60" y="686" font-size="17">When the run ends (its time, a panic, five fingers held) the kernel goes back to the loader:</text>
+      <text x="60" y="712" font-size="17">the log into Android's ramoops, a warm reset, Android. Written: boot_a every run,</text>
+      <text x="60" y="738" font-size="17">the system partition once an image. Slot b, never.</text>
+    </g>
+  </g>
+</svg>
