@@ -97,7 +97,7 @@ Details: [docs/architecture.md](docs/architecture.md#what-is-not-in-this-reposit
 
 ## Where it came from
 
-The port grew out of a working tree called darwin-redwood, the first phone's, and out of
+The port grew out of the working tree of the project's first phone, and out of
 [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel), branch `mtk`. For people with a
 branch from there: [docs/migrating.md](docs/migrating.md) says where everything went, and
 [CHANGELOG.md](CHANGELOG.md) what changed. The Qualcomm side of the project is

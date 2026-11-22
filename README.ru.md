@@ -80,7 +80,7 @@ Apple. Файлы системного образа вы скачиваете с
 
 ## Откуда это
 
-Порт вырос из рабочего дерева darwin-redwood (первого телефона проекта) и ветки `mtk` репозитория
+Порт вырос из рабочего дерева первого телефона проекта и ветки `mtk` репозитория
 [hakios-xnu-kernel](https://github.com/oosexgang/hakios-xnu-kernel). Тем, у кого есть ветки оттуда:
 [docs/migrating.md](docs/migrating.md) — что куда переехало, [CHANGELOG.md](CHANGELOG.md) — что
 изменилось. Qualcomm-часть проекта — [xnu-kernel-qcom](https://github.com/oosexgang/xnu-kernel-qcom).

@@ -10,7 +10,7 @@ is rebased onto it, work is carried over.
 
 | Before | Now |
 | --- | --- |
-| `xnu/redwood.patch`, `xnu/apply.sh`, `xnu/export.sh` | `kernel/patches/` (seven patches by topic, `patches/series`), `kernel/assemble.sh`, `kernel/export.sh`, `kernel/verify.sh` |
+| `xnu/<old>.patch`, `xnu/apply.sh`, `xnu/export.sh` | `kernel/patches/` (seven patches by topic, `patches/series`), `kernel/assemble.sh`, `kernel/export.sh`, `kernel/verify.sh` |
 | `xnu/files/` | `kernel/overlay/` |
 | `xnu-src/xnu-8796.121.2` (the tree, inside the repository's directory) | `../xnu-8796-hakios`, next to the repository, made by `kernel/assemble.sh` (or `$XNU_SRC`) |
 | `xnu-build.sh`, `xnu-env.sh` | `kernel/build.sh`, `kernel/env.sh` |
@@ -37,7 +37,7 @@ is rebased onto it, work is carried over.
 
 | What | Why | Where it still is |
 | --- | --- | --- |
-| The Qualcomm phone's drivers: Adreno and `RedwoodGPU`, the audio DSP, QMI and WLFW, the WCN6750 and ath11k's layer (`wifi/lx`), the amplifiers, microphones, flashlight, haptic motor, Goodix touch, PMIC keys, the UEFI battery, EPSS, the cameras, UFS | Another chip family | [xnu-kernel-qcom](https://github.com/oosexgang/xnu-kernel-qcom) |
+| The Qualcomm phone's drivers: Adreno and `<Old>GPU`, the audio DSP, QMI and WLFW, the WCN6750 and ath11k's layer (`wifi/lx`), the amplifiers, microphones, flashlight, haptic motor, Goodix touch, PMIC keys, the UEFI battery, EPSS, the cameras, UFS | Another chip family | [xnu-kernel-qcom](https://github.com/oosexgang/xnu-kernel-qcom) |
 | `uefi/`, `xnuloader/loader.c`, `prebuilt/` | MediaTek phones start the loader from LK, not from a UEFI; no binaries are kept | xnu-kernel-qcom, hakios-uefi |
 | `qemu/`, `xl`, `mkxnuimg.py` | The emulator's path goes through the UEFI loader | hakios-xnu-kernel |
 | `xl_x6826b boot`, `mkxnuimg_x6826b.py` (a one-off image for `fastboot boot`) | Needed the vendor's device tree as a file in the repository | branch `mtk` |
@@ -47,7 +47,7 @@ is rebased onto it, work is carried over.
 
 Comments in the kernel, the loader and the tools still name files of the list above in about 130 places
 (`hakios_adreno.c`, `hakios_ufs.c`, `xnuloader`, `HakiosGPU`): they are where a design was taken
-from, and those files are in xnu-kernel-qcom under their names there (`redwood_…`).
+from, and those files are in xnu-kernel-qcom under their names there, some still with the old prefix.
 
 `userland/src/var_store.c` came over but has nothing to write to: it kept `/private/var` in a
 partition through the Qualcomm phone's storage driver. On a MediaTek phone the kernel's eMMC driver
@@ -57,27 +57,29 @@ directories are absent.
 
 ## Names
 
-The first phone's name is gone from code, paths and interfaces. Each pair below changed on both of
-its sides at once; a program or an image built before the change does not work with a kernel built
-after it.
+The working name of the first phone is gone from code, paths, interfaces and documents. Below it is
+written `<old>`, in the case the name had: `<old>` in lower case, `<Old>` capitalised, `<OLD>` in upper
+case. Where it was a prefix, the name now has `hakios`, or `mtk` where the code is MediaTek's. Each pair
+below changed on both of its sides at once; a program or an image built before the change does not work
+with a kernel built after it.
 
 | Was | Is |
 | --- | --- |
-| `/dev/redwood-touch`, `-audio`, `-camera`, … | `/dev/hakios-touch`, `-audio`, `-camera`, … |
-| `kern.redwood.*`, `kern.redwood_switch_root` | `kern.hakios.*`, `kern.hakios_switch_root` |
-| IOKit classes `RedwoodMali`, `RedwoodMaliUserClient`, `RedwoodBattery`, `RedwoodWLAN`, `RedwoodBluetooth` | `HakiosMali`, `HakiosMaliUserClient`, `HakiosBattery`, `HakiosWLAN`, `HakiosBluetooth` |
-| `RedwoodMetalDevice` and the other `RedwoodMetal*` classes, `RedwoodMetal.bundle`, `RedwoodAudio.driver` | `HakiosMetal*`, `HakiosMetal.bundle`, `HakiosAudio.driver` |
-| `/redwood/bin`, `/redwood/lib`, `/usr/lib/redwood` in the images; the volume `redwood` | `/hakios/bin`, `/hakios/lib`, `/usr/lib/hakios`; the volume `hakios` |
-| `libredwood.dylib`, `libredwood-sb`, `-media`, `-gl`, `-app`, `-tweaks`, `libredwoodair` | `libhakios.dylib`, `libhakios-sb`, … `libhakiosair` |
-| launchd jobs `com.redwood.demo`, `.varstore`, `.wifi`, `.nullcomm` | `com.hakios.demo`, … |
-| The request in pmsg: `DARWIN-REDWOOD:BOOT-XNU`, `:GPU-PROBE`, `:CAM-PROBE` | `HAKIOS:BOOT-XNU`, `HAKIOS:GPU-PROBE`, `HAKIOS:CAM-PROBE` |
-| `REDWOOD_*` macros and header guards, `redwood_*()` functions | `HAKIOS_*`, `hakios_*()`; `MTK_*`, `mtk_*()` where the code is MediaTek's |
-| make variable `REDWOOD_OBJECTS` | `HAKIOS_OBJECTS` |
-| `userland/src/redwoodmetal.m`, `redwood_*.h`, `userland/tools/mesa/redwood-drm/`, `panfrost-redwood-perf.patch` | `hakiosmetal.m`, `hakios_*.h`, `userland/tools/mesa/hakios-drm/`, `panfrost-hakios-perf.patch` |
+| `/dev/<old>-touch`, `-audio`, `-camera`, … | `/dev/hakios-touch`, `-audio`, `-camera`, … |
+| `kern.<old>.*`, `kern.<old>_switch_root` | `kern.hakios.*`, `kern.hakios_switch_root` |
+| IOKit classes `<Old>Mali`, `<Old>MaliUserClient`, `<Old>Battery`, `<Old>WLAN`, `<Old>Bluetooth` | `HakiosMali`, `HakiosMaliUserClient`, `HakiosBattery`, `HakiosWLAN`, `HakiosBluetooth` |
+| `<Old>MetalDevice` and the other `<Old>Metal*` classes, `<Old>Metal.bundle`, `<Old>Audio.driver` | `HakiosMetal*`, `HakiosMetal.bundle`, `HakiosAudio.driver` |
+| `/<old>/bin`, `/<old>/lib`, `/usr/lib/<old>` in the images; the volume `<old>` | `/hakios/bin`, `/hakios/lib`, `/usr/lib/hakios`; the volume `hakios` |
+| `lib<old>.dylib`, `lib<old>-sb`, `-media`, `-gl`, `-app`, `-tweaks`, `lib<old>air` | `libhakios.dylib`, `libhakios-sb`, … `libhakiosair` |
+| launchd jobs `com.<old>.demo`, `.varstore`, `.wifi`, `.nullcomm` | `com.hakios.demo`, … |
+| The request in pmsg: `DARWIN-<OLD>:BOOT-XNU`, `:GPU-PROBE`, `:CAM-PROBE` | `HAKIOS:BOOT-XNU`, `HAKIOS:GPU-PROBE`, `HAKIOS:CAM-PROBE` |
+| `<OLD>_*` macros and header guards, `<old>_*()` functions | `HAKIOS_*`, `hakios_*()`; `MTK_*`, `mtk_*()` where the code is MediaTek's |
+| make variable `<OLD>_OBJECTS` | `HAKIOS_OBJECTS` |
+| `userland/src/<old>metal.m`, `<old>_*.h`, `userland/tools/mesa/<old>-drm/`, `panfrost-<old>-perf.patch` | `hakiosmetal.m`, `hakios_*.h`, `userland/tools/mesa/hakios-drm/`, `panfrost-hakios-perf.patch` |
 
 Kernel files (`kernel/overlay/bsd/dev/`, headers in `bsd/sys/`):
 
-| Was `redwood_…` | Is |
+| Was `<old>_…` | Is |
 | --- | --- |
 | `mtkcam`, `mtkcam_skel` | `mtk_camera`, `mtk_camera_skel` |
 | `mtkkeys`, `mtkbatt`, `mtkwifi`, `mtkbt_skel` | `mtk_keys`, `mtk_battery`, `mtk_wifi`, `mtk_bt_skel` |

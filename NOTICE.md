@@ -34,6 +34,5 @@ with. If you believe a file here infringes anyone's rights, open an issue and it
 
 ## Origin
 
-The port grew out of the working tree darwin-redwood (the project's first phone, a Qualcomm one) and
-of hakios-xnu-kernel's branch `mtk`. Names of that tree survive only in `docs/migrating.md` and
-`CHANGELOG.md`, which say what each became.
+The port grew out of the working tree of the project's first phone (a Qualcomm one) and of
+hakios-xnu-kernel's branch `mtk`. `docs/migrating.md` says what the names of that tree became.
