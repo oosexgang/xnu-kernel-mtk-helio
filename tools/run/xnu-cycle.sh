@@ -12,6 +12,13 @@ OUT=${XNU_LOG_OUT:-$ROOT/logs/xnu-last.log}
 BOARD=${HAKIOS_BOARD:-$("$ROOT/tools/boards.py" which)}
 SECS=${XNU_SECS:-$("$ROOT/tools/boards.py" get "$BOARD" boot.seconds || echo 45)}
 # XNU_ARGS: the kernel's own command line (cores and so on); the clock comes from this machine
+# XNU_DEFCONFIG=NAME: the arguments of arch/arm64/configs/NAME_defconfig (tools/defconfig.py --list), with
+# XNU_ARGS replacing or adding to them
+if [ -n "${XNU_DEFCONFIG:-}" ]; then
+	# (XNU_ARGS split into its arguments on purpose)
+	# shellcheck disable=SC2086
+	XNU_ARGS=$(python3 "$ROOT/tools/defconfig.py" "$XNU_DEFCONFIG" ${XNU_ARGS:-}) || exit 1
+fi
 if [ -z "${XNU_ARGS:-}" ]; then
 	XNU_ARGS="cpus=$("$ROOT/tools/boards.py" get "$BOARD" boot.cpus || echo 1) $("$ROOT/tools/boards.py" get "$BOARD" boot.bootargs || true)"
 fi

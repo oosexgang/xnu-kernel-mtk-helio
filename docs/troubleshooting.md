@@ -85,7 +85,7 @@ commits point into [darwin27-boot.md](darwin27-boot.md) and the history.
 ## What the screen shows
 
 - **Icons and text too big.** The run had no `fbscale=2 fbfit=3`. They are in the board file's
-  `[boot] bootargs`; a run with its own `XNU_ARGS` must include them.
+  `[boot] bootargs` and in every `phone_*` defconfig; a run with its own `XNU_ARGS` must include them.
 - **Swipes at 17 frames a second, the GPU 60% busy.** The live wallpaper: with `sb_wallpaper=0` among
   the arguments PosterBoard draws its rainbow as vector paths every frame. Without it, 25 to 29.
 - **The home screen redraws ten times a second while nothing moves.** The Clock icon's second hand

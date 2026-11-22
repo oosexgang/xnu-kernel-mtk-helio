@@ -133,7 +133,7 @@ Each step has the check that proves it. Do not start a step whose predecessor's 
      (`gic_fix_eoimode`) and patches one instruction of the kernel's `gic_v3_irq_cpu_init` so that every other core clears it too.
    - XNU's timer is the virtual one (PPI 27). The loader prints CNTPCT against CNTVCT and the exception level it was started at.
    *Check:* the probe's lines name a timer that was taken.
-5. **The kernel's first lines.** Build the kernel (`kernel/README.md`), make the payload, run `tools/run/xnu-cycle.sh` with `XNU_ARGS="cpus=1"`. There is
+5. **The kernel's first lines.** Build the kernel (`kernel/README.md`), make the payload, run `tools/run/xnu-cycle.sh` with `XNU_DEFCONFIG=phone_first` (`cpus=1`, nothing else). There is
    no serial port, so the loader finds the kernel's console functions by symbol and points them at its own log buffer (`run_xnu`: the patches of
    `vmapple_uart`). If the kernel says nothing, `-DXNU_CHECKPOINT=n` makes it return at the n-th `LOADER_CHECKPOINT` of `osfmk/arm64/start.s` /
    `arm_init.c`, and the log says `(checkpoint)`: bisect with that. `-DXNU_VERBOSE=1` puts the text console on the panel; it is slow and the system cannot

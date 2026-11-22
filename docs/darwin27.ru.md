@@ -77,20 +77,23 @@ RWA_CACHE_BIN=$PWD/build/rwa-cache.bin RC_JOBS=$PWD/userland/jobs/rc.jobs.native
 # телефон
 HAKIOS_PAYLOAD=flash tools/run/system-flash.sh "$REL/system27-prune.apfs"   # раз на образ; Android должен быть загружен
 HAKIOS_RAMDISK="$REL/root26-sys.apfs" tools/run/mkpayload.sh               # каждый запуск: ядро + малый образ
-HAKIOS_PAYLOAD=flash XNU_SECS=300 XNU_LOG_OUT=logs/run1.log XNU_ARGS="cpus=7 touchscreen=2 buttons=2 mtkbatt=1 \
-  mali=1 mtk_cpufreq=3 mali_mhz=950 metal=1 camtl=1 fb_queue=1 fb_flip=1 metal_profile=4 fbscale=2 fbfit=3 \
-  launchd_unsecure_cache=1 mali_native=1 thid_should_crash=0" tools/run/xnu-cycle.sh
+HAKIOS_PAYLOAD=flash XNU_SECS=300 XNU_LOG_OUT=logs/run1.log XNU_DEFCONFIG=phone_darwin27 tools/run/xnu-cycle.sh
 ```
+
+Аргументы загрузки берутся из `arch/arm64/configs/phone_darwin27_defconfig`: по одному на строку, у каждого
+сказано, что он делает. `tools/defconfig.py phone_darwin27` печатает их так, как их получит ядро, а
+`make defconfigs` перечисляет остальные виды запуска. Аргументы из `XNU_ARGS` заменяют одноимённые из
+defconfig или добавляются к ним (`XNU_ARGS="cpus=4 mali_mhz=800"`).
 
 Последняя команда собирает загрузчик, пакует его вместе с ядром Android в `build/boot_a.img`, пишет
 нагрузку (ядро и малый образ) в последние 96 МиБ системного раздела и читает её обратно, прошивает
 `boot_a`, ждёт Android, просит у него одну загрузку XNU и забирает журнал, когда Android вернётся.
 Телефон возвращается в Android сам через `XNU_SECS` секунд.
 
-С радио и акселерометром добавьте к аргументам `connsys_step=17 connsys_wake=0 connsys_bt=2 scp_step=7`, а
-к шагу `root` — `JOBCACHE=1 ALLOW="wifi WiFi"`; сеть, к которой подключаться, — `fw-wifi/network` (имя,
-затем пароль; в репозиторий не попадает никогда). Камера — `mtkcam=5`, без CONNSYS: у них общий канал
-PMIC. С 27-м выпуском никогда не передавайте `aks_keys=1`: launchd сразу перезагружает телефон.
+С радио и акселерометром запускайте с `XNU_DEFCONFIG=phone_radios`, а к шагу `root` добавьте
+`JOBCACHE=1 ALLOW="wifi WiFi"`; сеть, к которой подключаться, — `fw-wifi/network` (имя,
+затем пароль; в репозиторий не попадает никогда). Камера — `XNU_DEFCONFIG=phone_camera` (`mtkcam=5`), без CONNSYS: у них общий
+канал PMIC. С 27-м выпуском никогда не передавайте `aks_keys=1`: launchd сразу перезагружает телефон.
 
 ## Как понять, что всё получилось
 

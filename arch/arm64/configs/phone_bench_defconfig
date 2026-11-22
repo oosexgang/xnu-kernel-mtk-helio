@@ -1,0 +1,8 @@
+# The interface measured, as runs 653-669: phone_radios, frames a second and fingers kept for the host.
+# The native library's log kept short and its frames of each second kept (Documentation/metal-glass.md), every
+# finger lifted said.
+include phone_radios
+rwn_texprobe=0                  # no texture probes: they read GPU memory
+rwn_smalllog=0                  # the small passes' lines left out of the log
+rwn_keepfps=1                   # the frames of each second kept for the host, as kept lines (!!)
+touch_log=1                     # every finger lifted, a kept line: where, how long, a tap, a hold or a swipe

@@ -58,10 +58,14 @@ RWA_CACHE_BIN=$PWD/build/rwa-cache.bin RC_JOBS=$PWD/userland/jobs/rc.jobs.native
 # the phone
 HAKIOS_PAYLOAD=flash tools/run/system-flash.sh "$REL/system27-prune.apfs"   # once an image; Android must be up
 HAKIOS_RAMDISK="$REL/root26-sys.apfs" tools/run/mkpayload.sh               # every run: the kernel + the small image
-HAKIOS_PAYLOAD=flash XNU_SECS=300 XNU_LOG_OUT=logs/run1.log XNU_ARGS="cpus=7 touchscreen=2 buttons=2 mtkbatt=1 \
-  mali=1 mtk_cpufreq=3 mali_mhz=950 metal=1 camtl=1 fb_queue=1 fb_flip=1 metal_profile=4 fbscale=2 fbfit=3 \
-  launchd_unsecure_cache=1 mali_native=1 thid_should_crash=0" tools/run/xnu-cycle.sh
+HAKIOS_PAYLOAD=flash XNU_SECS=300 XNU_LOG_OUT=logs/run1.log XNU_DEFCONFIG=phone_darwin27 tools/run/xnu-cycle.sh
 ```
+
+The run's boot arguments are those of `arch/arm64/configs/phone_darwin27_defconfig`, one a line with
+what each does; `tools/defconfig.py phone_darwin27` prints them as the kernel gets them, and
+`make defconfigs` lists the other kinds of run. Arguments in `XNU_ARGS` replace the defconfig's of the
+same name or are added (`XNU_ARGS="cpus=4 mali_mhz=800"`); `XNU_ARGS` without `XNU_DEFCONFIG` is the
+whole command line, and neither is the board file's `[boot]`.
 
 The last command builds the loader, packs it with Android's kernel into `build/boot_a.img`, writes the
 payload into the tail of the system partition and reads it back, flashes `boot_a`, lets Android come
@@ -69,10 +73,11 @@ up, asks it for one XNU boot, and reads the log when Android is back. Only `boot
 partition are written; slot `b` never. The phone goes back to Android by itself `XNU_SECS` after the
 kernel starts.
 
-With the radios and the accelerometer, add `connsys_step=17 connsys_wake=0 connsys_bt=2 scp_step=7`
-to the arguments and `JOBCACHE=1 ALLOW="wifi WiFi"` to the `root` step (the network to join is
-`fw-wifi/network`: its name, then its passphrase; never in the repository). The camera is `mtkcam=5`,
-without CONNSYS. Never `aks_keys=1` with the 27 release: launchd reboots at once.
+With the radios and the accelerometer, the run is `XNU_DEFCONFIG=phone_radios` and the `root` step
+gets `JOBCACHE=1 ALLOW="wifi WiFi"` (the network to join is `fw-wifi/network`: its name, then its
+passphrase; never in the repository). The camera is `phone_camera` (`mtkcam=5`), without CONNSYS; the
+runs that measure the interface are `phone_bench`. Never `aks_keys=1` with the 27 release: launchd
+reboots at once.
 
 ## What a good run looks like
 

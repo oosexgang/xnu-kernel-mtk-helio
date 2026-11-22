@@ -1,0 +1,20 @@
+# Darwin 27 to its home screen: touch, keys, cell, the GPU through the native Mali library.
+# The first phone's run of Documentation/building.md, every core at its full clock. The other phone_* defconfigs
+# start from it.
+cpus=7                          # the cores the kernel starts; the loader offers it as many (tools/run/xnu-cycle.sh)
+touchscreen=2                   # the touch screen, a TD4160 on SPI (drivers/board/mtk_tcm.c)
+buttons=2                       # the keys, through the PMIC (drivers/board/mtk_keys.c)
+mtkbatt=1                       # the cell's percentage, from where Android's gauge left it
+mali=1                          # the Mali-G52, powered and clocked (drivers/board/mtk_mali.c)
+mtk_cpufreq=3                   # the A75s at 2000 MHz and the A55s at 1700
+mali_mhz=950                    # the GPU's clock (375 to 950)
+metal=1                         # user space may find the Metal device
+camtl=1                         # CoreAnimation's Metal device left where it is (userland/src/inject.c)
+fb_queue=1                      # one frame waits for the panel, not two
+fb_flip=1                       # two framebuffers, the panel pointed at the finished one
+metal_profile=4                 # the feature profile the Metal device answers (userland/src/hakiosmetal.m)
+fbscale=2                       # two pixels a point: icons and text at their size
+fbfit=3                         # the picture one pixel to a pixel of the panel, nothing scaled
+launchd_unsecure_cache=1        # launchd takes its job cache without the signature (darwin/tools/mkimage26.py)
+mali_native=1                   # Metal through our native Mali library (userland/src/mali/)
+thid_should_crash=0             # no corpse made for a thread identity's misuse (osfmk/kern/ipc_tt.c)

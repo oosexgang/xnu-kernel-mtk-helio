@@ -1,0 +1,4 @@
+# A new phone's first run: one core, every driver off.
+# Documentation/porting.md, step 5: the kernel's first lines in the log. A feature of the board starts only when its
+# argument is added.
+cpus=1

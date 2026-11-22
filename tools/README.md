@@ -16,6 +16,7 @@ file's `[boot] android_device`, and stop when the phone is not on slot `a`.
 | `boards.py` | Board and SoC files: `check`, `status NAME` (what is on, what can be turned on next), `new NAME --soc SOC --dtb FILE` (a board file started from the phone's device tree), `gen` (the kernel's table and the loader's header), `features --write` (`docs/features.md`) |
 | `device.py` | Device packages: `available`, `add NAME` (from the `devices` branch, or `--from SOURCE`), `remove NAME`, `list`, `export NAME DIR` (back to a checkout of the `devices` branch) |
 | `bootargs.py` | `docs/boot-args.md` from the kernel's sources (`--write`; `make docs`) |
+| `defconfig.py` | The boot arguments of a kind of run, `arch/arm64/configs/NAME_defconfig`, on one line (`NAME [ARG...]`: an `ARG` replaces or adds); `--list`, `--check`. `tools/run/xnu-cycle.sh` takes one as `XNU_DEFCONFIG=NAME` |
 | `components.py` | `components.toml` against the scripts that fetch each component (`check`, in `make lint`) |
 | `lint.sh` | The checks of form: every shell and Python script parses, `shellcheck` where it is installed, the components, the publish check |
 | `check-publishable.sh` | What must never be published: binaries, firmware, pictures, home paths, serial numbers, keys, old names, links out of the repository |

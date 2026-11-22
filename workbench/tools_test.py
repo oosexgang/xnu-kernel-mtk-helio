@@ -220,5 +220,37 @@ class DeviceTree(unittest.TestCase):
             devicetree.from_dtb(b'\0' * 64)
 
 
+DEFCONFIG = [sys.executable, str(ROOT / 'tools/defconfig.py')]
+
+
+class Defconfig(unittest.TestCase):
+    def run_it(self, *arguments):
+        return subprocess.run(DEFCONFIG + list(arguments), capture_output=True, text=True)
+
+    def test_every_defconfig_reads(self):
+        done = self.run_it('--check')
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn('phone_darwin27', self.run_it('--list').stdout)
+
+    def test_includes_and_replacements(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base, top = Path(directory) / 'base_defconfig', Path(directory) / 'top_defconfig'
+            base.write_text('# the base\na=1          # a comment\nb=2\nenv=X=1\n')
+            top.write_text(f'# the top\ninclude {base}\n\nb=3\nenv=Y=2\nflag\n')
+            done = self.run_it(str(top), 'a=9', 'd=5')
+            self.assertEqual(done.returncode, 0, done.stderr)
+            # the include's first, a replaced argument where it was, NAME=KEY=VALUE one a KEY, the given ones last
+            self.assertEqual(done.stdout.split(), ['a=9', 'b=3', 'env=X=1', 'env=Y=2', 'flag', 'd=5'])
+
+    def test_refusals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            two, itself = Path(directory) / 'two_defconfig', Path(directory) / 'itself_defconfig'
+            two.write_text('a=1 b=2\n')
+            itself.write_text(f'include {itself}\n')
+            self.assertIn('one argument a line', self.run_it(str(two)).stderr)
+            self.assertIn('includes itself', self.run_it(str(itself)).stderr)
+            self.assertIn('no defconfig', self.run_it('nonesuch').stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,0 +1,5 @@
+# phone_darwin27 with the camera's frames at /dev/hakios-camera.
+# userland's camera_test reads them. Without CONNSYS: the two share a PMIC channel. The camera's register tables are
+# the phone's, and only in a private kernel tree.
+include phone_darwin27
+mtkcam=5                        # after the stream is on, /dev/hakios-camera served until nobody reads

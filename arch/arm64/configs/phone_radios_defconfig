@@ -1,0 +1,9 @@
+# phone_darwin27 with Wi-Fi, Bluetooth and the accelerometer.
+# The network joined is fw-wifi/network's (its name, then its passphrase: never in the repository); the image's root
+# step wants JOBCACHE=1 ALLOW="wifi WiFi". Not with the camera: the two share a PMIC channel.
+include phone_darwin27
+connsys_step=17                 # CONNSYS up to the Wi-Fi joining the network: step 17 (drivers/board/mtk_wifi.c)
+connsys_wake=0                  # CONNSYS not woken before each command (as Android does, out of sleep only)
+connsys_bt=2                    # Bluetooth: the controller behind the serial ports bluetoothd looks for
+scp_step=7                      # the sensor hub, the accelerometer read in a thread (drivers/board/mtk_scp.c)
+bt_dump=0                       # no HCI traffic in the log (a scan's filled the host's 64 KB, run 653)

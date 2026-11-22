@@ -15,12 +15,13 @@ help:
 	@echo "make boards         validate the device packages and arch/arm64/boot/dts/mediatek/, write what the code is built with (build/boards)"
 	@echo "make verify-kernel  Apple's release + overlay + patches assemble and export back unchanged (network)"
 	@echo "make syntax-check   every overlay file through clang -fsyntax-only, in seconds (TREE=an assembled tree)"
+	@echo "make defconfigs     the boot arguments of each kind of run (arch/arm64/configs: tools/defconfig.py --list)"
 	@echo "make docs           docs/boot-args.md and docs/features.md, generated (tools/bootargs.py, tools/boards.py)"
 	@echo "make kernel         build the kernel (kernel/build.sh; docs/building.md says what it needs)"
 	@echo "make loader         build the loader for the phone whose package is here (arch/arm64/boot/build.sh)"
 
 .PHONY: check
-check: lint boards-check test
+check: lint boards-check defconfig-check test
 
 .PHONY: test
 test:
@@ -44,6 +45,12 @@ docs:
 TREE ?= ../xnu-12377-hakios
 syntax-check:
 	kernel/syntax-check.sh --tree $(TREE)
+
+.PHONY: defconfigs defconfig-check
+defconfigs:
+	tools/defconfig.py --list
+defconfig-check:
+	tools/defconfig.py --check
 
 .PHONY: boards-check
 boards-check:
