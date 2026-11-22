@@ -36,7 +36,7 @@
         <text x="450" y="253">front of Android's kernel (written every run)</text>
         <text x="450" y="347">Android, unless one XNU boot was asked for;</text>
         <text x="450" y="369">the payload from the system partition's tail</text>
-        <text x="450" y="463">Apple's XNU 12377 + overlay + patches: starts</text>
+        <text x="450" y="463">Apple's XNU 12377 + our files + patches: starts</text>
         <text x="450" y="485">only the drivers the board lists</text>
         <text x="450" y="579">the 27 release from xnusys, unmodified</text>
         <text x="450" y="601">but for PAC: launchd → SpringBoard → apps</text>

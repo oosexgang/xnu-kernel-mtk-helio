@@ -22,7 +22,7 @@ boot ROM -> preloader -> LK (the phone's own, untouched)
            - builds the Apple-format device tree and boot_args, names the board in /chosen/darwin-board
            - gives the kernel LK's framebuffer; uploads the touch controller's firmware on the way
            - a watcher on a spare core takes a snapshot and resets the board if the kernel never returns
-              kernel (kernel/: Apple's xnu-12377 + overlay + patches)
+              kernel (Apple's xnu-12377 + the files of ours + kernel/patches)
                 - looks its board up in the generated table (hakios_board())
                 - starts only the drivers the board lists and the boot arguments ask for
                 - the root is the system image on the eMMC (xnusys); the small image is md1 on /hakios;

@@ -15,7 +15,7 @@ commits point into [darwin27-boot.md](darwin27-boot.md) and the history.
 - **`tools/check-publishable.sh` says "link out of the repository".** A symbolic link whose target
   is an absolute path, or one that climbs out of the checkout, was added: it names one machine's
   files. Copy what is needed, or leave it ignored (`/fw-*` is).
-- **`kernel/syntax-check.sh` fails on a file of the overlay** with an error in Apple's headers that
+- **`kernel/syntax-check.sh` fails on a file of ours** with an error in Apple's headers that
   the file does not cause: the file needs the real build's generated headers. Add it to
   `kernel/syntax-check.skip`. A file on that list that compiles fails the check, so the list stays
   short.
