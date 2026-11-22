@@ -1,5 +1,5 @@
 /*
- * The test of docs/examples/example_pwrkey.c, as docs/writing-a-driver.md describes it: the driver's
+ * The test of Documentation/examples/example_pwrkey.c, as Documentation/writing-a-driver.md describes it: the driver's
  * own .c included, the kernel faked (workbench/fakekernel), the hardware a model (workbench/pwrap_model.h).
  * One scenario a process: workbench/run.sh lists them by running this with no argument.
  */

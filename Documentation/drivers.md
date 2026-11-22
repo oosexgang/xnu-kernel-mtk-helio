@@ -1,6 +1,6 @@
 # Drivers
 
-Every driver of `drivers/board/` and `iokit/Kernel/`: what it is for, what starts it, and
+Every driver of `drivers/board/` and `drivers/iokit/`: what it is for, what starts it, and
 how tied to one phone it still is. A driver starts only with its boot argument, and a MediaTek driver
 only on a board whose file lists its feature.
 
@@ -23,8 +23,8 @@ feature `display-ovl-flip` (`fb_flip=1`); the overlay engine's address and the f
 data.
 
 Two addresses of the MT6768 remain in platform code as fall-backs for a device tree that has none:
-the interrupt controller's in `osfmk/arm64/gic_v3_irq.c` and the UART's in
-`iokit/Kernel/GenericARMPE.cpp`. The loader always passes the interrupt controller in the tree it
+the interrupt controller's in `arch/arm64/kernel/gic_v3_irq.c` and the UART's in
+`drivers/iokit/GenericARMPE.cpp`. The loader always passes the interrupt controller in the tree it
 builds.
 
 ## The same on any phone

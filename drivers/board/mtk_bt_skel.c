@@ -14,7 +14,7 @@
  * define mtk_connsys_bt_send, the name mtk_btsk.c calls). To try it: add
  *     bsd/dev/mtk_bt_skel.c    standard
  * to bsd/conf/files (mtk_btsk.c and HakiosBluetooth.cpp stay as they are), call mtk_bt_skel_init() where mtk_connsys_init() is
- * called (hakios_input.c), and put your platform in mtkbt_platform below. docs/bluetooth-mtk-porting.md has the order to find things out in
+ * called (hakios_input.c), and put your platform in mtkbt_platform below. Documentation/bluetooth-porting.md has the order to find things out in
  * and the user-space half, which is the same on every phone.
  *
  * Compiles with the kernel's own flags; has not run on a phone: there is no port for it to run on yet.

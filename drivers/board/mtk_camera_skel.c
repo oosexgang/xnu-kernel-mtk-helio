@@ -11,7 +11,7 @@
  * Not in bsd/conf/files, and not to be built together with mtk_camera.c (both make /dev/hakios-camera). To try it: add
  *     bsd/dev/mtk_camera_skel.c   standard
  * to bsd/conf/files, call mtk_camera_skel_init() where mtk_camera_init() is called (hakios_input.c), and put your platform in
- * mtkcam_platform below. docs/camera-mtk-porting.md has the order to find things out in and the tools for it; the proven sequence for one phone is
+ * mtkcam_platform below. Documentation/camera-porting.md has the order to find things out in and the tools for it; the proven sequence for one phone is
  * mtk_camera.c and mtkloader/mtkcam.h of this tree (the first phone's journal (camera)).
  */
 #include <kern/clock.h>

@@ -1,6 +1,7 @@
 # What the patches change in Apple's files
 
-Everything HakiOS *adds* is in `kernel/overlay/`. These seven patches are the changes to files Apple
+Everything HakiOS *adds* is in its own files (`arch/`, `drivers/`, `fs/`, `crypto/`, `security/`,
+`include/`, `kernel/overlay/`: [Documentation/layout.md](../../Documentation/layout.md)). These seven patches are the changes to files Apple
 ships, grouped by subsystem. `series` assigns every file to one patch; `kernel/export.sh` regenerates
 the patches from an assembled tree, so they are never edited by hand. The reason for each change is in
 a comment beside it in the code. This page is the map.
@@ -9,7 +10,7 @@ a comment beside it in the code. This page is the map.
 
 - Building on Linux with upstream clang and the cctools linker instead of Xcode: `Makefile`, `makedefs/`,
   `SETUP/`. `kextsymboltool` accepts the DriverKit dispatch symbols this kernel does not have.
-- `config/MASTER` and the `conf/files` lists: the files of `kernel/overlay/` are added here, and the
+- `config/MASTER` and the `conf/files` lists: the files of ours are added here, and the
   board is a generic one (`BCM2837` is the open configuration the port reuses).
 - Signed data pointers are left plain (`libkern/os/base.h`, `XNU_PTRAUTH_DATA_PTRS_PLAIN`): signing them
   at load time needs the keys, which only dyld or Apple's kernelcache generator has.
@@ -23,7 +24,7 @@ a comment beside it in the code. This page is the map.
   (`prng_random.c`), bring-up checkpoints and the return to the loader instead of powering off.
 - CPUs without pointer authentication (ARMv8.2: Cortex-A78/A55 and older): PAC register accesses are
   guarded by `HAS_STD_PAC`; arm64e code runs as arm64 (see `bsd/dev/arm/kern_machdep.c` in 0006 and
-  `osfmk/arm64/hakios_a64emu.c` in the overlay).
+  `arch/arm64/kernel/hakios_a64emu.c`, `osfmk/arm64/` in the tree).
 - Standard ARMv8.3 PAC, where a CPU has it: keys handed over by the loader and switched by the kernel.
 - Secondary cores started through PSCI. The slower cores are known from the device tree (`small-core`,
   `l2-access-penalty`); pairing them with faster ones for the scheduler is prepared but does nothing on

@@ -20,7 +20,7 @@
 A board file says what a device has; a SoC file says where the blocks of its chip are, once for every
 board with that chip. The kernel is built with one table of the boards that are there and picks its row
 at boot by /chosen/darwin-board. The loader is built for one board: it is linked at the address that
-phone's boot loader starts a kernel at and travels in that phone's own boot image. docs/porting.md walks
+phone's boot loader starts a kernel at and travels in that phone's own boot image. Documentation/porting.md walks
 through adding a device.
 
 A board is a device package: a directory NAME with board.toml in it. Packages are looked for in
@@ -123,7 +123,7 @@ FEATURE_BOOTARGS = {
     'battery-mt6358': 'mtkbatt=1',
     'display-ovl-flip': 'fb_flip=1',
 }
-# drivers of one part, wired the way one phone has it (docs/drivers.md)
+# drivers of one part, wired the way one phone has it (Documentation/drivers.md)
 PART_DRIVERS = ('touch', 'camera', 'connsys')
 # the loader's own parts of a feature, compiled in only for a board that lists it
 LOADER_FEATURES = ('touch-td4160', 'connsys-mt6631', 'gpu-mali-g52', 'camera-s5kjn1')
@@ -176,7 +176,7 @@ def c_name(feature):
     return 'HAKIOS_HAS_' + feature.upper().replace('-', '_')
 
 
-FEATURES_PAGE = ROOT / 'docs' / 'features.md'
+FEATURES_PAGE = ROOT / 'Documentation' / 'features.md'
 
 
 def feature_comments():
@@ -186,7 +186,7 @@ def feature_comments():
 
 
 def features_text():
-    """docs/features.md: every feature a board can list, what it needs first, what starts it."""
+    """Documentation/features.md: every feature a board can list, what it needs first, what starts it."""
     comments = feature_comments()
     out = ['# What each feature needs', '',
            'A board lists the drivers it may start in `features` of its `board.toml`. Each needs to be told where',
@@ -232,7 +232,7 @@ def status_text(name, board, soc):
         out.append(f'  {what:18} {state}')
 
     line('loader', 'built for this board (arch/arm64/boot/build.sh)' if all(s in board for s in ('loader', 'ramoops', 'display'))
-         else 'needs [loader], [ramoops] and [display] in the board file (docs/porting.md)')
+         else 'needs [loader], [ramoops] and [display] in the board file (Documentation/porting.md)')
     out.append('')
     for _, feature in feature_bits():
         needs = feature_needs(feature, board, soc)
@@ -243,10 +243,10 @@ def status_text(name, board, soc):
         elif needs:
             line(feature, 'needs ' + ', '.join(needs))
         elif part:
-            line(feature, "one part's driver: only if this phone has that part wired the same way (docs/drivers.md)")
+            line(feature, "one part's driver: only if this phone has that part wired the same way (Documentation/drivers.md)")
         else:
             line(feature, 'can be listed: what it needs is there' + (f' (then {how})' if how else ''))
-    out += ['', 'A feature that is on is started only with its boot argument, in brackets; docs/porting.md has',
+    out += ['', 'A feature that is on is started only with its boot argument, in brackets; Documentation/porting.md has',
             'the order to try them in and the log line that says each one worked.', '']
     return '\n'.join(out)
 
@@ -629,7 +629,7 @@ def new_board(name, soc_name, description=None, dtb=None):
     shutil.copy(DEVICES / '_template/README.md', target / 'README.md')
     if found and found['missing']:
         print('boards.py: not in the tree, to be read another way:\n  ' + '\n  '.join(found['missing']))
-    print(f'boards.py: {shown(target)}/board.toml: fill in what is marked, in the order of docs/porting.md; '
+    print(f'boards.py: {shown(target)}/board.toml: fill in what is marked, in the order of Documentation/porting.md; '
           f'then tools/boards.py check')
 
 
@@ -649,7 +649,7 @@ def main():
     get.add_argument('key')
     gen = sub.add_parser('gen')
     gen.add_argument('--out', default=str(OUT))
-    features = sub.add_parser('features', help='docs/features.md: what each feature needs (--write writes it)')
+    features = sub.add_parser('features', help='Documentation/features.md: what each feature needs (--write writes it)')
     features.add_argument('--write', action='store_true')
     new = sub.add_parser('new')
     new.add_argument('name')

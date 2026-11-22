@@ -1,4 +1,4 @@
-# A board file with every key, explained. `tools/boards.py new NAME --soc SOC` copies it; docs/porting.md
+# A board file with every key, explained. `tools/boards.py new NAME --soc SOC` copies it; Documentation/porting.md
 # is the guide, and says where on the phone each value is read. A value you have not read yet stays
 # out (a required one keeps `tools/boards.py check` failing until it is there): never guess an address.
 
@@ -7,7 +7,7 @@ description = "Maker Model"         # for people: logs, hw.board.description, to
 soc = "mt0000"                      # arch/arm64/boot/dts/mediatek/mt0000.toml: where the blocks of the chip are
 
 # The drivers this board may start. Empty at first: add one once its driver has been seen to work
-# here, in the order of docs/porting.md. The kernel knows these (drivers/board/hakios_board.h):
+# here, in the order of Documentation/porting.md. The kernel knows these (drivers/board/hakios_board.h):
 #   emmc-msdc           the root on an eMMC behind MSDC0, as LK left the card (boot-arg emmc_root=1)
 #   keys-mt6358         power and volume keys through the keypad block and the MT6358; the clocks (buttons=2)
 #   gpu-mali-g52        a Mali-G52 in MFG's power domains (mali=1)
@@ -15,7 +15,7 @@ soc = "mt0000"                      # arch/arm64/boot/dts/mediatek/mt0000.toml: 
 #   battery-mt6358      the MT6358's fuel gauge; needs [battery] (mtkbatt=1)
 #   display-ovl-flip    frames shown by pointing OVL0 at a second picture in LK's framebuffer (fb_flip=1)
 # and these, each a driver of one part wired the way one phone has it -- list one only if your phone
-# has that part on the same pins and bus (docs/drivers.md):
+# has that part on the same pins and bus (Documentation/drivers.md):
 #   touch-td4160, connsys-mt6631, camera-s5kjn1
 features = []
 

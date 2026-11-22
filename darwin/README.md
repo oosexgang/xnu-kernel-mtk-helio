@@ -11,8 +11,8 @@ Most of `darwin/userland/` and `darwin/tools/` came from
 [xnu-kernel-qcom](https://github.com/oosexgang/xnu-kernel-qcom), whose scripts expect that team's
 working tree, darwin-renoir, beside them. `mtk27.sh` makes that tree out of links into this
 repository (`build/ios27/darwin-renoir`), so everything here builds from a clean checkout and an
-unpacked IPSW. How to build and run: [docs/building.md](../docs/building.md); how it was found:
-[docs/darwin27-boot.md](../docs/darwin27-boot.md).
+unpacked IPSW. How to build and run: [Documentation/building.md](../Documentation/building.md); how it was found:
+[Documentation/darwin27-boot.md](../Documentation/darwin27-boot.md).
 
 ## `mtk27.sh`
 

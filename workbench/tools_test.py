@@ -4,6 +4,7 @@
 They run against the stand-in phone of workbench/devices and the made-up chip of workbench/soc, whose addresses
 are no real phone's, so a test cannot pass by a value being hard-wired somewhere.
 """
+import fnmatch
 import os
 import shutil
 import subprocess
@@ -167,10 +168,10 @@ class FeaturesPage(unittest.TestCase):
     def test_the_committed_page_is_what_the_tool_writes(self):
         written = boards('features')
         self.assertEqual(written.returncode, 0, written.stderr)
-        self.assertEqual((ROOT / 'docs/features.md').read_text(), written.stdout, 'run `make docs`')
+        self.assertEqual((ROOT / 'Documentation/features.md').read_text(), written.stdout, 'run `make docs`')
 
     def test_every_feature_of_the_kernel_is_on_it(self):
-        page = (ROOT / 'docs/features.md').read_text()
+        page = (ROOT / 'Documentation/features.md').read_text()
         header = (ROOT / 'drivers/board/hakios_board.h').read_text()
         import re
         for name in re.findall(r'HAKIOS_HAS_([A-Z0-9_]+)\s*=\s*1u', header):
@@ -250,6 +251,48 @@ class Defconfig(unittest.TestCase):
             self.assertIn('one argument a line', self.run_it(str(two)).stderr)
             self.assertIn('includes itself', self.run_it(str(itself)).stderr)
             self.assertIn('no defconfig', self.run_it('nonesuch').stderr)
+
+
+class Maintainers(unittest.TestCase):
+    """MAINTAINERS: every pattern names a file there is, every test and document is there, and every driver, tool
+    and file of the loader belongs to a part."""
+
+    def setUp(self):
+        done = subprocess.run(['git', '-C', str(ROOT), 'ls-files'], capture_output=True, text=True)
+        if done.returncode != 0:
+            self.skipTest('not a git checkout')
+        self.files = [f for f in done.stdout.split('\n') if f]
+        self.parts = {}
+        part = None
+        for line in (ROOT / 'MAINTAINERS').read_text().split('\n'):
+            if line and not line.startswith(('\t', ' ')) and ':' not in line[:2] and line.isupper():
+                part = self.parts.setdefault(line, [])
+            elif part is not None and len(line) > 2 and line[1] == ':' and line[2] == '\t':
+                part.append((line[0], line[3:]))
+
+    @staticmethod
+    def matches(pattern, path):
+        if pattern.endswith('/'):
+            return path.startswith(pattern)
+        if '*' in pattern:
+            return fnmatch.fnmatchcase(path, pattern) and path.count('/') == pattern.count('/')
+        return path == pattern
+
+    def test_every_entry_is_there(self):
+        self.assertGreater(len(self.parts), 10)
+        for name, entries in self.parts.items():
+            for kind, value in entries:
+                if kind == 'F':
+                    self.assertTrue(any(self.matches(value, f) for f in self.files), f'{name}: F: {value} names no file')
+                elif kind in 'TD':
+                    path = value.split(' (', 1)[0]
+                    self.assertTrue((ROOT / path).exists(), f'{name}: {kind}: {path} is not there')
+
+    def test_every_driver_tool_and_loader_file_has_a_part(self):
+        patterns = [value for entries in self.parts.values() for kind, value in entries if kind == 'F']
+        for path in self.files:
+            if path.startswith(('drivers/', 'tools/', 'arch/arm64/boot/')) and path != 'tools/README.md':
+                self.assertTrue(any(self.matches(p, path) for p in patterns), f'{path} belongs to no part of MAINTAINERS')
 
 
 if __name__ == '__main__':

@@ -12,7 +12,7 @@ order it was needed, and where each thing is in the tree. Expect a step it does 
 
 | The same on every phone (already written) | Yours to find and write |
 | --- | --- |
-| The kernel: Apple's xnu-12377.121.6 + `kernel/patches/` + `kernel/overlay/`, built as `DEVELOPMENT_ARM64_BCM2837` | Your phone's package: `arch/arm64/boot/dts/NAME/board.toml` (the table below) |
+| The kernel: Apple's xnu-12377.121.6 + `kernel/patches/` + the files of ours (`arch/`, `drivers/`, `fs/`, …), built as `DEVELOPMENT_ARM64_BCM2837` | Your phone's package: `arch/arm64/boot/dts/NAME/board.toml` (the table below) |
 | GICv3, PSCI cores, the return to the loader, the platform expert | `arch/arm64/boot/dts/mediatek/SOC.toml`, if your chip has none yet |
 | The loader, the image format and its packer (`arch/arm64/boot/chainboot.py`), the run cycle (`tools/run/xnu-cycle.sh`, `tools/run/boot-xnu.sh`) | The storage driver if yours is not an eMMC on MSDC0 left ready by LK |
 | The user space side: `darwin/mtk27.sh` for the 27 release, `userland/build.sh` and `darwin/system/fetch.sh` for the earlier system, the inserted libraries | The touch controller, the GPU's power sequence, the keys, the radios, the camera: a driver each, with a feature |
@@ -146,7 +146,7 @@ Each step has the check that proves it. Do not start a step whose predecessor's 
    rendezvous. *Check:* each processor checks in, in the log.
 8. **The root.** `darwin/system/fetch.sh` (your own download of the 20F66 system), `userland/build.sh` for `system.apfs`, the partition
    (`tools/gpt-carve.py` writes a new GPT **to files**; putting it on the phone is your step and the one that can lose `userdata`), then
-   `tools/run/system-flash.sh`. With `emmc_root=1` the kernel reads the partition itself (`bsd/dev/mtk_emmc.c`; the measurements are in the
+   `tools/run/system-flash.sh`. With `emmc_root=1` the kernel reads the partition itself (`drivers/board/mtk_emmc.c`; the measurements are in the
    eMMC journal of the first phone's package: holding the image in DRAM instead cost 2.5 GB wired and 203 s of every boot). For the 27 release the
    image is `darwin/mtk27.sh system`'s, written with `HAKIOS_PAYLOAD=flash` so that the partition's last 96 MiB stay the payload's
    ([building.md](building.md)). *Check:* `launchd` starts; then the home screen appears on

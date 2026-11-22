@@ -3,7 +3,7 @@
 #                     made-up phone
 #   kernel/verify.sh  Apple's pinned release + kernel/overlay + kernel/patches assemble, and exporting
 #                     the assembled tree gives back exactly what is committed
-# The kernel itself is not built or linked here: that needs the Darwin toolchain (docs/building.md).
+# The kernel itself is not built or linked here: that needs the Darwin toolchain (Documentation/building.md).
 name: check
 
 on:

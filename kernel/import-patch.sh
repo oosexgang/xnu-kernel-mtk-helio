@@ -1,7 +1,8 @@
 #!/bin/bash
 # Take patches written against the kernel tree into the repository: each is applied to an assembled
-# tree, and the tree is exported, so their content ends up where it belongs -- new files in
-# kernel/overlay, changes to Apple's files in the topic patches of kernel/patches.
+# tree, and the tree is exported, so their content ends up where it belongs -- new files in their
+# places (kernel/lib.sh, OVERLAY_PLACES) or kernel/overlay, changes to Apple's files in the topic
+# patches of kernel/patches.
 #
 #   kernel/import-patch.sh [--tree DIR] [--from SRC] PATCH...
 #

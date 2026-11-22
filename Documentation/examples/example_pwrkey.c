@@ -1,5 +1,5 @@
 /*
- * The example driver of docs/writing-a-driver.md: the power key's state, read from the MT6358 PMIC
+ * The example driver of Documentation/writing-a-driver.md: the power key's state, read from the MT6358 PMIC
  * through the PMIC wrapper's second channel each time it is asked for, as the sysctl
  * kern.hakios.example_pwrkey (1 while the key is down, 0 while it is up, -1 when the PMIC does not
  * answer or the driver was not asked for). It is not built into the kernel; workbench/run.sh runs it against workbench/pwrap_model.h.
@@ -86,7 +86,7 @@ example_pwrkey_sysctl SYSCTL_HANDLER_ARGS
 
 SYSCTL_DECL(_kern_hakios);
 SYSCTL_PROC(_kern_hakios, OID_AUTO, example_pwrkey, CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_LOCKED, NULL, 0,
-    example_pwrkey_sysctl, "I", "the power key: 1 down, 0 up, -1 no answer (docs/examples/example_pwrkey.c)");
+    example_pwrkey_sysctl, "I", "the power key: 1 down, 0 up, -1 no answer (Documentation/examples/example_pwrkey.c)");
 
 void
 example_pwrkey_init(void)

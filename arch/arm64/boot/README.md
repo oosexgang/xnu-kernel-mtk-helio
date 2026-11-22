@@ -45,4 +45,4 @@ before anything that can hang. It is built `-Os`: the boot partition is small.
 
 The compile-time switches (`-DMSDC_TEST=1`, `-DTIMER_PROBE=1`, `-DTOUCH_PROBE=1`, `-DGPU_PROBE=1`,
 `-DCAM_PROBE=1`, `-DXNU_CHECKPOINT=n`, `-DXNU_VERBOSE=1`, `-DXNU_SERIAL=...`) are explained at the head
-of `mtkloader.c`; [docs/porting.md](../../../docs/porting.md) says when each is used.
+of `mtkloader.c`; [Documentation/porting.md](../../../Documentation/porting.md) says when each is used.

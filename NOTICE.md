@@ -2,7 +2,8 @@
 
 ## Licences
 
-- `kernel/patches/` and the files of `kernel/overlay/` derived from Apple's XNU are under the
+- `kernel/patches/` and the files of ours added to the kernel's tree (`arch/`, `drivers/`, `fs/`, `crypto/`,
+  `security/`, `include/`, `kernel/overlay/`) that are derived from Apple's XNU are under the
   **Apple Public Source License 2.0**, as XNU is (`LICENSES/APSL-2.0.txt`).
 - `fs/apfs/libdeflate/` is libdeflate, under the MIT licence (its `COPYING`).
 - Everything else is under the **MIT licence** (`LICENSES/MIT.txt`), unless a file's header says
@@ -35,4 +36,4 @@ with. If you believe a file here infringes anyone's rights, open an issue and it
 ## Origin
 
 The port grew out of the working tree of the project's first phone (a Qualcomm one) and of
-hakios-xnu-kernel's branch `mtk`. `docs/migrating.md` says what the names of that tree became.
+hakios-xnu-kernel's branch `mtk`. `Documentation/migrating.md` says what the names of that tree became.

@@ -8,8 +8,8 @@ What is tested without a phone, and how a driver runs without a kernel. `make ch
 
 | Test | What it holds |
 | --- | --- |
-| `tools_test.py` | The TOML reader against every TOML file of the repository; the board files' checks and refusals; what `tools/boards.py gen` writes; `status` and `get`; that the template explains every key; the device tree reader; that `docs/features.md` is what `boards.py features` writes |
-| `bootargs_test.py` | An argument is found by its read and described by the comment that names it; `docs/boot-args.md` is what `tools/bootargs.py` writes (`make docs` after a change) |
+| `tools_test.py` | The TOML reader against every TOML file of the repository; the board files' checks and refusals; what `tools/boards.py gen` writes; `status` and `get`; that the template explains every key; the device tree reader; that `Documentation/features.md` is what `boards.py features` writes |
+| `bootargs_test.py` | An argument is found by its read and described by the comment that names it; `Documentation/boot-args.md` is what `tools/bootargs.py` writes (`make docs` after a change) |
 | The loader | `arch/arm64/boot/mtkloader.c` compiled for the stand-in phone (syntax and types, `-Werror`), so that a key the loader uses and the generator does not write is found here |
 | `input_queue_test.c` | `/dev/hakios-touch`: what the touch and key drivers post and what the system reads |
 | `station_test.c`, `apple80211_test.c` | The Wi-Fi station's side, and the system's Wi-Fi requests answered as wifid sends them |
@@ -18,7 +18,7 @@ What is tested without a phone, and how a driver runs without a kernel. `make ch
 | `audio_device_test.c` | `/dev/hakios-audio`: what is played reaches the driver that plays it |
 | `battery_driver_test.c` | The MT6358's fuel gauge against a model of the PMIC wrapper and the PMIC |
 | `keys_driver_test.c` | The power and volume keys against a model of the keypad and the PMIC |
-| `example_pwrkey_test` | The example driver of [docs/writing-a-driver.md](../docs/writing-a-driver.md), from `docs/examples/` |
+| `example_pwrkey_test` | The example driver of [Documentation/writing-a-driver.md](../Documentation/writing-a-driver.md), from `Documentation/examples/` |
 
 `guard-measure.sh` (with `guard_measure.c`) is not a test but a measurement: the speakers' guard's
 output, second by second, for a sustained tone at the amplifiers' levels, for music-like noise and for
@@ -45,4 +45,4 @@ A test lists its scenarios when run without one, and `run.sh` runs each in its o
 Write `NAME_test.c` here, include the driver's `.c`, fake what the kernel gives it, model the
 hardware it touches, and add `NAME_test` to the list in `run.sh`. What a host test cannot show (the
 real hardware's timing, what a register does that the model does not) is said in
-[docs/writing-a-driver.md](../docs/writing-a-driver.md#what-the-host-test-can-and-cannot-show).
+[Documentation/writing-a-driver.md](../Documentation/writing-a-driver.md#what-the-host-test-can-and-cannot-show).

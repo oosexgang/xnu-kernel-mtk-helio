@@ -2,7 +2,36 @@
 
 The newest first. From "The layout" on, the sections say what changed against branch `x6826b` of the
 working tree at `6076bc1f` (the same tree as branch `mtk` of hakios-xnu-kernel at `a9627984`), which
-this repository was made from on 2026-11-11. Where a path went: [docs/migrating.md](docs/migrating.md).
+this repository was made from on 2026-11-11. Where a path went: [docs/migrating.md](Documentation/migrating.md).
+
+## The Linux layout, the defconfigs and Documentation/ (2026-11-22)
+
+For the people who run it:
+
+- The boot arguments of each kind of run are a defconfig, `arch/arm64/configs/NAME_defconfig`, one argument a line
+  with what it does: `phone_first`, `phone_darwin27`, `phone_radios`, `phone_camera`, `phone_bench` (the last is
+  exactly the arguments of runs 653-669). `XNU_DEFCONFIG=NAME tools/run/xnu-cycle.sh`, `XNU_ARGS` replacing or
+  adding; `tools/defconfig.py` (`--list`, `--check`, part of `make check`); an unknown name stops the run before
+  anything is built or written.
+- `Documentation/phone-test.ru.md` (a day with the phone: the runs in order and the lines that mean success),
+  `quickstart.ru.md`, `whats-new.ru.md`; `userland/jobs/rc.jobs.camraw`, the 27 release's camera run (run 651).
+
+For the people who change it:
+
+- The kernel's files of ours are laid out as Linux's tree: `arch/arm64/kernel/`, `arch/arm64/include/pexpert/`,
+  `arch/arm64/configs/xnu/`, `drivers/board/`, `drivers/iokit/`, `fs/apfs/`, `fs/ramfs/`, `crypto/`,
+  `security/amfi/`, `include/board/`, `include/external/`; `kernel/lib.sh`'s `OVERLAY_PLACES` says which directory
+  of XNU's tree each is, and `assemble.sh`, `export.sh`, `verify.sh`, `syntax-check.sh`, the host tests
+  (`overlay_view`) and `tools/bootargs.py` read it. `kernel/overlay/` keeps the two files that belong to none. The
+  tree assembled from the new layout is the earlier one to its git hash (974ad2dd).
+- The loader in `arch/arm64/boot/` (was `loader/`), the board template and the packages brought in in
+  `arch/arm64/boot/dts/` (was `devices/`), the SoC files in `arch/arm64/boot/dts/mediatek/` (was `soc/`;
+  `tools/boards.py` still looks in both old places). The loader builds byte for byte as before.
+- The first programs in `init/` (were `userland/src/`), their C runtime in `lib/libmini/` (was `userland/libmini/`):
+  the same binaries.
+- `docs/` is `Documentation/`, with `layout.md` (where everything is) and `chipsets.md` (what a chip gives the
+  drivers, what is still one chip's) new. `MAINTAINERS` (each part's files, tests and documents, kept true by a
+  test), `SECURITY.md`, `.clang-format`.
 
 ## The layout and the documentation (2026-11-22)
 
@@ -41,7 +70,7 @@ this repository was made from on 2026-11-11. Where a path went: [docs/migrating.
 - The earlier release's drivers on the 27 release: Wi-Fi (join, DHCP, DNS, the Settings list),
   Bluetooth (controller, bluetoothd, CoreBluetooth), the accelerometer's orientation, camera frames;
   the eMMC read by DMA; launchd's job cache from the small image (`JOBCACHE=1`).
-- The story, run by run: [docs/darwin27-boot.md](docs/darwin27-boot.md).
+- The story, run by run: [docs/darwin27-boot.md](Documentation/darwin27-boot.md).
 
 ## The layout
 
@@ -126,7 +155,7 @@ run on the phone showed what.
 
 ## Guides and repository files (2026-11-12)
 
-- [boot-args.md](docs/boot-args.md) (generated), [writing-a-driver.md](docs/writing-a-driver.md) with
-  an example driver and its test, [troubleshooting.md](docs/troubleshooting.md).
+- [boot-args.md](Documentation/boot-args.md) (generated), [writing-a-driver.md](Documentation/writing-a-driver.md) with
+  an example driver and its test, [troubleshooting.md](Documentation/troubleshooting.md).
 - Issue templates (a bug, another phone, the docs), a pull request template, `.editorconfig`,
   `.gitattributes`.

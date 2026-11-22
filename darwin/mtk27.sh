@@ -19,7 +19,7 @@
 # default build/ios27/ios27. RC_JOBS=FILE: the run's job list (root). Needs: userland/build.sh run once
 # (its root/ is the small image's start), kernel/deps/setup.sh, theos's iPhoneOS16.5.sdk ($THEOS).
 # Then: HAKIOS_PAYLOAD=flash tools/run/system-flash.sh $REL/system27-prune.apfs, HAKIOS_RAMDISK=$REL/root26-sys.apfs
-# tools/run/mkpayload.sh, and tools/run/xnu-cycle.sh with HAKIOS_PAYLOAD=flash (docs/darwin27-boot.md, docs/building.md).
+# tools/run/mkpayload.sh, and tools/run/xnu-cycle.sh with HAKIOS_PAYLOAD=flash (Documentation/darwin27-boot.md, Documentation/building.md).
 set -e -o pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$ROOT/kernel/env.sh"

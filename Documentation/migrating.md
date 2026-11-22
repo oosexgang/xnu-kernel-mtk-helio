@@ -6,9 +6,13 @@ rebased onto it, work is carried over.
 
 ## The layout of 22 November 2026
 
-The top of the repository is laid out as xnu-kernel-qcom's: the Darwin user space in `darwin/`, the
-host tests in `workbench/`, the user space's tools beside its sources, and `tools/` for the project's
-own. A branch from before it carries over by moving its paths:
+The top of the repository is laid out as xnu-kernel-qcom's, and as Linux's tree is: the kernel's files
+of ours in `arch/`, `drivers/`, `fs/`, `crypto/`, `security/` and `include/` (each directory one of the
+XNU tree's: `kernel/lib.sh`, `OVERLAY_PLACES`), the loader and the boards in `arch/arm64/boot/`, the
+first programs in `init/` with their C runtime in `lib/`, the documents in `Documentation/`; the Darwin
+user space in `darwin/`, the host tests in `workbench/`, the user space's tools beside its sources, and
+`tools/` for the project's own. [layout.md](layout.md) says where everything is. A branch from before
+it carries over by moving its paths:
 
 <!-- paths of the layout before 22 November 2026 -->
 
@@ -24,13 +28,32 @@ own. A branch from before it carries over by moving its paths:
 | `tools/xnu-cycle.sh`, `boot-xnu.sh`, `mkpayload.sh`, `payload-flash.sh`, `system-flash.sh`, `mksparse.py`, `image.sh`, `msdc-test.sh`, `touch-probe.sh`, `gpu-probe.sh`, `cam-probe.sh` | `tools/run/` |
 | `tools/fbshot.py`, `fbjpg.py`, `fbkept.py`, `fbrecv.py`, `fbframes.py`, `frames.py`, `latency.py`, `recording.py`, `sound.py`, `texshot.py`, `passpipes.py`, `camthumb.py`, `camraw.py` | `tools/log/` |
 | `docs/air.md`, `docs/air-report.md`, `docs/metal.md` | `userland/docs/` |
-| `docs/release27.md` | `docs/darwin27-boot.md` (with the rest of the 27 release's story) and `docs/building.md` |
+| `docs/release27.md` | `Documentation/darwin27-boot.md` (with the rest of the 27 release's story) and `Documentation/building.md` |
 | `fw-wifi` (a link into one machine's home directory) | gone; `fw-wifi/` is yours and ignored, like every `fw-*` |
+| `kernel/overlay/osfmk/arm64/` | `arch/arm64/kernel/` |
+| `kernel/overlay/pexpert/pexpert/arm64/` | `arch/arm64/include/pexpert/` |
+| `kernel/overlay/config/` | `arch/arm64/configs/xnu/` |
+| `kernel/overlay/osfmk/minicrypto/` | `crypto/` |
+| `kernel/overlay/bsd/miscfs/apfs/`, `ramfs/` | `fs/apfs/`, `fs/ramfs/` |
+| `kernel/overlay/libkern/amfi/` | `security/amfi/` |
+| `kernel/overlay/bsd/dev/` | `drivers/board/` |
+| `kernel/overlay/iokit/Kernel/` | `drivers/iokit/` |
+| `kernel/overlay/bsd/sys/` | `include/board/` |
+| `kernel/overlay/EXTERNAL_HEADERS/` | `include/external/` |
+| `loader/` | `arch/arm64/boot/` |
+| `devices/` (the template, and the packages brought in) | `arch/arm64/boot/dts/` (`tools/boards.py` still looks in `devices/` after it) |
+| `soc/` | `arch/arm64/boot/dts/mediatek/` (and still in `soc/`) |
+| `userland/src/stage0.c`, `init.c`, `child.c`, `var_store.c` | `init/` |
+| `userland/libmini/` | `lib/libmini/` |
+| `docs/` | `Documentation/` |
+| A run's arguments written out in `XNU_ARGS` | `XNU_DEFCONFIG=NAME`: `arch/arm64/configs/NAME_defconfig` (`tools/defconfig.py --list`), `XNU_ARGS` replacing or adding |
 
 <!-- end -->
 
 A script that found the repository from where it was (`$(dirname "$0")/..`) climbs one level more
-where it went one level deeper; one of your own must do the same. The build's outputs moved with
+where it went one level deeper (the loader's, in `arch/arm64/boot/`, three); one of your own must do the
+same. A change to a file of ours under `kernel/overlay/` goes to its place: `kernel/import-patch.sh`
+and `kernel/export.sh` put a new file of the tree where `OVERLAY_PLACES` says. The build's outputs moved with
 their scripts: `darwin/tools/pacstrip`, `darwin/userland/obj26`, and what `darwin/system/fetch.sh`
 fetched (move `system/`'s ignored files into `darwin/system/`, or fetch again).
 
@@ -46,7 +69,7 @@ For people with a branch, a patch or a habit from branch `x6826b` of the working
 | Before | Now |
 | --- | --- |
 | `xnu/<old>.patch`, `xnu/apply.sh`, `xnu/export.sh` | `kernel/patches/` (seven patches by topic, `patches/series`), `kernel/assemble.sh`, `kernel/export.sh`, `kernel/verify.sh` |
-| `xnu/files/` | `kernel/overlay/` |
+| `xnu/files/` | The places of `kernel/lib.sh`'s `OVERLAY_PLACES` (`drivers/board/`, `fs/apfs/`, …) and `kernel/overlay/` |
 | `xnu-src/xnu-8796.121.2` (the tree, inside the repository's directory) | `../xnu-12377-hakios` (the release of `kernel/UPSTREAM`), next to the repository, made by `kernel/assemble.sh` (or `$XNU_SRC`) |
 | `xnu-build.sh`, `xnu-env.sh` | `kernel/build.sh`, `kernel/env.sh` |
 | `xnu-deps/` | `kernel/deps/` |
@@ -60,8 +83,8 @@ For people with a branch, a patch or a habit from branch `x6826b` of the working
 | `xnu-deps/host/zig` | `build/zig` (`tools/get-zig.sh`) |
 | `ios165/` | `darwin/system/` (the scripts and, ignored by git, what they fetch) |
 | `userland/rc.ios`, `rc.jobs.ios`, `/sbin/launchd.ios` in the image | `userland/rc.system`, `rc.jobs.system`, `/sbin/launchd.system` |
-| `docs/mtk-porting.md`, `docs/from-a-clone.md` | `docs/porting.md`, `docs/building.md` |
-| `docs/bluetooth-mtk-porting.md`, `docs/camera-mtk-porting.md` | `docs/bluetooth-porting.md`, `docs/camera-porting.md` |
+| `docs/mtk-porting.md`, `docs/from-a-clone.md` | `Documentation/porting.md`, `Documentation/building.md` |
+| `docs/bluetooth-mtk-porting.md`, `docs/camera-mtk-porting.md` | `Documentation/bluetooth-porting.md`, `Documentation/camera-porting.md` |
 | `docs/*x6826b*.md`, `docs/touch-handover.md` (the phone's journals) | The package `x6826b` on the `devices` branch: `x6826b/journal/` |
 | Constants in `mtkloader/*.h` and in the drivers (`LK_FB_BASE`, `RAMOOPS_*`, `MARKER_PA`, `core_order`, `SYSTEM_PART`, every `*_BASE` and `*_PHYS`) | `arch/arm64/boot/dts/mediatek/mt6768.toml` and the package's `board.toml`; `tools/boards.py gen` makes `hakios_platform.h` for the loader and `hakios_board_table.h` for the kernel |
 | `runkit/` (the author's local kit) | Still local and not here; a plain run's defaults are the board file's `[boot]` |
@@ -112,7 +135,7 @@ with a kernel built after it.
 | make variable `<OLD>_OBJECTS` | `HAKIOS_OBJECTS` |
 | `userland/src/<old>metal.m`, `<old>_*.h`, `userland/tools/mesa/<old>-drm/`, `panfrost-<old>-perf.patch` | `hakiosmetal.m`, `hakios_*.h`, `userland/tools/mesa/hakios-drm/`, `panfrost-hakios-perf.patch` |
 
-Kernel files (`drivers/board/`, headers in `bsd/sys/`):
+Kernel files (`drivers/board/`, headers in `include/board/`):
 
 | Was `<old>_…` | Is |
 | --- | --- |
@@ -133,7 +156,7 @@ replace the names by the tables above (in the patch's text and its file names), 
 
 ```sh
 kernel/import-patch.sh my-change.patch
-git status                                          # new files under kernel/overlay, changed topic patches
+git status                                          # new files in their places (drivers/board/, ...), changed topic patches
 ```
 
 ### What behaves differently

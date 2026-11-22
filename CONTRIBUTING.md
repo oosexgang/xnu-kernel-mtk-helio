@@ -8,7 +8,7 @@ make check
 
 It must pass. It runs the lint (every script parses, `shellcheck` where it is installed, the pinned
 components, the publish check), validates the board and SoC files, checks that the generated
-references (`docs/boot-args.md`, `docs/features.md`) are current, and runs the host tests of
+references (`Documentation/boot-args.md`, `Documentation/features.md`) are current, and runs the host tests of
 `workbench/`. CI runs the same, plus `kernel/verify.sh`. After a change to a driver,
 `kernel/syntax-check.sh --tree DIR` (or `make syntax-check`) says in seconds whether it still compiles,
 without the kernel toolchain.
@@ -19,19 +19,22 @@ without the kernel toolchain.
 | --- | --- | --- |
 | A new phone, or a value of an existing one | Its device package on the `devices` branch: `NAME/board.toml`, with its README and journal. Not `arch/arm64/boot/dts/NAME` on the main branch, which git ignores there. | `tools/boards.py check`, with the package in `arch/arm64/boot/dts/` of a checkout of the main branch (`tools/device.py add NAME --from DIR` copies it there and checks it) |
 | A new SoC, or a value of an existing one | `arch/arm64/boot/dts/mediatek/SOC.toml` | `tools/boards.py check` |
-| A new feature | `HAKIOS_HAS_*` in `drivers/board/hakios_board.h`, its needs in `tools/boards.py` | `make docs` (`docs/features.md`) |
-| A driver, or anything else HakiOS adds to the kernel | `kernel/overlay/` (a driver: `bsd/dev/`, a line in `bsd/conf/files`, its start in `hakios_drivers.c`) | `kernel/build.sh`, and its test in `workbench/` |
+| A new feature | `HAKIOS_HAS_*` in `drivers/board/hakios_board.h`, its needs in `tools/boards.py` | `make docs` (`Documentation/features.md`) |
+| A driver, or anything else HakiOS adds to the kernel | Its place ([Documentation/layout.md](Documentation/layout.md); a driver: `drivers/board/`), a line in `bsd/conf/files` (an assembled tree, then `kernel/export.sh`), its start in `hakios_drivers.c` | `kernel/build.sh`, and its test in `workbench/` |
 | A change to one of Apple's files | An assembled tree, then `kernel/export.sh` | Never edit `kernel/patches/*.patch` by hand: `kernel/verify.sh` rejects it. |
 | A boot argument | A comment naming it as `name=…` beside its read | `make docs` |
 | The loader | `arch/arm64/boot/` | `arch/arm64/boot/build.sh`; addresses come from the board files, not from code. |
 | A library inserted into a process, a test program, the Metal device, the Mali library | `userland/src/` | `darwin/mtk27.sh libs`, `metal` or `mali`, then `root` |
 | What a run does | `userland/jobs/` | `RC_JOBS=` of the `root` step |
+| The boot arguments of a kind of run | `arch/arm64/configs/NAME_defconfig`, one argument a line with what it does | `tools/defconfig.py --check` (`make check`); `XNU_DEFCONFIG=NAME` |
+| The first programs (`stage0`, `init`) | `init/`, `lib/libmini/` | `userland/build.sh` |
 | A build step of the 27 release's images | `darwin/` | `darwin/mtk27.sh STEP` |
 | A tool | `tools/` (the project's), `tools/run/` (a run on the phone), `tools/log/` (what a run left), `userland/tools/` (the user space's) | its own head comment, and `tools/README.md` or `userland/README.md` |
 
-[docs/architecture.md](docs/architecture.md) explains the split; [kernel/README.md](kernel/README.md)
+[Documentation/layout.md](Documentation/layout.md) says where everything is, [MAINTAINERS](MAINTAINERS) which tests and
+documents go with each part (a test keeps it true); [Documentation/architecture.md](Documentation/architecture.md) explains the split; [kernel/README.md](kernel/README.md)
 has the two ways of working on the kernel. If you have a branch or a patch from before the layout of
-22 November 2026: [docs/migrating.md](docs/migrating.md).
+22 November 2026: [Documentation/migrating.md](Documentation/migrating.md).
 
 ## Rules that keep the project portable
 
@@ -49,7 +52,7 @@ has the two ways of working on the kernel. If you have a branch or a patch from 
 - **Test what can run without the phone.** Arithmetic and state machines go where the host tests can
   compile them; a driver's register traffic can be tested against a model (`workbench/`).
 - **What two drivers need is written once**: the registers' access (`hakios_mmio.h`), the board
-  (`hakios_board.h`), the PMIC wrapper's lock. [docs/writing-a-driver.md](docs/writing-a-driver.md)
+  (`hakios_board.h`), the PMIC wrapper's lock. [Documentation/writing-a-driver.md](Documentation/writing-a-driver.md)
   lists what a driver has at hand, and has an example driver to start from.
 - **Say what was verified.** "Compiles", "passes the host tests" and "seen working on the phone" are
   three different statements. Commit messages and documents say which one applies, with the run.

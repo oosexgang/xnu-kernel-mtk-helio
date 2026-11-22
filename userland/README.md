@@ -16,7 +16,7 @@ release's arm64e processes ([darwin/README.md](../darwin/README.md)).
 | --- | --- |
 | `../init/` | The first programs, which `build.sh` compiles: `stage0.c`, `/sbin/launchd` of the system image, mounts the small image on `/hakios` and runs our `init.c`: mounts, checks, the data volume made from its skeleton, the overlays and the job cache bound over the system's, the libraries to insert (`etc/inject.conf`), then `etc/rc`; `child.c`, `var_store.c` |
 | `src/inject*.c`, `src/tweaks/` | Libraries the kernel inserts into single processes (`kern.exec_inject`): SpringBoard, backboardd, media, applications, key chain, tweaks. Each checks a method's type before it replaces it |
-| `src/hakiosmetal.m`, `src/metal/` | The Metal device: `HakiosMetal.bundle`, an `MTLDevice` over `air_metal.h`'s contract ([docs/metal-glass.md](../docs/metal-glass.md)) |
+| `src/hakiosmetal.m`, `src/metal/` | The Metal device: `HakiosMetal.bundle`, an `MTLDevice` over `air_metal.h`'s contract ([Documentation/metal-glass.md](../Documentation/metal-glass.md)) |
 | `src/mali/` | The native Mali library: `rwa/` (the contract served with our own job descriptors), `kmali.c` (GPU memory and submissions), `mali-probe` and its host test ([src/mali/README.md](src/mali/README.md)) |
 | `src/eagl.c`, `src/gl_*.c`, `src/hakios_gl.h` | OpenGL ES for the earlier system's CoreAnimation, over Mesa |
 | `src/audio_plugin.c`, `src/camera_*.c` | The audio output device; the camera's device and image pipeline |

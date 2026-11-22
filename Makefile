@@ -16,8 +16,8 @@ help:
 	@echo "make verify-kernel  Apple's release + overlay + patches assemble and export back unchanged (network)"
 	@echo "make syntax-check   every overlay file through clang -fsyntax-only, in seconds (TREE=an assembled tree)"
 	@echo "make defconfigs     the boot arguments of each kind of run (arch/arm64/configs: tools/defconfig.py --list)"
-	@echo "make docs           docs/boot-args.md and docs/features.md, generated (tools/bootargs.py, tools/boards.py)"
-	@echo "make kernel         build the kernel (kernel/build.sh; docs/building.md says what it needs)"
+	@echo "make docs           Documentation/boot-args.md and Documentation/features.md, generated (tools/bootargs.py, tools/boards.py)"
+	@echo "make kernel         build the kernel (kernel/build.sh; Documentation/building.md says what it needs)"
 	@echo "make loader         build the loader for the phone whose package is here (arch/arm64/boot/build.sh)"
 
 .PHONY: check

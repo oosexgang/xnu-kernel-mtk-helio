@@ -49,9 +49,9 @@ The GPUs are the vendor's published ones; only `mt6768` has been run. To bring a
 
 1. Its SoC file here, from the Android device tree of a phone with it (`arch/arm64/boot/dts/_template/soc.toml`, `tools/fdtfind.py`).
    `mali` (the GPU's registers) and `mfgcfg` (its clock gates) are the GPU's blocks.
-2. Its GPU brought up by `bsd/dev/mtk_mali.c` (power domains, clocks): the G52's are MT6768's MFG domains, another
+2. Its GPU brought up by `drivers/board/mtk_mali.c` (power domains, clocks): the G52's are MT6768's MFG domains, another
    chip's are in its Android kernel's `drivers/gpu/mediatek` and clock driver. The clock's range (`mali_mhz=`,
-   `bsd/dev/mtk_keys.c` gpu_raise) is the G52's PLL on MT6768: another chip needs its own.
+   `drivers/board/mtk_keys.c` gpu_raise) is the G52's PLL on MT6768: another chip needs its own.
 3. The library's table (`rwa_helio.c`): the chip, its GPU's product id (Panfrost's `pan_props.c`) and `run = true`
    once a phone has drawn with it. The tile buffer the library sizes its tiles by comes from Panfrost's model table;
    the tiler's levels from the GPU's own `TILER_FEATURES`.

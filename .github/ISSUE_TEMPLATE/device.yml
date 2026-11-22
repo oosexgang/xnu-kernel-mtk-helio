@@ -1,5 +1,5 @@
 name: Another phone
-description: Porting to a MediaTek phone that has no device package yet (docs/porting.md).
+description: Porting to a MediaTek phone that has no device package yet (Documentation/porting.md).
 labels: [device]
 body:
   - type: input
@@ -33,4 +33,4 @@ body:
     id: where
     attributes:
       label: How far it got, and where it stopped
-      description: The step of docs/porting.md, and the last lines of the log or of pstore.
+      description: The step of Documentation/porting.md, and the last lines of the log or of pstore.

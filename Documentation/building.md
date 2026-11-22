@@ -33,7 +33,7 @@ make check                               # everything that needs no phone
 tools/device.py add x6826b               # the phone's package: what the kernel's table and the loader are built from
 
 # the kernel (about 4 minutes once its dependencies are there)
-kernel/assemble.sh ../xnu-12377-hakios   # Apple's xnu-12377.121.6 + kernel/overlay + kernel/patches, next to the clone
+kernel/assemble.sh ../xnu-12377-hakios   # Apple's xnu-12377.121.6 + the files of ours + kernel/patches, next to the clone
 kernel/deps/setup.sh                     # LLVM 19.1.7, mig 138, the iig headers of macOS 26.5's SDK, the build's sources
 kernel/build.sh -j8 -k                   # -k: one harmless error (lldbmacros) ends make with code 2
 tools/get-zig.sh                         # zig's ld.lld links the loader (not needed where ld.lld is installed)

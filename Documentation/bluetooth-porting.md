@@ -21,7 +21,7 @@ function on (and off), send one H4 packet, receive one H4 packet.
 
 `mtk_bt_skel.c` calls your `power_on` and `function_on`, asks the controller the six things a host asks first (HCI_Reset,
 Read_Local_Version_Information, Read_BD_ADDR, Read_Local_Supported_Features, Read_Buffer_Size, LE_Read_Buffer_Size), and only when all six are answered
-with status 0 makes what the system looks for: the service `bluetooth` in the registry (`iokit/Kernel/HakiosBluetooth.cpp`), the nodes `/dev/btwake`,
+with status 0 makes what the system looks for: the service `bluetooth` in the registry (`drivers/iokit/HakiosBluetooth.cpp`), the nodes `/dev/btwake`,
 `/dev/btreset`, `/dev/btpoweroff`, the kernel control and the Skywalk pipe. Then one thread carries packets both ways: what `bluetoothd` writes is cut
 into whole H4 packets and given to `send`; what `receive` returns is checked against its own header's length, passed through the answers Apple's stack
 needs changed (below), and handed to `bluetoothd`.

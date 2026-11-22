@@ -6,7 +6,7 @@ body:
     id: where
     attributes:
       label: Where
-      placeholder: docs/building.md, "The commands"
+      placeholder: Documentation/building.md, "The commands"
     validations:
       required: true
   - type: textarea

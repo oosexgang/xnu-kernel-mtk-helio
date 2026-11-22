@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""docs/boot-args.md, written from the kernel's sources: every boot argument the kernel reads, where it is
+"""Documentation/boot-args.md, written from the kernel's sources: every boot argument the kernel reads, where it is
 read, and what the comment beside it says.
 
   tools/bootargs.py              print the reference
-  tools/bootargs.py --write      write docs/boot-args.md
-  tools/bootargs.py --check      fail if docs/boot-args.md is not what the sources say (`make check`)
+  tools/bootargs.py --write      write Documentation/boot-args.md
+  tools/bootargs.py --check      fail if Documentation/boot-args.md is not what the sources say (`make check`)
 
 A boot argument is found by its read (PE_parse_boot_argn, PE_parse_boot_arg_str, TUNABLE) in the files
 HakiOS adds to the kernel's tree (the places of kernel/lib.sh's OVERLAY_PLACES, and kernel/overlay) and in the
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / 'kernel/overlay'
 LIB = ROOT / 'kernel/lib.sh'
 PATCHES = ROOT / 'kernel/patches'
-OUT = ROOT / 'docs/boot-args.md'
+OUT = ROOT / 'Documentation/boot-args.md'
 
 READ = re.compile(r'(?:PE_parse_boot_argn|PE_parse_boot_arg_str|PE_parse_boot_arg)\(\s*"([A-Za-z0-9_]+)"|'
                   r'TUNABLE(?:_WRITEABLE|_DEV_WRITEABLE|_DT)?\([^;]*?"([A-Za-z0-9_]+)"')

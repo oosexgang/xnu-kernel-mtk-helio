@@ -50,7 +50,7 @@ download mode (mtkclient); [porting.md](porting.md) says how to check it first.
 | --- | --- | --- |
 | **Device data** | A device package per phone (`NAME/board.toml`, on the `devices` branch), `arch/arm64/boot/dts/mediatek/SOC.toml` on the main branch | A new phone, or a new SoC. No code. |
 | **Drivers for parts** | `drivers/board/`, `drivers/iokit/`, the loader's part headers | A phone has a part nobody wrote a driver for yet (a touch controller, a camera sensor). |
-| **The port itself** | `kernel/patches/`, the rest of `kernel/overlay/`, `arch/arm64/boot/`, `userland/`, `darwin/` | Apple's kernel or the system changes, or the port learns something new. Same for every device. |
+| **The port itself** | `kernel/patches/`, `arch/arm64/kernel/`, `fs/`, `crypto/`, `security/`, the rest of `drivers/`, `arch/arm64/boot/`, `init/`, `userland/`, `darwin/` | Apple's kernel or the system changes, or the port learns something new. Same for every device. |
 
 The aim is that a new phone on a known SoC is a change to the first row only, and a new SoC adds one
 file to it. Where that is not yet true, [drivers.md](drivers.md) says so driver by driver.
@@ -91,21 +91,21 @@ Details and every key: [arch/arm64/boot/dts/README.md](../arch/arm64/boot/dts/RE
 | Path | Contents |
 | --- | --- |
 | `kernel/UPSTREAM` | The Apple release, pinned by commit: xnu-12377.121.6, the 27 release's. |
-| `kernel/overlay/` | The files added, as ordinary sources at their place in the XNU tree. |
+| `arch/`, `drivers/`, `fs/`, `crypto/`, `security/`, `include/` | The files added, as ordinary sources: each directory is one of the XNU tree's (`kernel/lib.sh`, `OVERLAY_PLACES`; [layout.md](layout.md)). `kernel/overlay/` has the two that belong to none, at their place in the tree. |
 | `kernel/patches/` | The changes to Apple's own files, as patches by topic (`patches/series`). |
 | `kernel/assemble.sh`, `export.sh`, `verify.sh` | Make the tree that is compiled; take work back; check the round trip. |
 | `kernel/build.sh`, `env.sh`, `deps/` | The build, on macOS (LLVM 19.1.7, mig 138, the iig headers of macOS 26.5's SDK). |
 
-What the overlay provides, in the order a boot meets it:
+What the files added provide, in the order a boot meets them:
 
-1. **Platform** (`osfmk/arm64/`): GICv3 interrupts, PSCI for the other cores, the return to the
+1. **Platform** (`arch/arm64/kernel/`, the tree's `osfmk/arm64/`): GICv3 interrupts, PSCI for the other cores, the return to the
    loader with the log.
-2. **Stand-ins for Apple's closed kernel extensions** (`iokit/Kernel/`, `libkern/amfi/`,
-   `osfmk/minicrypto/`): the platform expert, IOSurface, IOMobileFramebuffer, AppleKeyStore,
+2. **Stand-ins for Apple's closed kernel extensions** (`drivers/iokit/`, `security/amfi/`,
+   `crypto/`): the platform expert, IOSurface, IOMobileFramebuffer, AppleKeyStore,
    FairPlay's client, the network stack's registry side, code-signing policy, crypto.
-3. **File systems** (`bsd/miscfs/apfs/`, `ramfs/`): an APFS implementation that reads the system
+3. **File systems** (`fs/apfs/`, `fs/ramfs/`): an APFS implementation that reads the system
    image, and the RAM file system for `/private/var`.
-4. **Drivers** (`bsd/dev/`): `mtk_*` for MediaTek's blocks (eMMC, the PMIC's keys and gauge, the
+4. **Drivers** (`drivers/board/`, the tree's `bsd/dev/`): `mtk_*` for MediaTek's blocks (eMMC, the PMIC's keys and gauge, the
    clocks, Mali, CONNSYS's Wi-Fi and Bluetooth, the sensor hub, the camera path), `hakios_*` for what
    is the same on any phone (touch input, the network interface, the Wi-Fi station's side, audio, the
    board table). `HakiosMali.cpp` gives user space the GPU. Each does nothing until its boot argument

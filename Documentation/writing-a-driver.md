@@ -55,8 +55,8 @@ is not built into the kernel.
    given, the board does not have the part. Add the test to the list in `workbench/run.sh`.
 5. **Build it in.** Assemble the tree (`kernel/assemble.sh ../xnu-12377-hakios`), add the file to
    `bsd/conf/files` there (`bsd/dev/NAME.c standard`, as `mtk_keys.c` is), and call its init from
-   `hakios_input_init()` in `hakios_input.c`. Then `kernel/export.sh` writes the change back into
-   `kernel/patches/` and `kernel/overlay/`.
+   `hakios_input_init()` in `hakios_input.c`. Then `kernel/export.sh` writes the change back: the new file into
+   `drivers/board/`, the line of `bsd/conf/files` into `kernel/patches/`.
 6. **Check:** `make syntax-check` (seconds), `make check`, then `make kernel` (`kernel/build.sh`).
 7. **Run it on the phone** with its argument added: `XNU_ARGS="... example_pwrkey=1" tools/run/xnu-cycle.sh`
    ([building.md](building.md)). Read the result in the log, not from the screen.

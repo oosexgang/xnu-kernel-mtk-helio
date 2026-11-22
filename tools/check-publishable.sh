@@ -47,7 +47,7 @@ for f in $(found -E "0x[0-9a-f]{2}, ?0x[0-9a-f]{2}, ?0x[0-9a-f]{2}, ?0x[0-9a-f]{
 	[ "$n" -gt 64 ] && say "byte array ($n rows): $f"
 done
 # The working name of the project's first phone: gone from code, paths, interfaces and documents, all of
-# them (docs/migrating.md writes it <old>).
+# them (Documentation/migrating.md writes it <old>).
 echo "$files" | grep -i "redw[o]od" | while read -r f; do echo "old name in a path: $f"; done | grep . && bad=1
 found -i "redw[o]od" | while read -r f; do echo "old name: $f"; done | grep . && bad=1
 # A symbolic link that leaves the repository (an absolute path, or up and out of it) points at one
@@ -62,7 +62,7 @@ done | grep . && bad=1
 # The system image's trade names: only as the literal names of inputs and of what the system itself
 # looks for, and in the notices. Everything else says "the system" and "the reference phone".
 allowed='iPhoneOS[0-9.]*\.sdk|iPhone10,3|iPhone12,1|toolchain/linux/iphone|apple-ios|subsystem = .ios.|API_UNAVAILABLE\(ios\)|~iphone|/System/Volumes/iOS|chosen\[64\] = "iPhone"|trademarks? of Apple|товарные знаки'
-echo "$files" | grep -vE "^(NOTICE\.md|CHANGELOG\.md|docs/migrating\.md|kernel/patches/.*\.patch)$" | tr '\n' '\0' |
+echo "$files" | grep -vE "^(NOTICE\.md|CHANGELOG\.md|Documentation/migrating\.md|kernel/patches/.*\.patch)$" | tr '\n' '\0' |
 	xargs -0 grep -nIwiE "ios|iphone" 2>/dev/null | grep -v "^$me:" | grep -vE "$allowed" |
 	while read -r l; do echo "the system's trade name: ${l:0:150}"; done | grep . && bad=1
 # ... and in the patches, on the lines they add (the lines around them are Apple's)

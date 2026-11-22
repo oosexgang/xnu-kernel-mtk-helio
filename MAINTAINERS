@@ -1,0 +1,260 @@
+What each part of the project is made of: which files, which tests, which documents, and what starts it.
+
+workbench/tools_test.py (Maintainers) checks it: every pattern names a file there is, every test is there, and every
+driver of drivers/, every tool of tools/ and every file of arch/arm64/boot/ belongs to a part. Parts are in
+alphabetical order.
+
+	F:	Files: a path, or a pattern of them (* within a directory, a directory ending in / for all under it)
+	T:	Tests: a path (run by make check unless it says otherwise)
+	D:	Documents that explain it
+	K:	The feature of a board, and the boot argument, that start it
+
+APFS AND THE RAM DISKS
+F:	fs/apfs/
+F:	fs/ramfs/
+F:	drivers/board/hakios_apfs_check.c
+F:	drivers/board/hakios_image.c
+F:	drivers/board/hakios_sparse.c
+F:	include/board/hakios_apfs_check.h
+F:	include/board/hakios_sparse.h
+F:	tools/mk-libdeflate.sh
+F:	tools/run/image.sh
+F:	tools/run/mksparse.py
+F:	userland/tools/apfs/
+T:	workbench/sparse_driver_test.c
+D:	Documentation/architecture.md
+
+AUDIO
+F:	drivers/board/hakios_audio.c
+F:	drivers/board/hakios_guard.c
+F:	include/board/hakios_audio.h
+F:	userland/src/audio_plugin.c
+F:	userland/src/audio_plugin.plist
+F:	tools/log/recording.py
+F:	tools/log/sound.py
+F:	workbench/guard-measure.sh
+F:	workbench/guard_measure.c
+T:	workbench/audio_device_test.c
+T:	workbench/guard_test.c
+D:	Documentation/drivers.md
+
+BATTERY
+F:	drivers/board/mtk_battery.c
+F:	drivers/board/hakios_battery.c
+F:	drivers/iokit/HakiosBattery.cpp
+T:	workbench/battery_driver_test.c
+D:	Documentation/drivers.md
+K:	battery-mt6358; mtkbatt=
+
+BOARDS AND DEVICE PACKAGES
+F:	arch/arm64/boot/dts/
+F:	drivers/board/hakios_board.c
+F:	drivers/board/hakios_board.h
+F:	tools/boards.py
+F:	tools/device.py
+F:	tools/devicetree.py
+F:	tools/fdtfind.py
+F:	tools/minitoml.py
+F:	workbench/devices/
+F:	workbench/soc/
+T:	workbench/tools_test.py
+D:	arch/arm64/boot/dts/README.md
+D:	Documentation/features.md
+D:	Documentation/chipsets.md
+D:	Documentation/porting.md
+
+CAMERA
+F:	drivers/board/mtk_camera.c
+F:	drivers/board/mtk_camera_skel.c
+F:	include/board/hakios_camera.h
+F:	arch/arm64/boot/mtkcam.h
+F:	tools/camrx.py
+F:	tools/camtable.py
+F:	tools/log/camraw.py
+F:	tools/log/camthumb.py
+F:	tools/run/cam-probe.sh
+F:	userland/src/camera_*
+D:	Documentation/camera-porting.md
+K:	camera-s5kjn1; mtkcam=
+
+CONNSYS: WI-FI AND BLUETOOTH
+F:	drivers/board/mtk_connsys.c
+F:	drivers/board/mtk_wifi.c
+F:	drivers/board/mtk_btsk.c
+F:	drivers/board/mtk_bt_skel.c
+F:	drivers/board/hakios_net.c
+F:	drivers/board/hakios_sta.c
+F:	drivers/board/hakios_apple80211.c
+F:	drivers/board/hakios_wpa.c
+F:	drivers/board/hakios_wifi_given.c
+F:	drivers/iokit/HakiosWLAN.cpp
+F:	drivers/iokit/HakiosBluetooth.cpp
+F:	drivers/iokit/MiniIONetworkStack.cpp
+F:	include/board/hakios_net.h
+F:	include/board/hakios_sta.h
+F:	include/board/hakios_wpa.h
+F:	arch/arm64/boot/mtkconnsys.h
+T:	workbench/station_test.c
+T:	workbench/apple80211_test.c
+D:	Documentation/bluetooth-porting.md
+D:	Documentation/drivers.md
+K:	connsys-mt6631; connsys_step=, connsys_bt=
+
+DEFCONFIGS AND RUNS ON THE PHONE
+F:	arch/arm64/configs/*_defconfig
+F:	tools/defconfig.py
+F:	tools/run/boot-xnu.sh
+F:	tools/run/mkpayload.sh
+F:	tools/run/payload-flash.sh
+F:	tools/run/system-flash.sh
+F:	tools/run/xnu-cycle.sh
+F:	tools/gpt-carve.py
+F:	tools/userdata-carve.py
+F:	tools/android/
+F:	tools/log/fbkept.py
+F:	tools/log/frames.py
+F:	tools/log/latency.py
+F:	tools/log/passpipes.py
+F:	userland/jobs/
+T:	workbench/tools_test.py
+D:	Documentation/building.md
+D:	Documentation/phone-test.ru.md
+
+DISPLAY
+F:	drivers/iokit/MiniIOMobileFramebuffer.cpp
+F:	drivers/board/hakios_fbgrab.c
+F:	tools/log/fbframes.py
+F:	tools/log/fbjpg.py
+F:	tools/log/fbrecv.py
+F:	tools/log/fbshot.py
+D:	Documentation/drivers.md
+K:	display-ovl-flip; fb_flip=, fbscale=, fbfit=
+
+DOCUMENTATION
+F:	Documentation/
+F:	tools/bootargs.py
+T:	workbench/bootargs_test.py
+D:	Documentation/README.md
+
+EMMC
+F:	drivers/board/mtk_emmc.c
+F:	include/board/mtk_emmc.h
+F:	arch/arm64/boot/msdc.h
+F:	tools/run/msdc-test.sh
+D:	Documentation/drivers.md
+K:	emmc-msdc; emmc_root=
+
+FIRST PROGRAMS
+F:	init/
+F:	lib/libmini/
+F:	userland/build.sh
+F:	userland/rc.*
+D:	Documentation/architecture.md
+D:	userland/README.md
+
+GPU AND METAL
+F:	drivers/board/mtk_mali.c
+F:	drivers/iokit/HakiosMali.cpp
+F:	drivers/iokit/MiniIOSurface.cpp
+F:	drivers/iokit/MiniIOSurface.h
+F:	arch/arm64/boot/mtkmali.h
+F:	tools/run/gpu-probe.sh
+F:	tools/log/texshot.py
+F:	userland/src/mali/
+F:	userland/src/metal/
+F:	userland/src/hakiosmetal.m
+F:	userland/tools/air/
+F:	userland/tools/mesa/
+F:	userland/tools/rwacache.sh
+F:	darwin/userland/mali27.sh
+F:	darwin/userland/metal27.sh
+T:	userland/src/mali/tests/host_test.cpp (userland/src/mali/README.md says how; not part of make check)
+D:	Documentation/metal-glass.md
+D:	userland/src/mali/README.md
+D:	userland/docs/air.md
+K:	gpu-mali-g52; mali=, mali_native=, metal=
+
+INPUT: KEYS AND TOUCH
+F:	drivers/board/hakios_input.c
+F:	drivers/board/mtk_keys.c
+F:	drivers/board/mtk_tcm.c
+F:	include/board/hakios_input.h
+F:	arch/arm64/boot/mtkspi.h
+F:	arch/arm64/boot/tcm.h
+F:	arch/arm64/boot/mtkpwrap.h
+F:	tools/mktouchfw.py
+F:	tools/run/touch-probe.sh
+F:	userland/src/rwtouch.c
+F:	workbench/pwrap_model.h
+T:	workbench/input_queue_test.c
+T:	workbench/keys_driver_test.c
+D:	Documentation/drivers.md
+K:	keys-mt6358, touch-td4160; buttons=, touchscreen=
+
+KERNEL TREE AND PLATFORM
+F:	kernel/
+F:	arch/arm64/kernel/
+F:	arch/arm64/include/
+F:	arch/arm64/configs/xnu/
+F:	crypto/
+F:	security/
+F:	include/external/
+F:	drivers/board/hakios_drivers.c
+F:	drivers/board/hakios_kernel.h
+F:	drivers/board/hakios_log.h
+F:	drivers/board/hakios_mmio.h
+F:	drivers/board/hakios_cache.h
+F:	drivers/board/hakios_time.h
+F:	drivers/board/hakios_ustack.c
+F:	drivers/iokit/GenericARMPE.cpp
+F:	drivers/iokit/MiniAppleKeyStore.cpp
+F:	drivers/iokit/MiniFairPlay.cpp
+F:	drivers/iokit/MiniDrivers.h
+F:	workbench/fakekernel/
+T:	kernel/verify.sh (run by CI, not by make check: it fetches Apple's release)
+T:	kernel/syntax-check.sh (make syntax-check)
+D:	kernel/README.md
+D:	kernel/patches/README.md
+D:	Documentation/layout.md
+
+LOADER
+F:	arch/arm64/boot/*
+F:	tools/get-zig.sh
+F:	tools/mkfont8x16.swift
+T:	workbench/run.sh (the loader compiled for a made-up phone)
+D:	arch/arm64/boot/README.md
+D:	Documentation/architecture.md
+
+PROJECT CHECKS
+F:	Makefile
+F:	components.toml
+F:	tools/lint.sh
+F:	tools/check-publishable.sh
+F:	tools/components.py
+F:	.github/
+T:	workbench/run.sh
+D:	CONTRIBUTING.md
+
+SENSOR HUB
+F:	drivers/board/mtk_scp.c
+D:	Documentation/drivers.md
+K:	scp-sensors; scp_step=
+
+SYSTEM IMAGES AND THE INSERTED LIBRARIES
+F:	darwin/
+F:	userland/src/inject*
+F:	userland/src/tweaks/
+F:	userland/tools/dsc/
+F:	userland/tools/mk-mesa.sh
+F:	userland/tools/metallib.py
+D:	darwin/README.md
+D:	Documentation/darwin27-boot.md
+
+VIRTIO, FOR THE EMULATOR
+F:	drivers/board/hakios_virtio.h
+F:	drivers/board/hakios_virtio_blk.c
+F:	drivers/board/hakios_virtio_input.c
+F:	drivers/board/hakios_virtio_net.c
+F:	drivers/board/hakios_virtio_sound.c
+F:	include/board/hakios_virtio_blk.h
+D:	Documentation/drivers.md

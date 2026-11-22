@@ -13,9 +13,9 @@ file's `[boot] android_device`, and stop when the phone is not on slot `a`.
 
 | Tool | What it does |
 | --- | --- |
-| `boards.py` | Board and SoC files: `check`, `status NAME` (what is on, what can be turned on next), `new NAME --soc SOC --dtb FILE` (a board file started from the phone's device tree), `gen` (the kernel's table and the loader's header), `features --write` (`docs/features.md`) |
+| `boards.py` | Board and SoC files: `check`, `status NAME` (what is on, what can be turned on next), `new NAME --soc SOC --dtb FILE` (a board file started from the phone's device tree), `gen` (the kernel's table and the loader's header), `features --write` (`Documentation/features.md`) |
 | `device.py` | Device packages: `available`, `add NAME` (from the `devices` branch, or `--from SOURCE`), `remove NAME`, `list`, `export NAME DIR` (back to a checkout of the `devices` branch) |
-| `bootargs.py` | `docs/boot-args.md` from the kernel's sources (`--write`; `make docs`) |
+| `bootargs.py` | `Documentation/boot-args.md` from the kernel's sources (`--write`; `make docs`) |
 | `defconfig.py` | The boot arguments of a kind of run, `arch/arm64/configs/NAME_defconfig`, on one line (`NAME [ARG...]`: an `ARG` replaces or adds); `--list`, `--check`. `tools/run/xnu-cycle.sh` takes one as `XNU_DEFCONFIG=NAME` |
 | `components.py` | `components.toml` against the scripts that fetch each component (`check`, in `make lint`) |
 | `lint.sh` | The checks of form: every shell and Python script parses, `shellcheck` where it is installed, the components, the publish check |
@@ -43,7 +43,7 @@ file's `[boot] android_device`, and stop when the phone is not on slot `a`.
 | `system-flash.sh`, `mksparse.py` | A system image into its partition, straight from the host, in sparse pieces fastboot takes |
 | `boot-xnu.sh` | Asks the loader for one XNU boot from Android (`HAKIOS:BOOT-XNU` in pmsg) and reboots |
 | `image.sh` | The images of a run with more than the plain boot of the earlier system (`wifi`, `bluetooth`, `metal`) |
-| `msdc-test.sh`, `touch-probe.sh`, `gpu-probe.sh`, `cam-probe.sh` | The loader's probes ([docs/porting.md](../docs/porting.md)): each a flash, one boot and a report; read only |
+| `msdc-test.sh`, `touch-probe.sh`, `gpu-probe.sh`, `cam-probe.sh` | The loader's probes ([Documentation/porting.md](../Documentation/porting.md)): each a flash, one boot and a report; read only |
 
 ## `log/`: what a run left
 

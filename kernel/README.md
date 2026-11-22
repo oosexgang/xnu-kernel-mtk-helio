@@ -5,20 +5,20 @@ Apple's `xnu-12377.121.6`, the 27 release's kernel, kept as three things:
 | | |
 | --- | --- |
 | `UPSTREAM` | which release it is made from, by commit |
-| `overlay/` | the files added, at their place in the XNU tree |
+| the files added | in the repository's `arch/`, `drivers/`, `fs/`, `crypto/`, `security/` and `include/`, each directory one of the XNU tree's (`lib.sh`, `OVERLAY_PLACES`: `drivers/board` is `bsd/dev`, …); `overlay/` has the two that belong to none, at their place in the tree |
 | `patches/` | the changes to Apple's own files, one patch a topic (`patches/series`, [patches/README.md](patches/README.md)) |
 
-An *assembled tree* is a checkout of the release with the overlay copied in and the patches applied:
+An *assembled tree* is a checkout of the release with the files added copied in and the patches applied:
 what is compiled, and where the kernel is worked on. It is a git repository of its own (tag `upstream`
 is Apple's release, tag `assembled` what the scripts put there, branch `hakios` the work) and lives
 next to this repository, in `../xnu-12377-hakios` unless `XNU_SRC` says otherwise.
 
 ## Building
 
-What it needs is in [docs/building.md](../docs/building.md). In short:
+What it needs is in [Documentation/building.md](../Documentation/building.md). In short:
 
 ```sh
-kernel/assemble.sh ../xnu-12377-hakios   # Apple's release + overlay + patches
+kernel/assemble.sh ../xnu-12377-hakios   # Apple's release + the files of ours + patches
 kernel/deps/setup.sh                     # what the build needs beside the tree: LLVM 19.1.7, mig 138, the iig headers of
                                          # macOS 26.5's SDK, sources, host tools, the SDK's overlay, two libraries
 kernel/build.sh -j8 -k                   # -k is needed: one harmless error (lldbmacros) ends make with code 2
@@ -39,10 +39,12 @@ Things to know:
 
 ## Two ways of working
 
-- **A file of ours**: edit it in `kernel/overlay/`, run `kernel/build.sh` (which updates the tree).
+- **A file of ours**: edit it where it is kept (`drivers/board/mtk_keys.c`, `fs/apfs/`, …: the places of
+  `lib.sh`'s `OVERLAY_PLACES`, [Documentation/layout.md](../Documentation/layout.md)), run `kernel/build.sh`
+  (which updates the tree).
 - **In the tree**, the only way for Apple's own files: edit there, build, then
   `kernel/export.sh ../xnu-12377-hakios`. `git diff` in this repository then shows the work: new files
-  under `overlay/`, changed topic patches. A changed file of Apple's that no line of `patches/series`
+  in their places (a new file of `bsd/dev/` in `drivers/board/`), changed topic patches. A changed file of Apple's that no line of `patches/series`
   claims stops the export: give it a topic there.
 
 `kernel/syntax-check.sh --tree ../xnu-12377-hakios` (or `make syntax-check`) puts every C file of

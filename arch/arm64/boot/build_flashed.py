@@ -17,7 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 android = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'backup', 'boot_a_magisk.img')
 if not os.path.isfile(android):
     sys.exit(f'build_flashed.py: no {android}: it is your phone\'s own rooted boot image '
-             '(see docs/porting.md, "What the phone must allow"), never in the repository')
+             '(see Documentation/porting.md, "What the phone must allow"), never in the repository')
 # HAKIOS_PAYLOAD=flash: no payload in the boot image; the loader reads it from the system partition's tail
 # (tools/run/payload-flash.sh), and boot_a holds only the loader and Android
 payload = [] if os.environ.get('HAKIOS_PAYLOAD') == 'flash' else [os.path.join(ROOT, 'build', 'payload.bin')]

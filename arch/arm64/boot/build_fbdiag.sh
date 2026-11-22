@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build build/loader/fbdiag.img: fbdiag in front of Android's kernel (your rooted boot image,
 # backup/boot_a_magisk.img unless ANDROID_BOOT names another). The first thing a port runs
-# (docs/porting.md, step 1). HAKIOS_BOARD=NAME when more than one phone's package is here.
+# (Documentation/porting.md, step 1). HAKIOS_BOARD=NAME when more than one phone's package is here.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"

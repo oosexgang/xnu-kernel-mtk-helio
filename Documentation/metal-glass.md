@@ -13,7 +13,7 @@ backboardd (CoreAnimation, the window server)
        └─ HakiosMetal.bundle: userland/src/hakiosmetal.m + userland/src/metal/   the MTLDevice, its encoders
             └─ air_metal.h's contract (rwa_*), served by one of two libraries:
                  ├─ libhakiosmali.dylib (mali_native=1): userland/src/mali/rwa/, our own job descriptors
-                 │    └─ kmali.c ── HakiosMali's user client ── kernel: iokit/Kernel/HakiosMali.cpp, bsd/dev/mtk_mali.c
+                 │    └─ kmali.c ── HakiosMali's user client ── kernel: drivers/iokit/HakiosMali.cpp, drivers/board/mtk_mali.c
                  └─ libhakiosair.dylib: Mesa's Gallium and panfrost (the first path, kept for comparison)
 ```
 
@@ -85,7 +85,7 @@ came; `rwm_slowcb=MS` names every command buffer slower than that.
 
 ## The boot arguments
 
-The kernel's (`docs/boot-args.md`): `mali=1` (the GPU), `mali_mhz=N` (its clock; 950 is the fastest
+The kernel's (`Documentation/boot-args.md`): `mali=1` (the GPU), `mali_mhz=N` (its clock; 950 is the fastest
 used), `metal=1` (the device published to Metal), `camtl=1` (the hooks that let CoreAnimation take a
 Metal device), `fb_queue=1 fb_flip=1` (frames shown by flipping OVL0 between two pictures).
 

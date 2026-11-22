@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 python3 workbench/tools_test.py
-python3 workbench/bootargs_test.py   # (docs/boot-args.md is what tools/bootargs.py writes: `make docs`)
+python3 workbench/bootargs_test.py   # (Documentation/boot-args.md is what tools/bootargs.py writes: `make docs`)
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 tools/boards.py --alone --devices workbench/devices --soc-dir workbench/soc gen --out "$out" > /dev/null
@@ -36,9 +36,9 @@ DRIVER_FLAGS=(-std=gnu11 -Wall -Wextra -Wno-unknown-pragmas -Wno-unused-paramete
 failed=0
 for test in input_queue_test station_test apple80211_test sparse_driver_test guard_test audio_device_test battery_driver_test keys_driver_test example_pwrkey_test; do
 	source=$HERE/$test.c
-	[ -f "$source" ] || source=$PWD/docs/examples/$test.c    # (the example driver lives beside its guide)
+	[ -f "$source" ] || source=$PWD/Documentation/examples/$test.c    # (the example driver lives beside its guide)
 	echo "== $test"
-	if ! "$CC" "${DRIVER_FLAGS[@]}" -I"$PWD/docs/examples" "$source" -o "$out/$test"; then
+	if ! "$CC" "${DRIVER_FLAGS[@]}" -I"$PWD/Documentation/examples" "$source" -o "$out/$test"; then
 		failed=1
 		continue
 	fi

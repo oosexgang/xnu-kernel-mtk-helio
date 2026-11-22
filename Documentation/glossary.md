@@ -7,7 +7,7 @@ word names a file or a tool, the path says where it is.
 
 | Word | What it is |
 | --- | --- |
-| **Assembled tree** | Apple's kernel release with `kernel/overlay/` copied in and `kernel/patches/` applied: what is compiled (`kernel/assemble.sh`, `../xnu-12377-hakios`). |
+| **Assembled tree** | Apple's kernel release with the files of ours copied in (`drivers/`, `fs/`, …: [layout.md](layout.md)) and `kernel/patches/` applied: what is compiled (`kernel/assemble.sh`, `../xnu-12377-hakios`). |
 | **Board file** | `NAME/board.toml` of a device package: what one phone has, where its memory and panel are, which features it may start. |
 | **Boot argument** | A word on the kernel's command line (`mali=1`); every driver waits for its own. The list: [boot-args.md](boot-args.md). |
 | **Device package** | A phone's directory (`board.toml`, README, journal), kept on the `devices` branch and brought in by `tools/device.py add`. |
@@ -71,7 +71,7 @@ word names a file or a tool, the path says where it is.
 | **DriverKit, iig** | Apple's user-space drivers and the generator of their interfaces; the kernel's build needs iig's output. |
 | **dyld shared cache** | The system's libraries prelinked into one file; rewritten as a whole for PAC. |
 | **FairPlay** | Apple's content protection; the kernel has a stand-in client for it. |
-| **IOKit, kext** | The kernel's driver framework and its extensions; Apple's closed ones are stood in for in `kernel/overlay/iokit/`. |
+| **IOKit, kext** | The kernel's driver framework and its extensions; Apple's closed ones are stood in for in `drivers/iokit/`. |
 | **IOMobileFramebuffer, IOSurface** | The display service the window server swaps frames to; shared image memory between processes and the GPU. |
 | **IPSW** | Apple's firmware archive of a release: disk images of the root and the cryptexes, the shared cache. |
 | **launchd** | Process 1 of the system (`/sbin/launchd.system` here), started by our `init`. |
