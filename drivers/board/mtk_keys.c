@@ -339,13 +339,26 @@ keys_thread(__unused void *parameter, __unused wait_result_t result)
 	printf("mtkkeys: the buttons are looked at every 20 ms; keypad %#x, PMIC status %s\n",
 	    rd(kpd, KP_MEM1), pwrap_wait(PWRAP_FSM_IDLE) ? "reachable" : "NOT REACHABLE");
 	{
+		/* the clocks' tables and PLL registers below are the MT6768's: on another chip they are not written, and
+		 * the log says so (a chip's own are its Android kernel's gpufreq and cpufreq drivers') */
+		const char *soc = hakios_board()->soc;
+		bool mt6768 = soc != NULL && strcmp(soc, "mt6768") == 0;
 		uint32_t how = 0;
 
 		if (PE_parse_boot_argn("mtk_cpufreq", &how, sizeof(how)) && how != 0) {
-			cpufreq_set(how);
+			if (mt6768) {
+				cpufreq_set(how);
+			} else {
+				printf("mtkkeys: mtk_cpufreq= is the MT6768's tables and PLLs, and this is %s: the clocks left alone\n", soc);
+			}
 		}
 		if (PE_parse_boot_argn("mali_mhz", &how, sizeof(how)) && how != 0) {
-			gpu_raise(how);
+			if (mt6768) {
+				gpu_raise(how);
+			} else {
+				printf("mtkkeys: mali_mhz= is the MT6768's GPUPLL and the MT6358's rails, and this is %s: the GPU's "
+				    "clock left alone\n", soc);
+			}
 		}
 	}
 

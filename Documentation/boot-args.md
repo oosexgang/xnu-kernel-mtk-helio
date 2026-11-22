@@ -39,7 +39,7 @@ beside the code, so the file named in each heading has the full explanation.
 
 | Argument | What the source says |
 | --- | --- |
-| `mali` | mali=1: every address below belongs to this phone (the Qualcomm port's GPU is an Adreno, in xnu-kernel-qcom). |
+| `mali` | Only with boot-arg mali=1, on a board whose file lists the feature, and on a chip whose GPU platform is known (mtk_mfg.h). |
 | `mali_fastmap` | — |
 | `mali_trace` | mali_trace=1: a line for every job, "tl: j SEQ f\|v q QUEUED b BEGAN e ENDED" in us of mach_absolute_time, beside touch_lat's lines of the display's and the Metal driver's |
 | `mali_walk_wb` | mali_walk_wb=1: the walks cached all the same, with mali_fastmap's way of entering buffers. |

@@ -1,17 +1,25 @@
 /*
- * The GPU of the first phone (an MT6768: arch/arm64/boot/dts/x6826b), a Mali-G52 MC2, brought up from the kernel. Only with
- * boot-arg mali=1: every address below belongs to this phone (the Qualcomm port's GPU is an Adreno,
- * in xnu-kernel-qcom).
+ * A Mali on a MediaTek chip, brought up from the kernel and kept for programs (drivers/iokit/HakiosMali.cpp): first
+ * run on the first phone (an MT6768 with a Mali-G52 MC2: arch/arm64/boot/dts/x6826b). Only with boot-arg mali=1, on a
+ * board whose file lists the feature, and on a chip whose GPU platform is known (mtk_mfg.h).
  *
- * A Bifrost Mali needs no firmware, so bringing it up is power and clocks and nothing else, in the
- * order MediaTek's own kernel uses -- the same sequence the loader's GPU probe proved on the phone
- * (mtkloader/mtkmali.h, where it is written out with its sources):
+ * Two halves. What is the chip's -- the GPU's clock, MFG's power domains and bus protection, its clock gate -- is a
+ * table of the chip's registers in mtk_mfg.h (steps 1 to 3 below), found by hw.board.soc; a chip that has none is
+ * said and left alone, and adding one is Documentation/metal-porting.md. What is the GPU's is the same on every
+ * Mali with a job manager -- Bifrost (G31 to G76) and Valhall before its command stream frontend (G57, G68, G77,
+ * G78) -- and is everything from step 4 on: the registers of Linux's panfrost_regs.h, an MMU with AArch64 tables,
+ * two job slots. A Midgard (T6xx to T8xx; its MMU takes only the older format) or a GPU with a command stream
+ * frontend (G310, G510, G610 and after: firmware of its own) is named and refused.
+ *
+ * A Mali needs no firmware of its own until the command stream frontend, so bringing it up is power and clocks
+ * and nothing else, in the order MediaTek's own kernel uses -- on the MT6768 the sequence the loader's GPU probe
+ * proved on the phone (arch/arm64/boot/mtkmali.h, where it is written out with its sources):
  *
  *   1  the "mfg_sel" clock mux in topckgen, to the main PLL's third (364 MHz)
  *   2  the four power domains in the SPM, MFG_ASYNC, MFG, MFG_CORE0 and _CORE1, each with its SRAM,
  *      and once MFG has power the bus protection between the GPU block and the rest released
  *   3  the block's own clock gate (BG3D in mfgcfg)
- *   4  the GPU: which one it is, a soft reset, and its L2, tiler and two shader cores powered
+ *   4  the GPU: which one it is, a soft reset, and its L2, tiler and shader cores powered
  *   5  one job, the smallest there is -- write a value into memory -- through address space 0 in
  *      identity mode (a GPU address is the physical one), and the processor reads the value back
  *   6  the same job again through the GPU's own page tables, at a GPU address of their making
@@ -317,48 +325,11 @@ wait_for(vm_offset_t base, uint32_t at, uint32_t mask, uint32_t want, uint32_t m
 	return (rd(base, at) & mask) == want;
 }
 
-/* ---- power ---- */
+/* ---- power: the chip's (mtk_mfg.h, which uses rd, wr and wait_for above) ---- */
 
-#define PWR_STATUS      0x180
-#define PWR_STATUS_2ND  0x184
-#define PWR_RST_B       (1u << 0)
-#define PWR_ISO         (1u << 1)
-#define PWR_ON          (1u << 2)
-#define PWR_ON_2ND      (1u << 3)
-#define PWR_CLK_DIS     (1u << 4)
-#define PWR_SRAM_PDN    (1u << 8)
-#define PWR_SRAM_ACK    (1u << 12)
+#include "mtk_mfg.h"
 
-static const struct {
-	const char *name;
-	uint32_t con, status;
-	bool sram;
-} domains[4] = {
-	{ "MFG_ASYNC", 0x334, 1u << 14, false },
-	{ "MFG", 0x338, 1u << 11, true },
-	{ "MFG_CORE0", 0x34c, 1u << 12, true },
-	{ "MFG_CORE1", 0x310, 1u << 13, true },
-};
-
-static bool
-domain_on(unsigned i)
-{
-	uint32_t con = domains[i].con, bit = domains[i].status;
-
-	wr(spm, con, rd(spm, con) | PWR_ON);
-	wr(spm, con, rd(spm, con) | PWR_ON_2ND);
-	if (!wait_for(spm, PWR_STATUS, bit, bit, 20) || !wait_for(spm, PWR_STATUS_2ND, bit, bit, 20)) {
-		return false;
-	}
-	wr(spm, con, rd(spm, con) & ~PWR_CLK_DIS);
-	wr(spm, con, rd(spm, con) & ~PWR_ISO);
-	wr(spm, con, rd(spm, con) | PWR_RST_B);
-	if (domains[i].sram) {
-		wr(spm, con, rd(spm, con) & ~PWR_SRAM_PDN);
-		return wait_for(spm, con, PWR_SRAM_ACK, 0, 20);
-	}
-	return true;
-}
+static const struct mtk_mfg *chip;      /* this chip's GPU platform, found by hw.board.soc at the start */
 
 /* ---- the GPU's registers (Linux drivers/gpu/drm/panfrost/panfrost_regs.h) ---- */
 
@@ -578,6 +549,45 @@ first_jobs(void)
 	return done;
 }
 
+/*
+ * Which Mali, by its product id (GPU_ID's top half; the names are Panfrost's, pan_props.c), and whether this driver
+ * can drive it: NULL when it can, else why not. Its architecture is the id's top nibble from Bifrost on; a Midgard's
+ * ids are below 0x1000.
+ */
+static const char *
+mali_name(uint32_t id)
+{
+	static const struct {
+		uint16_t product;
+		const char *name;
+	} names[] = {
+		{ 0x6000, "Mali-G71" }, { 0x6221, "Mali-G72" }, { 0x7090, "Mali-G51" }, { 0x7093, "Mali-G31" },
+		{ 0x7211, "Mali-G76" }, { 0x7212, "Mali-G52" }, { 0x7402, "Mali-G52" }, { 0x9091, "Mali-G57" },
+		{ 0x9093, "Mali-G57" },
+	};
+
+	for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		if (names[i].product == id >> 16) {
+			return names[i].name;
+		}
+	}
+	return id >> 16 < 0x1000 ? "a Midgard Mali" : "a Mali";
+}
+
+static const char *
+mali_kind(uint32_t id)
+{
+	uint32_t arch = id >> 28;
+
+	if (id >> 16 < 0x1000) {
+		return "a Midgard: its MMU takes the older table format, and this driver writes AArch64 tables";
+	}
+	if (arch >= 10) {
+		return "a GPU with a command stream frontend, which needs firmware of its own and another way to submit";
+	}
+	return NULL;    /* Bifrost (6, 7) or Valhall with a job manager (9) */
+}
+
 static void
 mali_up(void)
 {
@@ -587,30 +597,40 @@ mali_up(void)
 	infracfg = ml_io_map(INFRACFG_PHYS, 0x1000);
 	spm = ml_io_map(SPM_PHYS, 0x1000);
 
-	/* 1: the clock; 2: power */
-	wr(topckgen, 0x58, 3u | (1u << 7));     /* CLK_CFG_1_CLR: mfg_sel's source and its gate */
-	wr(topckgen, 0x54, 2u);                 /* CLK_CFG_1_SET: syspll_d3 */
-	reached = 1;
-	for (unsigned i = 0; i < 4; i++) {
-		if (!domain_on(i)) {
-			printf("mali: power domain %s did not come up (status %#x)\n", domains[i].name, rd(spm, PWR_STATUS));
+	if (chip->power_on != NULL) {
+		/* a chip whose GPU comes up its own way: all of 1 to 3 in its function */
+		mfgcfg = ml_io_map(MFGCFG_PHYS, 0x1000);
+		if (!chip->power_on(topckgen, spm, infracfg, mfgcfg)) {
+			printf("mali: %s: the GPU's platform did not come up\n", chip->soc);
 			return;
 		}
-		if (i == 1) {
-			wr(infracfg, 0x2a4, (1u << 21) | (1u << 22));   /* bus protection, released */
-			wr(infracfg, 0x2a4, 1u << 25);
+		mali = ml_io_map(MALI_PHYS, 0x4000);
+		reached = 3;
+	} else {
+		const struct mtk_mfg_domain *failed;
+
+		/* 1: the clock; 2: power */
+		mtk_mfg_clock(chip, topckgen);
+		reached = 1;
+		if ((failed = mtk_mfg_domains_on(chip, spm, infracfg)) != NULL) {
+			printf("mali: power domain %s did not come up (status %#x)\n", failed->name, rd(spm, chip->pwr_status));
+			return;
 		}
+		reached = 2;
+
+		/* 3: inside the block, which now has power and a bus */
+		mfgcfg = ml_io_map(MFGCFG_PHYS, 0x1000);
+		mali = ml_io_map(MALI_PHYS, 0x4000);
+		mtk_mfg_gate(chip, mfgcfg);
+		reached = 3;
 	}
-	reached = 2;
 
-	/* 3: inside the block, which now has power and a bus */
-	mfgcfg = ml_io_map(MFGCFG_PHYS, 0x1000);
-	mali = ml_io_map(MALI_PHYS, 0x4000);
-	wr(mfgcfg, 0x008, 1u);                  /* MFG_CG_CLR: BG3D runs */
-	reached = 3;
-
-	/* 4: the GPU itself */
+	/* 4: the GPU itself: one with a job manager and an MMU that takes AArch64 tables (mali_kind) */
 	gpu_id = rd(mali, GPU_ID);
+	if (mali_kind(gpu_id) != NULL) {
+		printf("mali: GPU_ID %#x (%s): %s; left alone\n", gpu_id, mali_name(gpu_id), mali_kind(gpu_id));
+		return;
+	}
 	shaders = shader_mask = rd(mali, SHADER_PRESENT);
 	tiler = rd(mali, TILER_PRESENT);
 	l2 = rd(mali, L2_PRESENT);
@@ -632,8 +652,8 @@ mali_up(void)
 		return;
 	}
 	reached = 4;
-	printf("mali: GPU_ID %#x (Mali-G52 r%up%u), shader cores %#x, tiler %#x, L2 %#x: all powered\n", gpu_id,
-	    (gpu_id >> 12) & 0xf, (gpu_id >> 4) & 0xff, shaders, tiler, l2);
+	printf("mali: GPU_ID %#x (%s r%up%u, %s), shader cores %#x, tiler %#x, L2 %#x: all powered\n", gpu_id,
+	    mali_name(gpu_id), (gpu_id >> 12) & 0xf, (gpu_id >> 4) & 0xff, chip->soc, shaders, tiler, l2);
 
 	/* 5: something for it to do */
 	switch (first_jobs()) {
@@ -1722,6 +1742,12 @@ mtk_mali_init(void)
 		return;
 	}
 	if (!hakios_board_wants(HAKIOS_HAS_GPU_MALI_G52, "mali=1")) {
+		return;
+	}
+	if ((chip = mtk_mfg_find(hakios_board()->soc)) == NULL) {
+		printf("mali: the GPU's platform of %s is not known (drivers/board/mtk_mfg.h): its clock, power domains and "
+		    "clock gate are to be written there first (Documentation/metal-porting.md); the GPU left alone\n",
+		    hakios_board()->soc);
 		return;
 	}
 	if (kernel_thread_start(mali_thread, NULL, &thread) == KERN_SUCCESS) {

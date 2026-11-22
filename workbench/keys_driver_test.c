@@ -172,6 +172,17 @@ off_by_default(void)
 	CHECK(pw.reads == 0 && !logged("mtkkeys"), "no buttons=2: nothing read");
 }
 
+/* the clocks' tables are the MT6768's: on the made-up chip of phone-a (mt0001) neither is touched, and it is said */
+static void
+clocks_of_another_chip(void)
+{
+	start("buttons=2 mtk_cpufreq=3 mali_mhz=950");
+	WAIT_FOR(logged("looked at every 20 ms"), 2000);
+	EVENTUALLY(logged("mali_mhz= is the MT6768's"), 2000, "said: %s", log_text);
+	CHECK(logged("mtk_cpufreq= is the MT6768's"), "the processors' clock refused too: %s", log_text);
+	CHECK(pw.elsewhere == 0, "nothing read or written where nothing is: %u", pw.elsewhere);
+}
+
 static void
 board_without_keys(void)
 {
@@ -188,6 +199,7 @@ main(int argc, char **argv)
 	static const struct { const char *name; void (*run)(void); } scenarios[] = {
 		{ "volume_keys", volume_keys }, { "power_key", power_key }, { "bounce", bounce },
 		{ "pmic_silent", pmic_silent }, { "off_by_default", off_by_default }, { "board_without_keys", board_without_keys },
+		{ "clocks_of_another_chip", clocks_of_another_chip },
 	};
 
 	if (argc < 2) {

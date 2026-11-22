@@ -34,7 +34,7 @@ CC=${CC:-cc}
 DRIVER_FLAGS=(-std=gnu11 -Wall -Wextra -Wno-unknown-pragmas -Wno-unused-parameter -O2 -pthread
 	-I"$HERE" -I"$HERE/fakekernel" -I"$SRC" -I"$SRC/.." -I"$out" "$HERE/fakekernel/fakekernel.c")
 failed=0
-for test in input_queue_test station_test apple80211_test sparse_driver_test guard_test audio_device_test battery_driver_test keys_driver_test example_pwrkey_test; do
+for test in input_queue_test station_test apple80211_test sparse_driver_test guard_test audio_device_test battery_driver_test keys_driver_test mfg_power_test example_pwrkey_test; do
 	source=$HERE/$test.c
 	[ -f "$source" ] || source=$PWD/Documentation/examples/$test.c    # (the example driver lives beside its guide)
 	echo "== $test"
