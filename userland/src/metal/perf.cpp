@@ -284,7 +284,8 @@ rwm_perf_report(uint64_t now)
 	if (span < 5000000000ull) {
 		return;
 	}
-	/* boot-arg rwm_perfkeep=S: "rwm perf" and "rwm waits" into the host's kept lines for the 150 s from S s after boot
+	/* boot-arg rwm_perfkeep=S: "rwm perf", "rwm waits" and "rwm making" into the host's kept lines for the 150 s from S
+	 * s after boot
 	 * (a line said only to the kernel's log is lost with the log's middle; all of them would fill the 64 KB) */
 	static long keep_from = -2;
 
@@ -315,9 +316,9 @@ rwm_perf_report(uint64_t now)
 			 p.worker_cbs ? p.worker_cpu / 1e6 / p.worker_cbs : 0.0);
 	}
 	say(line + 2 - mark);
-	snprintf(line, sizeof(line), "rwm making: %llu buffers, %.1f ms each from made to committed, the maker running %.1f of them",
+	snprintf(line, sizeof(line), "!!rwm making: %llu buffers, %.1f ms each from made to committed, the maker running %.1f of them",
 		 p.made_cbs, p.made_cbs ? p.made_ns / 1e6 / p.made_cbs : 0.0, p.made_cbs ? p.made_cpu / 1e6 / p.made_cbs : 0.0);
-	say(line);
+	say(line + 2 - mark);
 
 	static void (*profile)(uint64_t *);
 	static void (*submits)(uint64_t *);

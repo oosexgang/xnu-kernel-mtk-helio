@@ -1,0 +1,15 @@
+# Pictures of the screens that use the full-screen attachments (kept JPEGs: tools/log/fbjpg.py LOG OUT.jpg NAME):
+# the home screen, Settings, the notification shade, Control Center and an icon's context menu.
+/hakios/bin/psgrep -bg 2 Widget
+/hakios/bin/rwtouch wait 170 swipe 0.705 0.586 0.707 0.587 150
+/hakios/bin/rwtouch wait 30
+/hakios/bin/fbgrab -keep home 170 0.45
+/hakios/bin/rwtouch tap 0.375 0.585 wait 5
+/hakios/bin/fbgrab -keep settings 170 0.45
+/hakios/bin/rwtouch button home wait 3 swipe 0.3 0.005 0.3 0.6 300 wait 3
+/hakios/bin/fbgrab -keep shade 170 0.45
+/hakios/bin/rwtouch swipe 0.5 0.95 0.5 0.3 300 wait 3 swipe 0.9 0.005 0.9 0.6 300 wait 3
+/hakios/bin/fbgrab -keep cc 170 0.45
+/hakios/bin/rwtouch swipe 0.5 0.95 0.5 0.2 300 wait 3 hold 0.375 0.355 1200 wait 3
+/hakios/bin/fbgrab -keep menu 170 0.45
+/hakios/bin/rwtouch button home wait 3

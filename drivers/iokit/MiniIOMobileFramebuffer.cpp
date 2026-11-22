@@ -384,6 +384,7 @@ public:
 	uint32_t        fMotionFrames, fMotionGaps[4], fMotionLongest, fMotionLines;
 	/* ... and all of them so far, for the minute's kept line: animations, those with a gap of 35 ms or more, the gaps */
 	uint32_t        fMotionAll, fMotionAllLate, fMotionAllGaps[4], fMotionWorst, fMotionWorstAt;
+	uint64_t        fHeldAll, fHeldAllTime;  /* swaps held in SwapEnd for a place in the queue (fb_queue), and how long */
 	/* boot-arg fb_diff=1: which pixels of the panel each frame changed (it costs: the panel's memory is slow to read) */
 	bool            fDiff;
 	uint64_t        fDiffPixels;
@@ -1207,9 +1208,13 @@ IOMobileFramebuffer::reportFrameTimes(void)
 
 			hakios_keep("MiniIOMobileFramebuffer: busy frames so far: %u, %u%% within 18 ms; %u under 26, %u under 35, %u longer",
 			    all, all ? (run[0] + run[1]) * 100 / all : 0, run[2], run[3], run[4]);
+			uint64_t held_ns;
+
+			absolutetime_to_nanoseconds(fHeldAllTime, &held_ns);
 			hakios_keep("fb motion so far: %u animations, %u with a gap of 35 ms or more; gaps %u %u %u %u (within 18, 35, "
-			    "52 ms, longer); the longest %u ms, at %u s", fMotionAll, fMotionAllLate, fMotionAllGaps[0],
-			    fMotionAllGaps[1], fMotionAllGaps[2], fMotionAllGaps[3], fMotionWorst, fMotionWorstAt);
+			    "52 ms, longer); the longest %u ms, at %u s; %llu swaps held for a place (fb_queue=%u), %llu ms in all",
+			    fMotionAll, fMotionAllLate, fMotionAllGaps[0], fMotionAllGaps[1], fMotionAllGaps[2], fMotionAllGaps[3],
+			    fMotionWorst, fMotionWorstAt, fHeldAll, swapQueue(), held_ns / NSEC_PER_MSEC);
 		}
 	}
 	bzero(fFrameTimes, sizeof(fFrameTimes));
@@ -1707,13 +1712,20 @@ IOMobileFramebuffer::present(const uint8_t * swap)
 	fStatSwapsLate += fSwapTime != 0 && now - fSwapTime > period && now - fSwapTime < pause;
 	fSwapTime = now;
 	fStatHeld += fSwapsWaiting >= swapQueue();
+	uint64_t heldFrom = fSwapsWaiting >= swapQueue() ? mach_absolute_time() : 0;
+
+	fHeldAll += heldFrom != 0;
 	while (fSwapsWaiting >= swapQueue()) {
 		if (IOLockSleepDeadline(fSwapLock, &fSwapsWaiting, deadline, THREAD_UNINT) == THREAD_TIMED_OUT &&
 		    fSwapsWaiting >= swapQueue()) {
 			fStatLost++;                    /* (the GPU has stopped answering: the frame before is waiting for it) */
+			fHeldAllTime += mach_absolute_time() - heldFrom;
 			IOLockUnlock(fSwapLock);
 			return;
 		}
+	}
+	if (heldFrom != 0) {
+		fHeldAllTime += mach_absolute_time() - heldFrom;
 	}
 	unsigned slot = (fSwapFirst + fSwapsWaiting) % SWAP_QUEUE;
 
