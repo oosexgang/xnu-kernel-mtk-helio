@@ -1,6 +1,6 @@
 # Writing a driver
 
-A driver here is one C file under `kernel/overlay/bsd/dev/`, built into the kernel. The example is
+A driver here is one C file under `drivers/board/`, built into the kernel. The example is
 [examples/example_pwrkey.c](examples/example_pwrkey.c): it reads the power key from the MT6358 PMIC
 and shows it as the sysctl `kern.hakios.example_pwrkey`. Its test,
 [examples/example_pwrkey_test.c](examples/example_pwrkey_test.c), runs in `make check`. The example
@@ -42,7 +42,7 @@ is not built into the kernel.
 1. **Read the part's registers under Android first**, as root, and write down what Android's driver
    writes (its source is in the vendor's kernel). [porting.md](porting.md) says where each kind of
    value is read.
-2. **Add the feature**: a `HAKIOS_HAS_*` bit in `kernel/overlay/bsd/dev/hakios_board.h`, and in
+2. **Add the feature**: a `HAKIOS_HAS_*` bit in `drivers/board/hakios_board.h`, and in
    `tools/boards.py` what it needs (`FEATURE_BLOCKS`, `FEATURE_SECTIONS`) and its boot argument
    (`FEATURE_BOOTARGS`). Then list it in the board files that have the part.
    `tools/boards.py check` must pass.

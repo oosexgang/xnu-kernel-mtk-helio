@@ -24,7 +24,12 @@ fi
 # functions it calls, made of ordinary C) and, where it talks to hardware, a model of that hardware.
 # A test lists its scenarios when run without one; each runs in its own process.
 HERE=$PWD/workbench
-SRC=$PWD/kernel/overlay/bsd/dev
+# the kernel's files of ours at their paths in the tree (drivers/board is bsd/dev, include/board bsd/sys: kernel/lib.sh),
+# so that a driver's includes are found as the kernel's build finds them
+# shellcheck source=../kernel/lib.sh
+source kernel/lib.sh
+overlay_view "$out/tree"
+SRC=$out/tree/bsd/dev
 CC=${CC:-cc}
 DRIVER_FLAGS=(-std=gnu11 -Wall -Wextra -Wno-unknown-pragmas -Wno-unused-parameter -O2 -pthread
 	-I"$HERE" -I"$HERE/fakekernel" -I"$SRC" -I"$SRC/.." -I"$out" "$HERE/fakekernel/fakekernel.c")

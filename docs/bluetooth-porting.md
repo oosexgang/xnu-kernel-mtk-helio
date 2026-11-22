@@ -1,8 +1,8 @@
 # Bluetooth on another MediaTek phone
 
 What the first phone (an MT6768, with an MT6631 in CONNSYS) taught, as an order of work for another MediaTek phone. The code that is the same on every
-phone is `kernel/overlay/bsd/dev/mtk_bt_skel.c`; what is different is a table of operations (`struct mtkbt_platform`) you fill in. The proven
-sequence for one phone is the Bluetooth part of `kernel/overlay/bsd/dev/mtk_connsys.c`; how it was found, run by run, is the Bluetooth journal of the first phone's device package
+phone is `drivers/board/mtk_bt_skel.c`; what is different is a table of operations (`struct mtkbt_platform`) you fill in. The proven
+sequence for one phone is the Bluetooth part of `drivers/board/mtk_connsys.c`; how it was found, run by run, is the Bluetooth journal of the first phone's device package
 (in Russian).
 
 ## The path, and which part is yours

@@ -1,5 +1,5 @@
 // hakios-mali: the Mali-G52 (Bifrost, v7) driven from user space by job descriptors this library writes itself, through
-// the kernel's HakiosMali user client (kernel/overlay/iokit/Kernel/HakiosMali.cpp), with no Gallium and no Panfrost
+// the kernel's HakiosMali user client (drivers/iokit/HakiosMali.cpp), with no Gallium and no Panfrost
 // driver in between. The requests are Linux's panfrost DRM ones (include/uapi/drm/panfrost_drm.h), each a call of the
 // user client whose selector is the request's number and whose structure goes in and comes back; what Linux does with
 // mmap() on the device is the client memory of the type that is the buffer's handle.

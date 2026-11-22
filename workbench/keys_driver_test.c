@@ -1,5 +1,5 @@
 /*
- * The MT6358 phone's keys (kernel/overlay/bsd/dev/mtk_keys.c), run as a host program against a model
+ * The MT6358 phone's keys (drivers/board/mtk_keys.c), run as a host program against a model
  * of the keypad's register and of the PMIC behind its wrapper (workbench/pwrap_model.h): the volume keys
  * from the keypad, the power key from the PMIC's status, a bounce, and a PMIC that does not answer.
  * What the driver posts is caught where bsd/dev/hakios_input.c would queue it.

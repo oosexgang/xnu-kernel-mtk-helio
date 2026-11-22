@@ -1,5 +1,5 @@
 /*
- * the system's Wi-Fi requests (kernel/overlay/bsd/dev/hakios_apple80211.c), run as a host program: SIOCGA80211 and
+ * the system's Wi-Fi requests (drivers/board/hakios_apple80211.c), run as a host program: SIOCGA80211 and
  * SIOCSA80211 as wifid sends them, answered from the station layer -- here a model of it that answers as a
  * scenario says, and whose records come from a radio's driver built outside this tree, so may say more
  * than there is room for. What goes back into the caller's buffer never passes the length it gave, and

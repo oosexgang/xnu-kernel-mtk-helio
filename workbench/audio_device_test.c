@@ -1,5 +1,5 @@
 /*
- * /dev/hakios-audio (kernel/overlay/bsd/dev/hakios_audio.c), run as a host program: what the system plays goes to
+ * /dev/hakios-audio (drivers/board/hakios_audio.c), run as a host program: what the system plays goes to
  * the driver that plays it, a recording keeps it with its time and never runs past its memory, a line says
  * what was played once the writer stops, and the volume the system sets is kept for the speakers' driver.
  *

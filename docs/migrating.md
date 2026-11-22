@@ -112,7 +112,7 @@ with a kernel built after it.
 | make variable `<OLD>_OBJECTS` | `HAKIOS_OBJECTS` |
 | `userland/src/<old>metal.m`, `<old>_*.h`, `userland/tools/mesa/<old>-drm/`, `panfrost-<old>-perf.patch` | `hakiosmetal.m`, `hakios_*.h`, `userland/tools/mesa/hakios-drm/`, `panfrost-hakios-perf.patch` |
 
-Kernel files (`kernel/overlay/bsd/dev/`, headers in `bsd/sys/`):
+Kernel files (`drivers/board/`, headers in `bsd/sys/`):
 
 | Was `<old>_…` | Is |
 | --- | --- |

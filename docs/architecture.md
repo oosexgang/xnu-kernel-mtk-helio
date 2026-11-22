@@ -49,7 +49,7 @@ download mode (mtkclient); [porting.md](porting.md) says how to check it first.
 | Layer | Where | Changes when |
 | --- | --- | --- |
 | **Device data** | A device package per phone (`NAME/board.toml`, on the `devices` branch), `soc/SOC.toml` on the main branch | A new phone, or a new SoC. No code. |
-| **Drivers for parts** | `kernel/overlay/bsd/dev/`, `kernel/overlay/iokit/Kernel/`, the loader's part headers | A phone has a part nobody wrote a driver for yet (a touch controller, a camera sensor). |
+| **Drivers for parts** | `drivers/board/`, `drivers/iokit/`, the loader's part headers | A phone has a part nobody wrote a driver for yet (a touch controller, a camera sensor). |
 | **The port itself** | `kernel/patches/`, the rest of `kernel/overlay/`, `loader/`, `userland/`, `darwin/` | Apple's kernel or the system changes, or the port learns something new. Same for every device. |
 
 The aim is that a new phone on a known SoC is a change to the first row only, and a new SoC adds one

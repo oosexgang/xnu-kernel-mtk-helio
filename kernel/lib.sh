@@ -3,7 +3,10 @@
 #
 # The kernel is kept as three things:
 #   UPSTREAM          which Apple release it is made from
-#   overlay/          the files HakiOS adds, at their place in the XNU tree
+#   the files HakiOS adds: the directories of the repository's top that OVERLAY_PLACES names, each one
+#                     directory of the XNU tree, as Linux's tree keeps its architecture, drivers, crypto and file
+#                     systems (drivers/board is bsd/dev, fs/apfs is bsd/miscfs/apfs, ...); and overlay/, the files
+#                     that belong to none of them, at their place in the tree
 #   patches/          the changes to Apple's own files, one patch a topic (patches/series)
 # and an "assembled tree" is a checkout of the release with the overlay copied in and the patches
 # applied: what is compiled, and where the kernel is worked on. It is a git repository of its own:
@@ -12,6 +15,57 @@
 #   branch hakios     the working branch
 KERNEL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 OVERLAY=$KERNEL_DIR/overlay
+REPO_DIR=$(cd "$KERNEL_DIR/.." && pwd)
+# A directory of the repository and the directory of the tree its files are, each "REPOSITORY:TREE". Everything in
+# it is the tree's but its README.md, which is the repository's (tools/bootargs.py reads this list as well).
+OVERLAY_PLACES=(
+	"arch/arm64/kernel:osfmk/arm64"
+	"arch/arm64/include/pexpert:pexpert/pexpert/arm64"
+	"arch/arm64/configs/xnu:config"
+	"crypto:osfmk/minicrypto"
+	"fs/apfs:bsd/miscfs/apfs"
+	"fs/ramfs:bsd/miscfs/ramfs"
+	"security/amfi:libkern/amfi"
+	"drivers/board:bsd/dev"
+	"drivers/iokit:iokit/Kernel"
+	"include/board:bsd/sys"
+	"include/external:EXTERNAL_HEADERS"
+)
+
+# overlay_files: every file the repository adds to the tree, one a line, "REPOSITORY-PATH<tab>TREE-PATH" (the first
+# relative to the repository's top), kernel/overlay's first, then each place's
+overlay_files() {
+	local place dir prefix
+	(cd "$OVERLAY" && find . -type f | sed 's|^\./||' | LC_ALL=C sort) | awk '{ printf "kernel/overlay/%s\t%s\n", $0, $0 }'
+	for place in "${OVERLAY_PLACES[@]}"; do
+		dir=${place%%:*} prefix=${place#*:}
+		[ -d "$REPO_DIR/$dir" ] || continue
+		(cd "$REPO_DIR/$dir" && find . -type f ! -name README.md | sed 's|^\./||' | LC_ALL=C sort) |
+			awk -v d="$dir" -v p="$prefix" '{ printf "%s/%s\t%s/%s\n", d, $0, p, $0 }'
+	done
+}
+
+# overlay_view DIR: every file of the overlay at its path in the kernel's tree, as a link to the repository's file
+# (DIR/bsd/dev/mtk_keys.c, DIR/bsd/sys/hakios_input.h, ...): what the host's tests compile the kernel's files in,
+# with the same paths the kernel's build has
+overlay_view() {
+	local view=$1 file tree
+	mkdir -p "$view"
+	while IFS=$'\t' read -r file tree; do
+		mkdir -p "$view/$(dirname "$tree")"
+		ln -sfn "$REPO_DIR/$file" "$view/$tree"
+	done < <(overlay_files)
+}
+
+# place_of TREE-PATH: the place of OVERLAY_PLACES a file of the tree belongs to, as "REPOSITORY:TREE"; nothing for
+# a file that is kernel/overlay's
+place_of() {
+	local place
+	for place in "${OVERLAY_PLACES[@]}"; do
+		case "$1" in "${place#*:}"/*) echo "$place"; return 0 ;; esac
+	done
+	return 1
+}
 PATCHES=$KERNEL_DIR/patches
 SERIES=$PATCHES/series
 # shellcheck source=UPSTREAM

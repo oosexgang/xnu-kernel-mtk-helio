@@ -185,7 +185,7 @@ pmsg zone, 64 KB): a long run loses its beginning, so keep runs short and say le
 
 ## The kernel's side
 
-- A driver is a file `kernel/overlay/bsd/dev/` (`mtk_<name>.c` for a MediaTek block, `hakios_<name>.c` for what any phone has), a line in
+- A driver is a file `drivers/board/` (`mtk_<name>.c` for a MediaTek block, `hakios_<name>.c` for what any phone has), a line in
   `bsd/conf/files` (in `kernel/patches/0001-build.patch`), and a call to its start function in `hakios_drivers.c`. There is no clock, pin, regulator or bus framework: a driver maps its registers and writes them, and says in its head comment
   which Linux source each layout was read from. GPL sources are read and named, never copied.
 - **Every driver is off without its boot-arg** and starts only on a board that lists its feature ([features.md](features.md)). The first

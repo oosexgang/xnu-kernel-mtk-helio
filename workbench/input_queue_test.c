@@ -1,5 +1,5 @@
 /*
- * The queue between the touch and key drivers and the system (kernel/overlay/bsd/dev/hakios_input.c, /dev/hakios-touch),
+ * The queue between the touch and key drivers and the system (drivers/board/hakios_input.c, /dev/hakios-touch),
  * run as a host program: what a driver posts reaches a reader whole and in order, a queue nobody reads
  * keeps the newest, and the way out of a run with five fingers held is a driver's fingers' alone -- a
  * program that writes samples to the device (inject.c does) cannot end the run with them.

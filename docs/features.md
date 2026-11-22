@@ -6,7 +6,7 @@ with that chip) and, for some, a section of the board file. `tools/boards.py che
 that lists a feature without them, and `tools/boards.py status NAME` says the same for one phone.
 
 This page is written by `tools/boards.py features --write` (`make docs`) from the tables the checker
-uses and the comments of `kernel/overlay/bsd/dev/hakios_board.h`; a test keeps the three the same.
+uses and the comments of `drivers/board/hakios_board.h`; a test keeps the three the same.
 What each key means is in `devices/_template/`; the order to turn features on in is
 [porting.md](porting.md)'s.
 

@@ -1,5 +1,6 @@
 #!/bin/bash
-# Make the kernel's source tree: Apple's release (kernel/UPSTREAM) with kernel/overlay copied in and
+# Make the kernel's source tree: Apple's release (kernel/UPSTREAM) with the files HakiOS adds copied in
+# (the places of kernel/lib.sh's OVERLAY_PLACES -- drivers/board, fs/apfs, ... -- and kernel/overlay) and
 # kernel/patches applied.
 #
 #   kernel/assemble.sh DIR              a new tree in DIR (which must not exist yet)
@@ -40,7 +41,13 @@ assembled_tree() {
 	export GIT_INDEX_FILE=$D/.git/hakios-assemble-index
 	rm -f "$GIT_INDEX_FILE"
 	tree_git "$D" read-tree upstream
-	(cd "$OVERLAY" && git --git-dir="$D/.git" --work-tree=. -c core.autocrlf=false add -f --no-all .)
+	# every file HakiOS adds, at its path in the tree: its contents as they are, its mode as git would take it
+	local file tree mode
+	while IFS=$'\t' read -r file tree; do
+		mode=100644
+		[ -x "$REPO_DIR/$file" ] && mode=100755
+		printf '%s %s\t%s\n' "$mode" "$(git --git-dir="$D/.git" hash-object -w --no-filters "$REPO_DIR/$file")" "$tree"
+	done < <(overlay_files) | git --git-dir="$D/.git" update-index --add --index-info
 	for patch in $(series_patches); do
 		[ -f "$PATCHES/$patch" ] || continue            # (a topic nothing has changed in yet)
 		tree_git "$D" apply --cached --whitespace=nowarn "$PATCHES/$patch" ||
@@ -109,7 +116,7 @@ with assemble.sh --update --discard $D"
 	fi
 fi
 commit=$(tree_git "$D" commit-tree "$tree" -p upstream \
-	-m "$UPSTREAM_TAG + HakiOS (kernel/overlay, kernel/patches)")
+	-m "$UPSTREAM_TAG + HakiOS (the overlay's places, kernel/patches)")
 changed=$(git -C "$D" diff --name-only "$(git -C "$D" rev-parse -q --verify 'assembled^{commit}' || echo upstream)" "$commit" | wc -l)
 if [ $update = 1 ] && [ "$work" = "$tree" ]; then
 	# the files are right already: only the tree's own history is brought in line, nothing is touched

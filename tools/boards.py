@@ -40,7 +40,7 @@ from devicetree import from_dtb  # noqa: E402  (what a phone's device tree says:
 ROOT = Path(__file__).resolve().parents[1]
 DEVICES = ROOT / 'devices'
 SOCS = ROOT / 'soc'
-BOARD_HEADER = ROOT / 'kernel/overlay/bsd/dev/hakios_board.h'
+BOARD_HEADER = ROOT / 'drivers/board/hakios_board.h'
 # What `gen` writes, into one directory (--out; build/boards unless told otherwise). None of it is kept
 # in the repository: it is made from whichever device packages are there when something is built.
 OUT = ROOT / 'build/boards'
@@ -188,7 +188,7 @@ def features_text():
            'with that chip) and, for some, a section of the board file. `tools/boards.py check` refuses a board',
            'that lists a feature without them, and `tools/boards.py status NAME` says the same for one phone.', '',
            'This page is written by `tools/boards.py features --write` (`make docs`) from the tables the checker',
-           'uses and the comments of `kernel/overlay/bsd/dev/hakios_board.h`; a test keeps the three the same.',
+           'uses and the comments of `drivers/board/hakios_board.h`; a test keeps the three the same.',
            'What each key means is in `devices/_template/`; the order to turn features on in is',
            '[porting.md](porting.md)\'s.', '',
            '| Feature | What it is | SoC file `[blocks]` | Board file | Started with |', '|---|---|---|---|---|']

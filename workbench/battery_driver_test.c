@@ -1,5 +1,5 @@
 /*
- * The MT6358 battery driver (kernel/overlay/bsd/dev/mtk_battery.c), run as a host program against a
+ * The MT6358 battery driver (drivers/board/mtk_battery.c), run as a host program against a
  * model of the PMIC wrapper and the PMIC (workbench/pwrap_model.h): the percentage Android left and the
  * gauge's counter, the voltage alone, the two too far apart, the charger, and a PMIC that does not
  * answer. What the driver hands on is caught where bsd/dev/hakios_battery.c would take it.

@@ -49,7 +49,7 @@ tools/boards.py new NAME --soc SOC      # start a new board from the template
 
 - `hakios_board_table.h`, the kernel's. At boot the kernel looks up the name the loader passed in
   `/chosen/darwin-board`. Drivers ask `hakios_board()` for addresses and
-  `hakios_board_wants(HAKIOS_HAS_...)` before they start (`kernel/overlay/bsd/dev/hakios_board.h`
+  `hakios_board_wants(HAKIOS_HAS_...)` before they start (`drivers/board/hakios_board.h`
   lists the features). A board that is not in the table gets no feature.
 - `NAME/hakios_platform.h`, the loader's, for each board with a `[loader]` section: every value as a
   constant. The loader is built for one board.
@@ -64,7 +64,7 @@ The tests make their own, with a stand-in phone (`workbench/devices`, `workbench
 
 When a driver needs something of a device that no section has yet, it becomes a key, not a constant:
 
-1. **The kernel's struct**: a field in `struct hakios_board` (`kernel/overlay/bsd/dev/hakios_board.h`).
+1. **The kernel's struct**: a field in `struct hakios_board` (`drivers/board/hakios_board.h`).
 2. **The schema**: the key and its kind in `SOC_SCHEMA` or `BOARD_SCHEMA` of `tools/boards.py`; if a
    feature cannot work without it, in `FEATURE_BLOCKS` or `FEATURE_SECTIONS`.
 3. **The table**: a board's section goes into the kernel's table if it is in `TABLE_SECTIONS`, and

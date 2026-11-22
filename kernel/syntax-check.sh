@@ -16,7 +16,7 @@
 #                   lines listed (a use of a value never set, a null pointer followed, a division by zero ...).
 #                   It reports and does not fail: it does not know that uiomove() fills what it is given,
 #                   for one, and says so of every read. What it says is for a person to judge.
-#   FILE...         files of kernel/overlay, as paths in the tree (bsd/dev/hakios_thermal.c); all of them
+#   FILE...         files of ours, as paths in the tree (bsd/dev/mtk_keys.c); all of them
 #                   if none is given
 #
 # What it cannot do: the files of kernel/syntax-check.skip need what only the real build has (headers
@@ -103,18 +103,18 @@ if [ $# -gt 0 ]; then
 	files=("$@")
 else
 	files=()
-	while IFS= read -r f; do files+=("$f"); done < <(cd "$OVERLAY" && find . \( -name '*.c' -o -name '*.cpp' \) | sed 's|^\./||' | sort)
+	while IFS= read -r f; do files+=("$f"); done < <(overlay_files | cut -f2 | grep -E '\.(c|cpp)$' | sort)
 fi
 
-# the files of the overlay, as paths in the tree followed by a colon: what --analyze keeps of what it says
-(cd "$OVERLAY" && find . -type f | sed 's|^\./||; s|$|:|') > "$work/ours"
+# the files of ours, as paths in the tree followed by a colon: what --analyze keeps of what it says
+overlay_files | cut -f2 | sed 's|$|:|' > "$work/ours"
 
 # every file at once, as many as there are processors; the answers are read in order afterwards
 mkdir "$work/out"
 jobs=$(getconf _NPROCESSORS_ONLN 2> /dev/null || echo 2)
 running=0
 for i in "${!files[@]}"; do
-	[ -f "$X/${files[$i]}" ] || die "${files[$i]} is not a file of the tree (a path as in kernel/overlay)"
+	[ -f "$X/${files[$i]}" ] || die "${files[$i]} is not a file of the tree (a path in the tree: bsd/dev/mtk_keys.c)"
 	(compile "${files[$i]}" > "$work/out/$i" || echo failed >> "$work/out/$i") &
 	running=$((running + 1))
 	if [ "$running" -ge "$jobs" ]; then

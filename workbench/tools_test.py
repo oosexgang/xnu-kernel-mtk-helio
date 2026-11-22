@@ -171,7 +171,7 @@ class FeaturesPage(unittest.TestCase):
 
     def test_every_feature_of_the_kernel_is_on_it(self):
         page = (ROOT / 'docs/features.md').read_text()
-        header = (ROOT / 'kernel/overlay/bsd/dev/hakios_board.h').read_text()
+        header = (ROOT / 'drivers/board/hakios_board.h').read_text()
         import re
         for name in re.findall(r'HAKIOS_HAS_([A-Z0-9_]+)\s*=\s*1u', header):
             self.assertIn('`' + name.lower().replace('_', '-') + '`', page)

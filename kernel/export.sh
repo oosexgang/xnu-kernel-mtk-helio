@@ -1,12 +1,13 @@
 #!/bin/bash
 # Take the kernel's sources out of an assembled tree, back into the repository: the files the tree has
-# and Apple's release has not become kernel/overlay, the changes to Apple's files become the patches
-# of kernel/patches/series. Run it after working in the tree; `git diff` in the repository then shows
+# and Apple's release has not go back to their places (kernel/lib.sh's OVERLAY_PLACES: a new file of
+# bsd/dev to drivers/board, ...; one of no place to kernel/overlay), the changes to Apple's files become
+# the patches of kernel/patches/series. Run it after working in the tree; `git diff` in the repository then shows
 # what the work was.
 #
 #   kernel/export.sh DIR            from the tree in DIR (made by kernel/assemble.sh)
 #
-#   --to OUT        write OUT/overlay and OUT/patches instead of the repository's (kernel/verify.sh)
+#   --to OUT        write OUT/overlay, OUT/places/DIR and OUT/patches instead of the repository's (kernel/verify.sh)
 #
 # What the build leaves in the tree (BUILD/, the firmware stub) is not sources and is left out. A
 # changed file of Apple's that no line of patches/series claims stops the export: give it a topic there.
@@ -49,8 +50,13 @@ unclaimed=
 while IFS=$'\t' read -r status file; do
 	case "$status" in
 	A)
-		mkdir -p "$work/overlay/$(dirname "$file")"
-		cp -p "$D/$file" "$work/overlay/$file"
+		if place=$(place_of "$file"); then
+			to=$work/places/${place%%:*}/${file#"${place#*:}"/}
+		else
+			to=$work/overlay/$file
+		fi
+		mkdir -p "$(dirname "$to")"
+		cp -p "$D/$file" "$to"
 		;;
 	*)
 		if patch=$(patch_for "$file"); then
@@ -76,9 +82,24 @@ done
 exported=$(tree_git "$D" write-tree)
 unset GIT_INDEX_FILE
 
-# In place of what was there; the series is the repository's and stays.
+# In place of what was there; the series is the repository's and stays, and so does each place's README.md.
 rm -rf "$out/overlay"
 mv "$work/overlay" "$out/overlay"
+for place in "${OVERLAY_PLACES[@]}"; do
+	dir=${place%%:*}
+	if [ "$out" = "$KERNEL_DIR" ]; then
+		to=$REPO_DIR/$dir
+		[ -d "$to" ] && find "$to" -type f ! -name README.md -delete
+	else
+		to=$out/places/$dir
+		rm -rf "$to"
+	fi
+	if [ -d "$work/places/$dir" ]; then
+		mkdir -p "$to"
+		cp -pR "$work/places/$dir/." "$to/"
+	fi
+	[ -d "$to" ] && find "$to" -mindepth 1 -type d -empty -delete
+done
 mkdir -p "$out/patches"
 rm -f "$out"/patches/*.patch
 for patch in "$work"/patches/*.patch; do
@@ -95,4 +116,4 @@ if [ "$out" = "$KERNEL_DIR" ]; then
 else
 	cp "$SERIES" "$out/patches/series"
 fi
-log "$(find "$out/overlay" -type f | wc -l) files in overlay, $(find "$out/patches" -name '*.patch' | wc -l) patches in $out"
+log "$( (find "$out/overlay" -type f; [ ! -d "$work/places" ] || find "$work/places" -type f) | wc -l) files added to the tree, $(find "$out/patches" -name '*.patch' | wc -l) patches in $out"

@@ -2,7 +2,7 @@
 
 The beginning of a Metal back end for the X6826B's Mali-G52 (Bifrost, architecture v7) that writes the GPU's job
 descriptors itself: no Gallium, no Panfrost driver, no Mesa at run time. It talks to the kernel's own GPU service,
-HakiosMali (`kernel/overlay/iokit/Kernel/HakiosMali.cpp`, brought up by `bsd/dev/mtk_mali.c` with boot-arg `mali=1`),
+HakiosMali (`drivers/iokit/HakiosMali.cpp`, brought up by `bsd/dev/mtk_mali.c` with boot-arg `mali=1`),
 in the requests of Linux's panfrost DRM driver: buffers made, given a GPU address and mapped, job chains submitted to
 the fragment slot or the other, waits by the job's number. It follows the method of `metal/` in xnu-kernel-qcom, which
 drives the Adreno the same way: every descriptor checked on this machine against a fake GPU, every refusal a sentence

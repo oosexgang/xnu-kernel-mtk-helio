@@ -1,6 +1,6 @@
 # Drivers
 
-Every driver of `kernel/overlay/bsd/dev/` and `iokit/Kernel/`: what it is for, what starts it, and
+Every driver of `drivers/board/` and `iokit/Kernel/`: what it is for, what starts it, and
 how tied to one phone it still is. A driver starts only with its boot argument, and a MediaTek driver
 only on a board whose file lists its feature.
 

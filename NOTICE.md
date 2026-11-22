@@ -4,7 +4,7 @@
 
 - `kernel/patches/` and the files of `kernel/overlay/` derived from Apple's XNU are under the
   **Apple Public Source License 2.0**, as XNU is (`LICENSES/APSL-2.0.txt`).
-- `kernel/overlay/bsd/miscfs/apfs/libdeflate/` is libdeflate, under the MIT licence (its `COPYING`).
+- `fs/apfs/libdeflate/` is libdeflate, under the MIT licence (its `COPYING`).
 - Everything else is under the **MIT licence** (`LICENSES/MIT.txt`), unless a file's header says
   otherwise.
 - `darwin/` comes from [xnu-kernel-qcom](https://github.com/oosexgang/xnu-kernel-qcom) (MIT), with the
