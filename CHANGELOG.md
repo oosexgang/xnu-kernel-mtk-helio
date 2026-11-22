@@ -18,6 +18,11 @@ this repository was made from on 2026-11-11. Where a path went: [docs/migrating.
   but a Bifrost v7), so G71, G72 and G57 phones draw; `rwn_refuse=1` shows the fallback on a G52. The native
   library names its GPU from Panfrost's table.
 - `Documentation/metal-porting.md`: what a new phone gives for Metal, and how each step is seen to work.
+- The ios27 branch merged: Mesa's panfrost path and the Metal device's work there (a draw waiting only for its own
+  pipeline, the builds a draw waits for first, backboardd's memory from 2.3 GB to 0.47 on that path, a sampler in
+  every slot), with the native library's kept as it was; 516 recipes, 563 records in the stage cache. On the phone:
+  the native path every stage from the cache, 0 compiled, 0 failed jobs (run 674); with `rwn_refuse=1` the system up
+  on Mesa's panfrost, 0 failed jobs (run 673).
 - The kernel's GPU driver, framebuffer and RAM file system as the runs have them (the ios27 branch's), with
   `tools/log/fbframes.py` and `tools/log/mali-dump.py`.
 

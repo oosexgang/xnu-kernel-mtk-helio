@@ -29,7 +29,9 @@ happens next depends on its architecture:
 "Not run yet" means: compiled, and the same code as on the G52, but no phone with that GPU has been run. The first
 run of one is a [phone_first](../arch/arm64/configs/phone_first_defconfig) of its own (step 3 below).
 
-The fallback to Mesa is said in the log, as a kept line: `rwm backboardd: the native Mali library does not serve
+The fallback was run on the first phone with `rwn_refuse=1` (run 673): the system up on Mesa's panfrost, the job
+list to its end, 22618 GPU job chains and none failed; slower than the native library. It is said in the log, as a
+kept line: `rwm backboardd: the native Mali library does not serve
 this GPU (...): Mesa's panfrost in its place`. To see it on a phone whose GPU the native library does serve, add
 `rwn_refuse=1` to the run's arguments.
 
