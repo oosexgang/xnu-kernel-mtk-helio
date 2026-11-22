@@ -4,7 +4,7 @@
  * that board's or its chip's, from hakios_platform.h (tools/boards.py gen writes it from the
  * board's package and arch/arm64/boot/dts/mediatek/).
  *
- * The boot image's kernel (tools/chainboot.py) is this program, then Android's own kernel Image
+ * The boot image's kernel (arch/arm64/boot/chainboot.py) is this program, then Android's own kernel Image
  * at CHAIN_OFFSET, then the XNU payload ("XNUP": kernel, ramdisk). Each boot, by the marker:
  *
  *   none     RUN: load XNU, give it LK's framebuffer, arm the watchdog, start it.

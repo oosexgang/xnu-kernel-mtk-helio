@@ -1,8 +1,9 @@
 /*
  * libhakios-brightness.dylib: the system's brightness slider and its automatic brightness switch, to the kernel's
- * backlight (hw.backlight.*: drivers/board/hakios_backlight.c).
+ * backlight (hw.backlight.*: a driver this tree does not have yet for the MT6768; where the sysctls are missing,
+ * the writes fail and CoreBrightness keeps its own value).
  *
- * On an phone the slider of Control Center and of Settings, and the switch of Auto-Brightness, are
+ * On a reference phone the slider of Control Center and of Settings, and the switch of Auto-Brightness, are
  * properties of CoreBrightness: a process sets "DisplayBrightness" (0.0 to 1.0) or "DisplayBrightnessAuto"
  * on a BrightnessSystemClient, which hands it to the BrightnessSystem in backboardd, which sets the panel.
  * Here CoreBrightness has no panel it knows (there is no Apple display driver), so the value goes nowhere.

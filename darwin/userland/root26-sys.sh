@@ -253,7 +253,7 @@ PY
 fi
 # The persona manifest. usermanagerd reads /private/var/keybags/persona.kb as it starts and aborts without
 # it ("Daemon failed to load persona manifest."), and every daemon that asks it for the user's personas
-# waits (runningboardd, so backboardd and SpringBoard). On an phone the file is left by the restore; this
+# waits (runningboardd, so backboardd and SpringBoard). On a reference phone the file is left by the restore; this
 # /private/var is new every boot. An empty manifest of the version the 26 release writes (1: a dictionary with
 # UsePersonaManifestVersion, UsePersonaGenerationID and UserPersonaDictionary) has usermanagerd take its
 # own way for a user without personas: "creating new set of default personas", in the kernel as well.

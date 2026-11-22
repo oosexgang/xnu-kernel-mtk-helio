@@ -1,6 +1,6 @@
 /*
  * fbdiag: does code that LK boots run, where is the framebuffer the panel shows, and how is
- * OVL0 set up? Packed in front of Android's kernel (tools/chainboot.py). Read-only on the display
+ * OVL0 set up? Packed in front of Android's kernel (arch/arm64/boot/chainboot.py). Read-only on the display
  * hardware. Results go on the screen and into the ramoops console; after FBDIAG_SECONDS it
  * starts Android's kernel, and the report is /sys/fs/pstore/console-ramoops-0.
  */
@@ -11,7 +11,7 @@
 
 /*
  * The boot image's kernel is this program followed, at CHAIN_OFFSET, by Android's own kernel
- * Image (tools/chainboot.py). When done, that kernel is moved to where LK would have put it
+ * Image (arch/arm64/boot/chainboot.py). When done, that kernel is moved to where LK would have put it
  * and started, so Android boots as usual and its ramoops keeps this report.
  */
 #define CHAIN_OFFSET  0x40000u

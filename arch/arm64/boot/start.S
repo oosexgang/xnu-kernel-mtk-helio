@@ -17,7 +17,7 @@
 .section .text.boot
 
 _start:
-    /* Linux ARM64 Image header (64 bytes); tools/chainboot.py fills image_size, res2, res3 */
+    /* Linux ARM64 Image header (64 bytes); arch/arm64/boot/chainboot.py fills image_size, res2, res3 */
     b       primary_entry       /* code0 */
     .word   0                   /* code1 */
     .quad   0x80000             /* text_offset */

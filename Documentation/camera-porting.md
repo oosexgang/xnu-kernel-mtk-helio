@@ -2,7 +2,7 @@
 
 What the first phone (an MT6768, with a Samsung S5K JN1) taught, as an order of work for another MediaTek phone. The code that is the same on every
 phone is `drivers/board/mtk_camera_skel.c`; what is different is a table of operations (`struct mtkcam_platform`) you fill in. The proven
-sequence for one phone is `kernel/bsd/dev/mtk_camera.c` (kernel) and `arch/arm64/boot/mtkcam.h` (the loader's probe) in the device repository
+sequence for one phone is `drivers/board/mtk_camera.c` (kernel) and `arch/arm64/boot/mtkcam.h` (the loader's probe) in the device repository
 [hakios-mt6768](https://github.com/oosexgang/hakios-mt6768); how it was found, run by run, is the camera journal of the first phone's device package (in Russian).
 
 ## What the skeleton does, and what it refuses to do
