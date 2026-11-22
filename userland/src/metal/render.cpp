@@ -263,6 +263,50 @@ rwm_render_color(struct rwm_render_state *s, unsigned index, unsigned level, voi
 }
 
 /*
+ * A store action given after the pass began (-setColorStoreAction:atIndex:, Metal's deferred store action, for a
+ * descriptor that said MTLStoreActionUnknown). The library takes a pass's store actions from its last draw, which is
+ * so already recorded: that draw's are changed too. Boot-arg rwm_keepall=1: everything kept, as rwm_render_color.
+ * (The window server does not use it -- run 679 said no such action; its attachments that are not kept are memoryless
+ * textures, which reach the library as discard_mask.)
+ */
+extern "C" void
+rwm_render_store(struct rwm_render_state *s, struct rwm_work *last, unsigned index, unsigned long store)
+{
+	static unsigned said;
+
+	if (index >= 8) {
+		return;
+	}
+	if (said < 6 && store != 1) {
+		char line[160];
+
+		said++;
+		snprintf(line, sizeof(line), "!!rwm store action %lu for colour attachment %u given after the pass began%s",
+			 store, index, last != nullptr ? " (its last draw changed)" : " (no draw yet)");
+		sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+	}
+	if (store == 2 || store == 3) {
+		return;                         /* (a resolve: said where the pass began; the attachment stored) */
+	}
+	const bool discard = (store == 0 || rwm_texture_memoryless(s->color[index].core)) &&
+			     strstr(rwm_boot_args(), "rwm_keepall=1") == nullptr;
+	s->color_store[index] = (unsigned char)(store <= 255 ? store : 1);
+	if (discard) {
+		s->discard_mask |= 1u << index;
+	} else {
+		s->discard_mask &= ~(1u << index);
+	}
+	if (last != nullptr && last->kind == RWM_WORK_DRAW && index < last->draw.color_count) {
+		last->draw.color_store[index] = s->color_store[index];
+		if (discard) {
+			last->draw.discard_mask |= 1u << index;
+		} else {
+			last->draw.discard_mask &= ~(1u << index);
+		}
+	}
+}
+
+/*
  * The depth/stencil attachment, which is two descriptors over one texture: for Depth32Float_Stencil8 an application
  * sets the same texture on both, for a depth-only format only the first. Whichever carries a texture is the attachment,
  * and both carrying DIFFERENT ones is refused out loud -- a Gallium framebuffer has one zsbuf, and quietly taking the

@@ -4376,6 +4376,8 @@ rw_core_of(id texture)
 @implementation HakiosMetalRenderEncoder {
 	HakiosMetalCommandBuffer *_commandBuffer;   /* not retained: it owns the encoder */
 	struct rwm_render_state _state;              /* the pass and what is bound: src/metal/render.cpp */
+	HakiosMetalWork *_lastDraw;                  /* not retained (the command buffer keeps it): for a store action
+						      * given after the draws (-setColorStoreAction:atIndex:) */
 }
 
 - (instancetype)initWithHakiosCommandBuffer:(HakiosMetalCommandBuffer *)commandBuffer
@@ -4585,6 +4587,7 @@ rw_core_of(id texture)
 
 	if (rwm_render_draw(&_state, &call, &work->core)) {
 		[_commandBuffer recordWork:work];
+		_lastDraw = work;
 	}
 	[work release];
 }
@@ -4862,10 +4865,11 @@ rw_core_of(id texture)
 }
 
 /*
- * We always store what was drawn, so these record nothing; saying it here is cheaper than
- * leaving the next reader to wonder whether a discarded attachment would be honoured.
+ * A colour attachment's store action given once the pass's draws are encoded (its descriptor said
+ * MTLStoreActionUnknown): recorded for the pass and its last draw (src/metal/render.cpp,
+ * rwm_render_store). A resolve is not done, and said.
  *
- * That is now also true of the depth attachment, and there it is more than tidiness: the
+ * Depth and stencil are always stored, and there it is more than tidiness: the
  * only thing MTLStoreActionDontCare permits that storing does not is leaving the contents
  * undefined, so keeping them is a superset of every store action Metal has. A pass whose
  * depth the next pass reads back therefore works whichever action it asked for -- and the
@@ -4877,6 +4881,7 @@ rw_core_of(id texture)
 		RW_ONCE("NOT DONE: -setColorStoreAction:%lu atIndex:%lu, a resolve\n", (unsigned long)action,
 		         (unsigned long)index);
 	}
+	rwm_render_store(&_state, _lastDraw != nil ? &_lastDraw->core : NULL, (unsigned)index, (unsigned long)action);
 }
 - (void)setDepthStoreAction:(NSUInteger)action                 { (void)action; }
 - (void)setStencilStoreAction:(NSUInteger)action               { (void)action; }

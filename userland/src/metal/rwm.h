@@ -428,6 +428,9 @@ void rwm_render_begin(struct rwm_render_state *state, struct rwa_device *device)
 void rwm_render_color(struct rwm_render_state *state, unsigned index, unsigned level, void *object, struct rwm_texture *core,
 		      bool clears, unsigned long load_action, const double color[4], unsigned long store_action,
 		      bool resolve_texture);
+/* -setColorStoreAction:atIndex: (Metal's deferred store action, given once the pass's draws are encoded): the
+ * attachment's store action from now on, and of the pass's last draw recorded so far (`last`, or NULL) */
+void rwm_render_store(struct rwm_render_state *state, struct rwm_work *last, unsigned index, unsigned long store_action);
 void rwm_render_depth(struct rwm_render_state *state, void *depth, struct rwm_texture *depth_core, bool clears_depth,
 		      double clear_depth, void *stencil, struct rwm_texture *stencil_core, bool clears_stencil,
 		      unsigned clear_stencil);
