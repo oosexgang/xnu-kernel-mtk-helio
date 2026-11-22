@@ -61,6 +61,11 @@ struct mtk_mfg {
 	/* a chip whose GPU does not come up by the three steps: the whole of it here instead, true when the Mali's
 	 * registers answer (the tables above are then not used) */
 	bool (*power_on)(vm_offset_t topckgen, vm_offset_t spm, vm_offset_t infracfg, vm_offset_t mfgcfg);
+	/* the Mali's job interrupt, the GIC's number of it (an SPI's plus 32; 0: none known, the jobs are polled), and
+	 * MediaTek's polarity inverter in front of the GIC (mediatek,mt6577-sysirq: a bit an SPI, set for one that is
+	 * active low, as the Mali's are; 0: none) */
+	uint32_t job_irq;
+	uint64_t intpol;
 };
 
 /*
@@ -85,6 +90,9 @@ static const struct mtk_mfg mtk_mfg_chips[] = {
 		.domains = mt6768_mfg_domains,
 		.domain_count = sizeof(mt6768_mfg_domains) / sizeof(mt6768_mfg_domains[0]),
 		.cg_clr = 0x008, .cg_clr_bits = 1u,                     /* MFG_CG_CLR: BG3D runs */
+		/* the Android tree's mali node: interrupts GPU, MMU, JOB = SPI 274, 275, 276, level low; its
+		 * intpol-controller at 0x0c53a650 */
+		.job_irq = 32 + 276, .intpol = 0x0c53a650,
 	},
 };
 

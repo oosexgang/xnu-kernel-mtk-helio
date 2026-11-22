@@ -690,9 +690,13 @@ static LCK_MTX_DECLARE(mali_job_lock, &mali_lock_group);
 /*
  * Until a job is done, without keeping a core busy: a moment of polling for the short ones, then
  * asleep 200 us at a time. The wait used to spin (delay(10) in a loop) for as long as the GPU
- * worked -- a whole core of the four lost to every frame's rendering.
+ * worked -- a whole core of the four lost to every frame's rendering. The GPU then stays idle until
+ * the nap is over, some 100 us a job on average. For measuring what that costs a frame of 26 passes:
+ *   mali_spin=US: the polling first, so long (200 us by default)
+ *   mali_nap=US: then each nap so long (200 us by default)
  */
 static int mali_wait_event;
+static uint32_t mali_spin_us = 200, mali_nap_us = 200;      /* (read at the driver's start) */
 static LCK_MTX_DECLARE(mali_wait_lock, &mali_lock_group);
 
 /* `want` 0: any of the bits of `mask` (a job that is done or failed -- a failure used to be seen only when the
@@ -703,12 +707,40 @@ job_bits_are(uint32_t value, uint32_t mask, uint32_t want)
 	return want != 0 ? (value & mask) == want : (value & mask) != 0;
 }
 
+/*
+ * Boot-arg mali_irq=1: the job interrupt wakes the wait instead of the naps (which stay, 2 ms each, for an interrupt
+ * that does not come). The handler quiets the level (JOB_INT_MASK 0) and wakes the waiter; mtk_mali_submit unmasks
+ * the slot's bits for the next job. An interrupt with nothing behind it a thousand times over -- a line seen the
+ * wrong way up -- is masked at the GIC and the jobs polled again, and said.
+ */
+extern kern_return_t gic_v3_spi_attach(uint32_t intid, bool edge, void (*handler)(void *context, uint32_t intid), void *context);
+extern void gic_v3_spi_mask(uint32_t intid);
+extern wait_result_t assert_wait_deadline(event_t event, wait_interrupt_t interruptible, uint64_t deadline);
+extern kern_return_t clear_wait(thread_t thread, wait_result_t result);   /* (thread_block: bind_cpu's) */
+#define JOB_INT_STAT        0x100c
+static volatile uint32_t mali_irq_on;
+static uint64_t mali_irqs, mali_irq_empty;
+
+static void
+mali_job_irq(__unused void *context, uint32_t intid)
+{
+	uint32_t stat = rd(mali, JOB_INT_STAT);
+
+	wr(mali, JOB_INT_MASK, 0);
+	mali_irqs++;
+	if (stat == 0 && ++mali_irq_empty > 1000) {
+		gic_v3_spi_mask(intid);
+		mali_irq_on = 0;
+	}
+	wakeup((caddr_t)&mali_wait_event);
+}
+
 static bool
 wait_job(uint32_t at, uint32_t mask, uint32_t want, uint32_t ms)
 {
 	uint64_t deadline;
 
-	for (int i = 0; i < 20; i++) {
+	for (uint32_t i = 0; i < mali_spin_us / 10; i++) {
 		if (job_bits_are(rd(mali, at), mask, want)) {
 			return true;
 		}
@@ -721,7 +753,18 @@ wait_job(uint32_t at, uint32_t mask, uint32_t want, uint32_t ms)
 		}
 		uint64_t nap;
 
-		clock_interval_to_deadline(200, NSEC_PER_USEC, &nap);
+		if (mali_irq_on) {
+			/* on the wait queue before the last look: an interrupt after it wakes this */
+			clock_interval_to_deadline(2000, NSEC_PER_USEC, &nap);
+			(void)assert_wait_deadline((event_t)&mali_wait_event, THREAD_UNINT, nap);
+			if (job_bits_are(rd(mali, at), mask, want)) {
+				clear_wait(current_thread(), THREAD_AWAKENED);
+				return true;
+			}
+			(void)thread_block(NULL);
+			continue;
+		}
+		clock_interval_to_deadline(mali_nap_us >= 10 && mali_nap_us <= 10000 ? mali_nap_us : 200, NSEC_PER_USEC, &nap);
 		lck_mtx_lock(&mali_wait_lock);
 		(void)lck_mtx_sleep_deadline(&mali_wait_lock, LCK_SLEEP_DEFAULT, (event_t)&mali_wait_event, THREAD_UNINT, nap);
 		lck_mtx_unlock(&mali_wait_lock);
@@ -1447,6 +1490,9 @@ mtk_mali_submit(uint64_t chain, bool fragment)
 	wr(mali, js + JS_AFFINITY_NEXT_LO, shader_mask);
 	wr(mali, js + JS_AFFINITY_NEXT_HI, 0);
 	wr(mali, js + JS_CONFIG_NEXT, JS_CONFIG);
+	if (mali_irq_on) {
+		wr(mali, JOB_INT_MASK, (1u << slot) | (1u << (slot + 16)));
+	}
 	wr(mali, js + JS_COMMAND_NEXT, 1);
 	lck_mtx_unlock(&mali_lock);
 	finished = wait_job(JOB_INT_RAWSTAT, (1u << slot) | (1u << (slot + 16)), 0, 1000);
@@ -1588,12 +1634,38 @@ mali_worker(__unused void *parameter, __unused wait_result_t result)
 		{
 			/* how busy the GPU is: every five seconds, its share of the time and by which slot */
 			static uint64_t busy[2], since, jobs[2];
+			/* ... and every minute as a kept line: each kind's time a job, and the time from one job's end to
+			 * the next one's start when the next was already queued (the GPU idle with work to do) */
+			static uint64_t m_busy[2], m_jobs[2], m_gap, m_gaps, m_since, last_end;
 			uint64_t began = mach_absolute_time(), now, ns;
 
+			if (last_end != 0 && queued <= last_end) {
+				absolutetime_to_nanoseconds(began - last_end, &ns);
+				m_gap += ns;
+				m_gaps++;
+			}
 			if (mtk_mali_submit(chain, fragment) != 0) {
 				gMaliFailed++;
 			}
 			now = mach_absolute_time();
+			last_end = now;
+			absolutetime_to_nanoseconds(now - began, &ns);
+			m_busy[fragment] += ns;
+			m_jobs[fragment]++;
+			if (m_since == 0) {
+				m_since = now;
+			} else {
+				absolutetime_to_nanoseconds(now - m_since, &ns);
+				if (ns >= 60ull * NSEC_PER_SEC) {
+					hakios_host_keep_add("mali: a minute: fragment %llu jobs, %llu us each; vertex and tiler %llu jobs, "
+					    "%llu us each; %llu times the next job was waiting, %llu us from one to the next (mali_spin=%u "
+					    "mali_nap=%u; the job interrupt %s, %llu so far)", m_jobs[1], m_jobs[1] ? m_busy[1] / 1000 / m_jobs[1] : 0,
+					    m_jobs[0], m_jobs[0] ? m_busy[0] / 1000 / m_jobs[0] : 0, m_gaps, m_gaps ? m_gap / 1000 / m_gaps : 0,
+					    mali_spin_us, mali_nap_us, mali_irq_on ? "on" : "off", mali_irqs);
+					m_busy[0] = m_busy[1] = m_jobs[0] = m_jobs[1] = m_gap = m_gaps = 0;
+					m_since = now;
+				}
+			}
 			if (mali_trace) {
 				uint64_t q, b, e;
 
@@ -1689,12 +1761,43 @@ mtk_mali_wait(uint64_t seq, uint64_t timeout_ns)
 	return done;
 }
 
+/* mali_irq=1: the chip's polarity bit for the job interrupt set (it is active low), and the interrupt taken */
+static void
+mali_irq_attach(void)
+{
+	uint32_t want = 0, spi;
+	vm_offset_t intpol;
+	kern_return_t kr;
+
+	(void)PE_parse_boot_argn("mali_irq", &want, sizeof(want));
+	if (want == 0 || chip->job_irq < 32 || chip->intpol == 0) {
+		return;
+	}
+	spi = chip->job_irq - 32;
+	intpol = ml_io_map((vm_offset_t)(chip->intpol & ~0xfffull), 0x1000) + (vm_offset_t)(chip->intpol & 0xfff);
+	wr(intpol, (spi / 32) * 4, rd(intpol, (spi / 32) * 4) | (1u << (spi % 32)));
+	wr(mali, JOB_INT_MASK, 0);
+	wr(mali, JOB_INT_CLEAR, 0xffffffffu);
+	mali_irq_on = 1;
+	kr = gic_v3_spi_attach(chip->job_irq, false, mali_job_irq, NULL);
+	if (kr != KERN_SUCCESS) {
+		mali_irq_on = 0;
+	}
+	/* a moment for a line seen the wrong way up to show itself */
+	delay(20 * 1000);
+	hakios_host_keep_add("mali: the job interrupt (%u, polarity at %#llx bit %u): %s; %llu interrupts with nothing behind "
+	    "them so far", chip->job_irq, chip->intpol + (spi / 32) * 4, spi % 32, kr != KERN_SUCCESS ? "NOT TAKEN" :
+	    mali_irq_on ? "taken, the jobs wait for it" : "taken and MASKED again (it fires by itself): the jobs are polled",
+	    mali_irq_empty);
+}
+
 static void
 mali_thread(__unused void *parameter, __unused wait_result_t result)
 {
 	mali_up();
 	printf("mali: came up to step %u of 6\n", reached);
 	if (reached >= 6) {
+		mali_irq_attach();
 		HakiosMaliStart();             /* programs can have it now (iokit/Kernel/HakiosMali.cpp) */
 	}
 	for (;;) {
@@ -1738,6 +1841,8 @@ mtk_mali_init(void)
 	(void)PE_parse_boot_argn("mali_fastmap", &mali_fastmap, sizeof(mali_fastmap));
 	(void)PE_parse_boot_argn("mali_walk_wb", &mali_walk_wb, sizeof(mali_walk_wb));
 	(void)PE_parse_boot_argn("mali_trace", &mali_trace, sizeof(mali_trace));
+	(void)PE_parse_boot_argn("mali_spin", &mali_spin_us, sizeof(mali_spin_us));
+	(void)PE_parse_boot_argn("mali_nap", &mali_nap_us, sizeof(mali_nap_us));
 	if (!PE_parse_boot_argn("mali", &on, sizeof(on)) || on == 0) {
 		return;
 	}
