@@ -43,7 +43,7 @@
 #                                   the kernel. adsp=1 needs none of it: the system image has the firmware in /fw.
 #   system.apfs      the system image, the root filesystem (the resident RAM disk, /dev/md0), an
 #                    APFS container: the part of the system image 20F66 chosen by ../darwin/system/select-system.py at
-#                    its real paths, the dyld shared cache, and src/stage0.c as /sbin/launchd (the
+#                    its real paths, the dyld shared cache, and init/stage0.c as /sbin/launchd (the
 #                    real one is /sbin/launchd.system). 2.5 GB; upload once per loader session with
 #                    `xl ramdisk userland/system.apfs`. Rebuilt when missing, when its inputs
 #                    (stage0, the manifest, the cryptex files) are newer, or with SYSTEM=1 (after
@@ -123,7 +123,7 @@ for j in $DROP_JOBS; do IOS_JOBS=$(echo " $IOS_JOBS " | tr '\n\t' '  ' | sed "s/
 # (src/inject.c is libhakios.dylib, src/inject_sb.c is libhakios-sb.dylib, src/inject_media.c is
 # libhakios-media.dylib).
 # What Sileo runs from /bin (see the package manager's prefix below): the system image's /bin, or the
-# boot volume's bin, bound over the system's volume's /bin when that is the root (src/init.c, flash_root).
+# boot volume's bin, bound over the system's volume's /bin when that is the root (init/init.c, flash_root).
 SILEO_BIN="chmod cp mkdir mv rm"
 # (libhakios-tweaks is the tweak loader of the package manager's prefix, src/inject_tweaks.c: in
 # SpringBoard the library above opens it, here it is named for the programs that have no library of
@@ -155,10 +155,11 @@ if [ -n "$PREBUILT" ]; then
 	cp obj/hello hello
 else
 	$CC $LD -o hello src/hello.c
-	$CC -Ilibmini -c libmini/mini.c -o obj/mini.o
-	$CC -c libmini/start.S -o obj/start.o
+	# the first programs (../init/) and the C runtime they are linked with (../lib/libmini/)
+	$CC -I../lib/libmini -c ../lib/libmini/mini.c -o obj/mini.o
+	$CC -c ../lib/libmini/start.S -o obj/start.o
 	for prog in init child stage0 var_store; do
-		$CC -Ilibmini $LD -o obj/$prog.new src/$prog.c obj/mini.o obj/start.o
+		$CC -I../lib/libmini $LD -o obj/$prog.new ../init/$prog.c obj/mini.o obj/start.o
 		# keep the old file (and its time stamp) when nothing changed: system.apfs depends on stage0
 		cmp -s obj/$prog.new obj/$prog && rm obj/$prog.new || mv obj/$prog.new obj/$prog
 	done
@@ -169,7 +170,7 @@ rm -rf root
 mkdir -p root/sbin root/bin root/etc root/share root/LaunchDaemons
 cp obj/init root/sbin/init
 cp obj/child root/bin/child
-# The data volume into the flash and back (src/var_store.c), and the job that saves it when a run
+# The data volume into the flash and back (init/var_store.c), and the job that saves it when a run
 # ends: the program and its job together, away from the system's job list below, which several working
 # copies are editing at once.
 [ -f obj/var_store ] && cp obj/var_store root/bin/
@@ -430,7 +431,7 @@ with open(path, 'w') as f:
 	rc_jobs=${RC_JOBS:-rc.jobs}
 	[ -f "$rc_jobs" ] || rc_jobs=jobs/$rc_jobs
 	cp "$rc_jobs" root/etc/rc.jobs
-	# QUIET=1: launchd's own standard error goes nowhere (src/init.c). It says a few thousand
+	# QUIET=1: launchd's own standard error goes nowhere (init/init.c). It says a few thousand
 	# lines about its own business in the first minutes and pushes everything else out of the
 	# kernel's log; the daemons keep their own standard error on the console all the same.
 	rm -f root/etc/quiet
@@ -501,7 +502,7 @@ if [ -f root/fw/network ]; then
 	echo "build.sh: SHARE=1 builds the same image without it."
 fi
 # When the system's volume on the phone's flash is to become the root (boot-arg root_apfs=ufs_darwin,
-# with flashboot.apfs resident; src/init.c, flash_root): an empty directory to hide the system's
+# with flashboot.apfs resident; init/init.c, flash_root): an empty directory to hide the system's
 # NanoLaunchDaemons and LaunchAngels with,
 # xpc without launchd.plist (launchd would read that list of all of the system's jobs instead of
 # LaunchDaemons) and the audio server's plug-in directory with only our device in it.
@@ -524,7 +525,7 @@ python3 ../userland/tools/apfs/mkapfs.py -z --plain fw -o root.apfs hakios=root 
 # boot volume to the volume's /private/preboot, then mounts the second container -- the OS cryptex -- on
 # the boot volume's empty Cryptexes/OS and the third -- Apple's App cryptex as it is -- on Cryptexes/App:
 # /private/preboot/Cryptexes/OS and App, where the volume's own /System/Cryptexes/OS and App point and
-# where the system grafts the cryptexes (src/init.c, flash_root; the kernel's apfs takes "/dev/md0,c=1" and
+# where the system grafts the cryptexes (init/init.c, flash_root; the kernel's apfs takes "/dev/md0,c=1" and
 # "c=2", and bsd/vm/vm_unix.c takes a shared cache from Cryptexes/OS). CRYPTEX_IMAGE=FILE:
 # Apple's own image of the cryptex as it is instead of this one remade (2.6 GB against 1 GB: too much
 # for the phone's memory beside the system, not for QEMU's). Upload it with `xl ramdisk userland/flashboot.apfs`.
@@ -542,7 +543,7 @@ if [ -n "$FLASHBOOT" ] && [ -f $CACHE/dyld_shared_cache_arm64 ]; then
 	if [ -d $SYSFILES/cryptex ]; then linktree $SYSFILES/cryptex flashboot.os; else mkdir -p flashboot.os; fi
 	# the audio DSP's firmware and the speaker amplifiers' configuration, as in the system image's /fw: the kernel
 	# reads the firmware as soon as there is a root (this image, adsp=1), the configuration maybe later -- by then
-	# from the system's volume's /fw, which src/init.c (flash_root) binds to this
+	# from the system's volume's /fw, which init/init.c (flash_root) binds to this
 	if [ -f ../fw-audio/adsp.mdt ]; then
 		mkdir -p flashboot/fw
 		cp ../fw-audio/adsp.mdt ../fw-audio/adsp.b0[2-9] ../fw-audio/adsp.b[1-9][0-9] flashboot/fw/
@@ -553,10 +554,10 @@ if [ -n "$FLASHBOOT" ] && [ -f $CACHE/dyld_shared_cache_arm64 ]; then
 	fi
 	# the package manager's prefix, when userland/tools/mk-jb.sh has fetched one: /jb of the boot volume, which is
 	# /private/preboot/jb once the system's volume is the root -- the volume where a rootless jailbreak keeps its
-	# Procursus on a reference phone as well; init grafts it onto /var/jb (src/init.c, mount_writable)
+	# Procursus on a reference phone as well; init grafts it onto /var/jb (init/init.c, mount_writable)
 	if [ -d ../jb/root/var/jb ]; then
 		cp -a ../jb/root/var/jb flashboot/jb
-		mkdir -p flashboot/jb-rw        # where init mounts the prefix's writable copy (src/init.c)
+		mkdir -p flashboot/jb-rw        # where init mounts the prefix's writable copy (init/init.c)
 		# and what Sileo runs from /bin, for init to put over the system's volume's /bin (see the system image below)
 		mkdir -p flashboot/jb-bin
 		for c in $SILEO_BIN; do
@@ -640,7 +641,7 @@ if [ -f $SYSFILES/system.manifest ] && [ -f $CACHE/dyld_shared_cache_arm64 ] &&
 	fi
 	# the package manager's prefix, when userland/tools/mk-jb.sh has fetched one: the Procursus bootstrap with
 	# Sileo in it, as /jb. It cannot live at /var/jb in the image -- /private/var is a memory
-	# filesystem made afresh at every boot -- so init copies it there (src/init.c, copy_tree).
+	# filesystem made afresh at every boot -- so init copies it there (init/init.c, copy_tree).
 	if [ -d ../jb/root/var/jb ]; then
 		rm -rf sysroot/jb
 		cp -a ../jb/root/var/jb sysroot/jb

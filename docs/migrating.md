@@ -84,7 +84,7 @@ Comments in the kernel, the loader and the tools still name files of the list ab
 (`hakios_adreno.c`, `hakios_ufs.c`, `xnuloader`, `HakiosGPU`): they are where a design was taken
 from, and those files are in xnu-kernel-qcom under their names there, some still with the old prefix.
 
-`userland/src/var_store.c` came over but has nothing to write to: it kept `/private/var` in a
+`init/var_store.c` came over but has nothing to write to: it kept `/private/var` in a
 partition through the Qualcomm phone's storage driver. On a MediaTek phone the kernel's eMMC driver
 only reads. `userland/build.sh` still has the branches that packed the Qualcomm phone's firmware
 (`fw-gpu`, `fw-audio`, `fw-haptic`, `fw-camera`, `ADSP=1`, `FLASHBOOT=1`); they do nothing where those

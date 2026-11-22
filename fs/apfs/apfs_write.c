@@ -4,7 +4,7 @@
  * The driver beside this file reads APFS and does not write it, and that one fact shapes the
  * whole port: /private/var has to be a filesystem in memory, remade empty at every boot, and
  * what is to outlive a boot has to be packed into an archive and put somewhere that is not a
- * filesystem at all (userland/src/var_store.c).  This file is the first step out of that, and
+ * filesystem at all (init/var_store.c).  This file is the first step out of that, and
  * it is a deliberately small one.
  *
  * What a write has to touch, and in what order

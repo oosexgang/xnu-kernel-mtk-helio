@@ -14,7 +14,7 @@ release's arm64e processes ([darwin/README.md](../darwin/README.md)).
 
 | Path | What it is |
 | --- | --- |
-| `src/stage0.c`, `src/init.c` | `/sbin/launchd` of the system image (stage0) mounts the small image on `/hakios` and runs our `init`: mounts, checks, the data volume made from its skeleton, the overlays and the job cache bound over the system's, the libraries to insert (`etc/inject.conf`), then `etc/rc` |
+| `../init/` | The first programs, which `build.sh` compiles: `stage0.c`, `/sbin/launchd` of the system image, mounts the small image on `/hakios` and runs our `init.c`: mounts, checks, the data volume made from its skeleton, the overlays and the job cache bound over the system's, the libraries to insert (`etc/inject.conf`), then `etc/rc`; `child.c`, `var_store.c` |
 | `src/inject*.c`, `src/tweaks/` | Libraries the kernel inserts into single processes (`kern.exec_inject`): SpringBoard, backboardd, media, applications, key chain, tweaks. Each checks a method's type before it replaces it |
 | `src/hakiosmetal.m`, `src/metal/` | The Metal device: `HakiosMetal.bundle`, an `MTLDevice` over `air_metal.h`'s contract ([docs/metal-glass.md](../docs/metal-glass.md)) |
 | `src/mali/` | The native Mali library: `rwa/` (the contract served with our own job descriptors), `kmali.c` (GPU memory and submissions), `mali-probe` and its host test ([src/mali/README.md](src/mali/README.md)) |
@@ -22,7 +22,7 @@ release's arm64e processes ([darwin/README.md](../darwin/README.md)).
 | `src/audio_plugin.c`, `src/camera_*.c` | The audio output device; the camera's device and image pipeline |
 | `src/rwtouch.c`, `src/fbgrab.m`, `src/cputop.c`, `src/psgrep.c`, `src/tolog.c`, `src/svclook.c` | The run's own tools on the phone: gestures, pictures of the panel, the processors' use, processes and their stacks, a program's output into the log, a Mach service looked up |
 | `src/*_test.c`, `src/*_test.m` | Test programs, each run by a job list |
-| `libmini/` | A C runtime of our own (system call wrappers, strings, a small printf), for programs that run without the system's libraries |
+| `../lib/libmini/` | A C runtime of our own (system call wrappers, strings, a small printf), for the first programs, which run without the system's libraries |
 | `jobs/` | The job lists: what `com.hakios.demo` runs, one command a line (`rc.jobs`, the default, and the lists of particular runs) |
 | `launchd/` | Our launchd jobs (`com.hakios.demo`, `.varstore`, `.wifi`, `.nullcomm`) |
 | `rc.launchd`, `rc.launchd.*`, `rc.system` | `etc/rc`: what `init` runs; `rc.launchd` hands process 1 to the system's launchd |

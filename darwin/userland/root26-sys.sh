@@ -177,7 +177,7 @@ plistlib.dump({'Label': 'com.hakios.nullairplay', 'ProgramArguments': ['/hakios/
                'com.apple.coremedia.endpointmanager.xpc'], 'MachServices': {'com.apple.coremedia.endpointmanager.xpc': True},
                'POSIXSpawnType': 'Adaptive'}, open(sys.argv[1], 'wb'))
 PY
-# LPROJ="BUNDLE ...": the system volume's bundles given an empty en.lproj, through init's overlays (src/init.c
+# LPROJ="BUNDLE ...": the system volume's bundles given an empty en.lproj, through init's overlays (init/init.c
 # overlay_dirs). The system image keeps only files, so every .lproj directory that held nothing is gone from it, and a
 # bundle whose CFBundleDevelopmentRegion is "English" (411 of them, SpringBoard.app among them) then shows its
 # strings' keys in place of its strings: Settings > Bluetooth said PLACARD_SUBTITLE and POWER_OFF_WARNING (run 650), a
@@ -213,7 +213,7 @@ for b in ${LPROJ:-}; do
 done
 [ -f $T/etc/overlays ] && echo "  overlays: $(wc -l < $T/etc/overlays | tr -d ' ') bundles given an empty en.lproj"
 # JOBCACHE=1: the jobs also as launchd's job cache in the small image, etc/xpc/launchd.plist, which init binds over the
-# system volume's /System/Library/xpc (src/init.c overlay_job_cache): a change to the jobs then needs no new system
+# system volume's /System/Library/xpc (init/init.c overlay_job_cache): a change to the jobs then needs no new system
 # image. The cache is the system's own with its LaunchDaemons ours, as mkimage26.py's write_job_cache makes it.
 if [ "${JOBCACHE:-}" = 1 ]; then
 	mkdir -p $T/etc/xpc

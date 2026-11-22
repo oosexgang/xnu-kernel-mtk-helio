@@ -131,7 +131,7 @@ instructions in the shared cache and every Mach-O of the image. What is ours:
 
 | Path | Contents |
 | --- | --- |
-| `userland/src/stage0.c`, `init.c` | `/sbin/launchd` of the system image is stage0: it mounts the small image on `/hakios` and runs our init (mounts, checks, the data volume, overlays, the libraries to insert), which hands process 1 to the system's launchd (`/sbin/launchd.system`). |
+| `init/stage0.c`, `init.c` (with `lib/libmini/`) | `/sbin/launchd` of the system image is stage0: it mounts the small image on `/hakios` and runs our init (mounts, checks, the data volume, overlays, the libraries to insert), which hands process 1 to the system's launchd (`/sbin/launchd.system`). |
 | `userland/src/inject*.c` | Libraries inserted into single processes by the kernel (`kern.exec_inject`). |
 | `userland/src/hakiosmetal.m`, `metal/`, `mali/` | The Metal device, and the native library that draws its frames on the Mali ([metal-glass.md](metal-glass.md)). |
 | `userland/src/audio_plugin.c` | The audio output device. |

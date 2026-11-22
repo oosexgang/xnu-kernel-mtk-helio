@@ -74,7 +74,7 @@ mkdir -p "$TMP/control" && tar -C "$TMP/control" -xf "$TMP"/control.tar.* 2>/dev
 # Qualcomm chip. mobilesubstrate and org.coolstar.libhooker are virtual packages it Provides, which is
 # what preferenceloader and nearly every tweak depend on. The loader /var/jb/usr/lib/TweakLoader.dylib
 # (ellekit/libinjector) reads /var/jb/usr/lib/TweakInject/*.plist, matches the process by the Filter
-# and dlopens the tweak; src/init.c (etc/inject.conf) inserts it into SpringBoard, Preferences and the
+# and dlopens the tweak; init/init.c (etc/inject.conf) inserts it into SpringBoard, Preferences and the
 # apps. Tweaks link /var/jb/usr/lib/lib{substrate,hooker}.dylib and CydiaSubstrate.framework, all
 # ElleKit.
 EK=ellekit_${ELLEKIT:-0.4.5}_iphoneos-arm64.deb

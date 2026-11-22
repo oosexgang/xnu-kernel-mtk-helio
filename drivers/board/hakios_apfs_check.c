@@ -1734,7 +1734,7 @@ apfs_check_runner(void *arg, wait_result_t wr)
  * synthetic one).  devfs stays on /dev (vfs_switch_root() keeps it there).  This is how
  * the system's root volume on the phone's flash becomes the root: the kernel starts from the
  * small image, whose init mounts the volume, puts in place what the system needs on it
- * and then asks for this (userland/src/init.c, boot-arg root_apfs=).  Process 1 only, once.
+ * and then asks for this (init/init.c, boot-arg root_apfs=).  Process 1 only, once.
  */
 static int hakios_root_switched;
 
