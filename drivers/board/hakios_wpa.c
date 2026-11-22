@@ -1,6 +1,6 @@
 /*
  * (bsd/dev/hakios_wpa.c: wifi/lx/src/lx_wpa.c as it is, built into the kernel for the first phone's radio
- * (mtk_wifi.c), whose firmware leaves the handshake to the host. The tests are that file's: tools/wpa-test.)
+ * (mtk_wifi.c), whose firmware leaves the handshake to the host. Its tests: workbench/wpa_test.c.)
  */
 /*
  * The arithmetic of WPA2 with a passphrase (lx_wpa.h): SHA-1 and HMAC over it (FIPS 180, RFC
@@ -9,8 +9,9 @@
  * AES decryption and the unwrapping of a key with it (FIPS 197, RFC 3394), and the messages of
  * the four-way and the group-key handshake (12.7.6, 12.7.7; figure 12-35 is the layout).
  *
- * Nothing here is taken from another implementation; the tests in tools/wpa-test check it
- * against the standards' own examples and against Python's hashlib and "cryptography".
+ * Nothing here is taken from another implementation; workbench/wpa_test.c checks it against the
+ * standards' own examples (their values checked with Python's hashlib and hmac too) and runs a
+ * handshake with an access point of its own.
  * Nothing here is written for speed, and nothing here says a key in a message.
  */
 #ifdef KERNEL

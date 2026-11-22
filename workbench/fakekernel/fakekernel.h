@@ -1,6 +1,6 @@
 /*
  * Just enough of XNU's kernel interfaces for a driver's own code to run as a host program
- * (workbench/backlight_driver_test.c): threads are pthreads, waits are condition variables, the
+ * (the driver tests of workbench/run.sh): threads are pthreads, waits are condition variables, the
  * clock is the host's, sysctls go into a table the test reads and writes, boot-args are a string the
  * test sets. Every header of this directory includes this one.
  */
@@ -20,8 +20,11 @@
 #endif
 #include <sys/types.h>
 
+#undef __printflike                  /* (the host's sys/cdefs.h has its own) */
 #define __printflike(a, b)      __attribute__((format(printf, a, b)))
+#undef __unused
 #define __unused                __attribute__((unused))
+#undef __DEVOLATILE
 #define __DEVOLATILE(type, var) ((type)(uintptr_t)(volatile void *)(var))
 #define MIN(a, b)               ((a) < (b) ? (a) : (b))
 
@@ -90,6 +93,7 @@ bool thread_call_cancel(thread_call_t call);
 #define Z_ZERO                          0
 #define kalloc_type(type, flags)        ((type *)calloc(1, sizeof(type)))
 #define kfree_type(type, pointer)       free(pointer)
+#undef __DECONST
 #define __DECONST(type, var)            ((type)(uintptr_t)(const void *)(var))
 #define os_atomic_add(pointer, value, order)    __sync_add_and_fetch((pointer), (value))
 #define os_atomic_inc(pointer, order)           __sync_add_and_fetch((pointer), 1)
@@ -320,6 +324,7 @@ extern unsigned fake_core;              /* the core "this" code runs on (0) */
 typedef int errno_t;
 typedef struct fake_mbuf *mbuf_t;
 typedef uint64_t user_addr_t;
+#undef USER_ADDR_NULL
 #define USER_ADDR_NULL                  ((user_addr_t)0)
 #ifndef EAUTH
 #define EAUTH                           80

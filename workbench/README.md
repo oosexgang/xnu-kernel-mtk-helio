@@ -18,6 +18,8 @@ What is tested without a phone, and how a driver runs without a kernel. `make ch
 | `audio_device_test.c` | `/dev/hakios-audio`: what is played reaches the driver that plays it |
 | `battery_driver_test.c` | The MT6358's fuel gauge against a model of the PMIC wrapper and the PMIC |
 | `keys_driver_test.c` | The power and volume keys against a model of the keypad and the PMIC |
+| `mfg_power_test.c` | The GPU's platform (`drivers/board/mtk_mfg.h`): the MT6768's table writes exactly what the driver wrote before it was a table, stops where it stopped, and every chip's table is whole |
+| `wpa_test.c` | WPA2 in the kernel (`drivers/board/hakios_wpa.c`): SHA-1, HMAC, the PMK, the PRF and the AES key unwrap against the standards' examples; a four-way and a group handshake with an access point of the test's; the messages that must be refused |
 | `example_pwrkey_test` | The example driver of [Documentation/writing-a-driver.md](../Documentation/writing-a-driver.md), from `Documentation/examples/` |
 
 `guard-measure.sh` (with `guard_measure.c`) is not a test but a measurement: the speakers' guard's
