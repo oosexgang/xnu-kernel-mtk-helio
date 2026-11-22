@@ -4,6 +4,23 @@ The newest first. From "The layout" on, the sections say what changed against br
 working tree at `6076bc1f` (the same tree as branch `mtk` of hakios-xnu-kernel at `a9627984`), which
 this repository was made from on 2026-11-11. Where a path went: [docs/migrating.md](Documentation/migrating.md).
 
+## Metal for other MediaTek phones (2026-11-22)
+
+- The GPU's platform is a table a chip, `struct mtk_mfg` in `drivers/board/mtk_mfg.h` (the clock's mux, MFG's power
+  domains in the SPM, the bus protection, the clock gate), found by the SoC file's name; the MT6768's is the first.
+  `drivers/board/mtk_mali.c` keeps what is the GPU's: any Mali with a job manager, named by its id; a Midgard or a
+  GPU with a command stream frontend is refused, and a chip without a table is said and left alone.
+  `workbench/mfg_power_test.c` runs the MT6768's table and the code it replaced against a model of the registers:
+  the same 28 writes, and the same stop when a domain does not come up.
+- `mtk_cpufreq=` and `mali_mhz=` write the MT6768's clock tables only on the MT6768; elsewhere they are refused, and
+  said.
+- The Metal device takes Mesa's panfrost (the Gallium library) when the native library refuses the GPU (any Mali
+  but a Bifrost v7), so G71, G72 and G57 phones draw; `rwn_refuse=1` shows the fallback on a G52. The native
+  library names its GPU from Panfrost's table.
+- `Documentation/metal-porting.md`: what a new phone gives for Metal, and how each step is seen to work.
+- The kernel's GPU driver, framebuffer and RAM file system as the runs have them (the ios27 branch's), with
+  `tools/log/fbframes.py` and `tools/log/mali-dump.py`.
+
 ## The Linux layout, the defconfigs and Documentation/ (2026-11-22)
 
 For the people who run it:

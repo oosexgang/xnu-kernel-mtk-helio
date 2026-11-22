@@ -154,6 +154,7 @@ D:	userland/README.md
 
 GPU AND METAL
 F:	drivers/board/mtk_mali.c
+F:	drivers/board/mtk_mfg.h
 F:	drivers/iokit/HakiosMali.cpp
 F:	drivers/iokit/MiniIOSurface.cpp
 F:	drivers/iokit/MiniIOSurface.h
@@ -169,7 +170,9 @@ F:	userland/tools/mesa/
 F:	userland/tools/rwacache.sh
 F:	darwin/userland/mali27.sh
 F:	darwin/userland/metal27.sh
+T:	workbench/mfg_power_test.c
 T:	userland/src/mali/tests/host_test.cpp (userland/src/mali/README.md says how; not part of make check)
+D:	Documentation/metal-porting.md
 D:	Documentation/metal-glass.md
 D:	userland/src/mali/README.md
 D:	userland/docs/air.md

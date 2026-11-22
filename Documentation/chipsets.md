@@ -21,7 +21,7 @@ changed where the new chip differs, before the driver is started there.
 | --- | --- | --- | --- |
 | The eMMC (`drivers/board/mtk_emmc.c`) | `emmc-msdc` | `msdc0` | Nothing of the chip: MSDC as LK leaves it, read by descriptor DMA, never written |
 | The keys and the clocks (`mtk_keys.c`) | `keys-mt6358` | `keypad`, `pwrap`, `apmixed`, `topckgen` | The MT6768's frequency table and PLL registers, which key is which; the PMIC is an MT6358 |
-| The GPU (`mtk_mali.c`, `drivers/iokit/HakiosMali.cpp`) | `gpu-mali-g52` | `topckgen`, `infracfg_ao`, `spm`, `mfgcfg`, `mali` | MFG's power domain sequence of the MT6768, the MT6358 rail's voltage, the clock's range (`mali_mhz=`) |
+| The GPU (`mtk_mali.c`, `drivers/iokit/HakiosMali.cpp`) | `gpu-mali-g52` | `topckgen`, `infracfg_ao`, `spm`, `mfgcfg`, `mali` | A table per chip in `mtk_mfg.h` (the clock's mux, MFG's power domains, the bus protection, the gate): the MT6768's is there; the clock above 364 MHz (`mali_mhz=`) only on the MT6768, refused elsewhere. The Mali itself is any with a job manager ([metal-porting.md](metal-porting.md)) |
 | The sensor hub (`mtk_scp.c`) | `scp-sensors` | `scp_sram`, `scp_cfg`, `scp_clkctrl`, `topckgen`, `infracfg_ao` | The firmware's layout as this chip's LK loads it |
 | The battery (`mtk_battery.c`) | `battery-mt6358` | `pwrap` | The MT6358's gauge; the cell's voltage curve (the board's `[battery]` gives its charge) |
 | The display's flip (`drivers/iokit/MiniIOMobileFramebuffer.cpp`) | `display-ovl-flip` | `disp_ovl0` | OVL0's layer 0 as LK programs it |
@@ -43,7 +43,7 @@ always passes the interrupt controller in the tree it builds.
 3. **What is still one chip's** in the table above, checked against the chip's Android kernel before the driver
    writes anything: the PMIC (an MT6357 or MT6359 is not an MT6358), the GPU's power domains and clock, CONNSYS's
    radio chip.
-4. **The GPU's generation** for Metal: the native library writes Bifrost's descriptors (Mali-G52 and G76); another
-   generation is refused with a sentence that says so (`userland/src/mali/rwa/rwa_helio.c`).
+4. **The GPU**: its chip's table in `drivers/board/mtk_mfg.h`, and for Metal the native library on a Bifrost v7 (Mali-G52,
+   G76) or Mesa's panfrost in its place on the other Malis ([metal-porting.md](metal-porting.md)).
 
 A SoC file goes to the main branch; a phone's package to the `devices` branch.

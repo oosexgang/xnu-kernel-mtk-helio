@@ -99,6 +99,7 @@ The library's, read from the same boot arguments in user space:
 | `rwn_smalllog=0` | the small passes' lines left out of the log |
 | `rwn_texprobe=0` | no texture probes (they read GPU memory) |
 | `rwn_keepfps=1` | the per-second counts kept for the host, as kept lines (`!!`) |
+| `rwn_refuse=1` | the native library refuses the GPU, and the Metal device takes Mesa's panfrost in its place: the fallback of a Mali the library does not serve, seen on one it does ([metal-porting.md](metal-porting.md)) |
 | `rwn_cache=0` | the stage cache not used |
 | `rwn_gpumips=0` | mipmaps made by the processor, not the GPU |
 | `rwm_slowcb=MS` | a command buffer slower than MS named, with what it did |

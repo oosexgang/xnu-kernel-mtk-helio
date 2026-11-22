@@ -18,6 +18,7 @@ log), [whats-new.ru.md](whats-new.ru.md) (what changed lately, by who it matters
 | [features.md](features.md) | Every feature a board can list: the blocks and sections it needs first, and what starts it. Generated. |
 | [boot-args.md](boot-args.md) | Every boot argument the kernel reads, with the comment beside its read. Generated. |
 | [writing-a-driver.md](writing-a-driver.md) | How a driver is written here: the rules and why, what a driver has at hand, the steps, with an example driver and its test that `make check` builds and runs. |
+| [metal-porting.md](metal-porting.md) | Metal on another MediaTek phone: the chip's GPU platform as a table, which library draws which Mali, how to see each step work. |
 | [metal-glass.md](metal-glass.md) | Metal on the Mali: how a frame reaches the GPU, the stage cache, what was measured, what stands between the 27 release and its glass. |
 | [darwin27-boot.md](darwin27-boot.md) | The lab notebook: how Darwin 27 was brought to its home screen and to an interface that moves, run by run, with the measurements. |
 | [bluetooth-porting.md](bluetooth-porting.md), [camera-porting.md](camera-porting.md) | Bluetooth and the camera on another MediaTek phone: the skeleton driver and the operations a phone supplies. |

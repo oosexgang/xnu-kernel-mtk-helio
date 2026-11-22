@@ -11,7 +11,11 @@
  *   Valhall v9 (G57)          planned: a backend of its own -- the renderer state and the attribute tables become
  *                             shader program and resource descriptors (genxml v9, Panfrost's PAN_ARCH 9)
  *   Midgard (T860, T880)      not planned: another shader compiler (midgard) and the v4/v5 descriptors
- *   PowerVR (GE8320, GM9446)  no Mali: no native path at all (the Gallium library may still draw in software)
+ *   PowerVR (GE8320, GM9446)  no Mali: no path at all (the Gallium library's software rasterizer cannot draw into the
+ *                             window server's surfaces)
+ *
+ * Until then a Mali this library refuses is drawn by Mesa's panfrost: the Metal device takes the Gallium library in
+ * its place when rwa_device_open says no (userland/src/metal/air.cpp), so v6 and v9 draw, more slowly.
  *
  * The GPU product ids are Panfrost's (pan_props.c's MODEL table: GPU_ID >> 16). The chip to GPU pairs are the
  * vendor's published ones; only mt6768 has been run on a phone (the Infinix X6826B, a Helio G85: product 0x7402).
@@ -80,18 +84,20 @@ const char *
 rwa_arch_status(unsigned arch, unsigned gpu_id)
 {
 	if (gpu_id == 0)
-		return "no Mali: no native path (PowerVR)";
+		return "no Mali: no native path, and no Mesa path either (PowerVR)";
 	switch (arch) {
 	case 7:
 		return "Bifrost v7: served";
 	case 6:
-		return "Bifrost v6: planned (this library built again with PAN_ARCH=6), not built yet";
+		return "Bifrost v6: not built yet (this library again with PAN_ARCH=6); Mesa's panfrost draws it meanwhile";
 	case 9:
-		return "Valhall v9: planned (a backend of its own: shader program and resource descriptors), not written yet";
+		return "Valhall v9: not written yet (a backend of its own); Mesa's panfrost draws it meanwhile";
 	case 4:
 	case 5:
-		return "Midgard: not planned (another compiler and the v4/v5 descriptors)";
+		return "Midgard: not planned here (another compiler, the v4/v5 descriptors), and the kernel's driver writes "
+		       "AArch64 tables its MMU does not take";
 	default:
-		return "an architecture this library has no plan for";
+		return "an architecture this library has no plan for (from the G310 on, a command stream frontend the kernel's "
+		       "driver does not drive)";
 	}
 }

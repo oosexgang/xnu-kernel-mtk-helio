@@ -458,6 +458,14 @@ rwa_device_open(char *why, size_t why_size)
 		free(d);
 		return NULL;
 	}
+	/* boot-arg rwn_refuse=1: refused as a GPU this library does not serve would be, to see the Metal device take Mesa's
+	 * panfrost in its place on a phone whose GPU it does serve (userland/src/metal/air.cpp) */
+	if (boot_arg("rwn_refuse=1")) {
+		say(why, why_size, "asked not to serve it (rwn_refuse=1): the GPU is product %#x (%s)", d->gpu_id,
+		    model ? model->name : "?");
+		free(d);
+		return NULL;
+	}
 	uint64_t v = 0;
 	if (km_param(10, &v) == 0 && ((v >> 8) & 0xf) >= 2)   /* TILER_FEATURES: hierarchy levels */
 		tiler_levels = (v >> 8) & 0xf;
@@ -465,7 +473,8 @@ rwa_device_open(char *why, size_t why_size)
 		core_id_range = 64 - __builtin_clzll(v);
 	if (km_param(39, &v) == 0)                            /* THREAD_TLS_ALLOC */
 		thread_tls_alloc = (unsigned)v;
-	snprintf(d->name, sizeof(d->name), "Mali-G52 r1 (hakios-mali, native)");
+	/* "Mali-G52 r1 (hakios-mali, native)" on the first phone: Panfrost's name of the product */
+	snprintf(d->name, sizeof(d->name), "Mali-%s (hakios-mali, native)", model ? model->name : "Bifrost");
 	/* the model's tile buffer, halved (panfrost_query_optimal_tib_size): the G52's and G76's 16 KB */
 	d->tile_budget = model && model->tilebuffer_size ? model->tilebuffer_size / 2 : 8192;
 	d->tiler_heap = km_bo_new(HEAP_BYTES, why, why_size);

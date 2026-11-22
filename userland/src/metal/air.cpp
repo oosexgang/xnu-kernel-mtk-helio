@@ -2,6 +2,13 @@
  * The compiler library, loaded with dlopen rather than linked, for a measured reason: the device
  * object must exist even when there is no GPU, and a device that refuses to be created at all takes
  * Metal's whole discovery down with it (the comment at the top of src/hakiosmetal.m).
+ *
+ * Which one: with boot-arg mali_native=1 the native library (userland/src/mali/rwa), if it serves this
+ * phone's GPU -- its rwa_device_open is asked here, before the device is made, and says why when it does
+ * not (a Mali of another architecture than Bifrost v7: rwa_helio.c). It is then left loaded but unused, and
+ * the Gallium library takes its place: Mesa's panfrost knows every Mali from the T600 to the G57, so a phone
+ * whose GPU the native library has not learned still draws (Documentation/metal-porting.md). Without
+ * mali_native=1, the Gallium library.
  */
 #include "rwm.h"
 #include <sys/sysctl.h>
@@ -12,12 +19,20 @@
 #include <dlfcn.h>
 #include <mutex>
 
+#define NATIVE_LIBRARY  "/hakios/lib/libhakiosmali.dylib"
+#define GALLIUM_LIBRARY "/hakios/lib/libhakiosair.dylib"
+
+namespace {
+const char *library_path;               /* the library in use, once load() has chosen */
+void load();
+std::once_flag once;
+}
+
 extern "C" const char *
 rwm_air_library_path(void)
 {
-	static const char *path = rwm_boot_arg("mali_native=1") ? "/hakios/lib/libhakiosmali.dylib"
-								 : "/hakios/lib/libhakiosair.dylib";
-	return path;
+	std::call_once(once, load);
+	return library_path;
 }
 
 namespace {
@@ -39,14 +54,15 @@ call(const char *name, F *slot, bool required)
 	return Call{ name, reinterpret_cast<void **>(slot), required };
 }
 
-void
-load()
+/* the library at `path` into `calls`, every entry looked up; false when it is not there or too old */
+bool
+take(const char *path)
 {
-	void *handle = dlopen(rwm_air_library_path(), RTLD_NOW);
+	void *handle = dlopen(path, RTLD_NOW);
 
 	if (handle == nullptr) {
 		rwm_print("no compiler library: %s\n", dlerror());
-		return;
+		return false;
 	}
 
 	struct rwm_air &c = calls;
@@ -108,10 +124,11 @@ load()
 				  "will not be used\n", entry.name);
 			calls = {};
 			dlclose(handle);
-			return;
+			return false;
 		}
 	}
 	c.handle = handle;
+	library_path = path;
 	loaded = true;
 	/* where it lies in this process, into the host's kept lines: the kernel's stack samples (ustacks=) give bare
 	 * addresses, and this is what turns those in the library into its own functions (atos -l BASE) */
@@ -126,9 +143,32 @@ load()
 			sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
 		}
 	}
+	return true;
 }
 
-std::once_flag once;
+void
+load()
+{
+	library_path = GALLIUM_LIBRARY;
+	if (rwm_boot_arg("mali_native=1") && take(NATIVE_LIBRARY)) {
+		char why[256] = "";
+
+		/* the native library's device is one a process: asked for again by the device, it is this one */
+		if (calls.device_open(why, sizeof(why)) != nullptr) {
+			return;
+		}
+		char line[400];
+
+		snprintf(line, sizeof(line), "!!rwm %s: the native Mali library does not serve this GPU (%s): Mesa's "
+			 "panfrost in its place", getprogname(), why);
+		rwm_print("%s\n", line + 2);
+		sysctlbyname("kern.hakios.say", NULL, NULL, line, strlen(line));
+		calls = {};
+		loaded = false;
+		library_path = GALLIUM_LIBRARY;
+	}
+	(void)take(GALLIUM_LIBRARY);
+}
 
 } // namespace
 
