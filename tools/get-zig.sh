@@ -1,6 +1,6 @@
 #!/bin/bash
 # Fetch zig 0.13.0 into build/zig. Only its linker is used: `zig ld.lld` links the loader
-# (loader/build.sh; an ELF linker, which macOS does not have) and `zig lld-link` the UEFI one (xnuloader).
+# (arch/arm64/boot/build.sh; an ELF linker, which macOS does not have) and `zig lld-link` the UEFI one (xnuloader).
 # A machine with ld.lld of its own (Linux: the package lld) does not need this.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

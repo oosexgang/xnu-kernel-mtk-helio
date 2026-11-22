@@ -20,11 +20,11 @@ Android asked for it once, XNU.
 
 ```sh
 tools/device.py add x6826b      # the board's package
-loader/build.sh                 # build/loader/mtkloader.bin; extra arguments go to the compiler (-DXNU_CHECKPOINT=17)
+arch/arm64/boot/build.sh                 # build/loader/mtkloader.bin; extra arguments go to the compiler (-DXNU_CHECKPOINT=17)
 ```
 
 Every address is the board's or its chip's, from `build/boards/NAME/hakios_platform.h`, which
-`tools/boards.py gen` writes from the package and `soc/`. With more than one phone's package present,
+`tools/boards.py gen` writes from the package and `arch/arm64/boot/dts/mediatek/`. With more than one phone's package present,
 say which: `HAKIOS_BOARD=NAME`. A part of the loader that belongs to one feature is compiled in only
 for a board that lists it.
 
@@ -45,4 +45,4 @@ before anything that can hang. It is built `-Os`: the boot partition is small.
 
 The compile-time switches (`-DMSDC_TEST=1`, `-DTIMER_PROBE=1`, `-DTOUCH_PROBE=1`, `-DGPU_PROBE=1`,
 `-DCAM_PROBE=1`, `-DXNU_CHECKPOINT=n`, `-DXNU_VERBOSE=1`, `-DXNU_SERIAL=...`) are explained at the head
-of `mtkloader.c`; [docs/porting.md](../docs/porting.md) says when each is used.
+of `mtkloader.c`; [docs/porting.md](../../../docs/porting.md) says when each is used.

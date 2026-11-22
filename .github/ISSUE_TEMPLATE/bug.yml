@@ -6,7 +6,7 @@ body:
     id: board
     attributes:
       label: Board
-      description: The device package (devices/NAME), or "none" for a build or a host check.
+      description: The device package (arch/arm64/boot/dts/NAME), or "none" for a build or a host check.
       placeholder: x6826b
     validations:
       required: true

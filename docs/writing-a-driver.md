@@ -14,7 +14,7 @@ is not built into the kernel.
   `hakios_board_wants(HAKIOS_HAS_..., "arg=1")`. On a board whose file does not list the feature, the
   driver says so in the log and does nothing.
 - **Addresses come from the board, never from the driver.** `hakios_board()->blocks.pwrap` is the
-  SoC file's value (`soc/*.toml`). A constant in a driver works on one phone and writes to something
+  SoC file's value (`arch/arm64/boot/dts/mediatek/*.toml`). A constant in a driver works on one phone and writes to something
   else on the next one.
 - **Every wait is bounded.** A register that never changes ends the wait with an answer such as "no
   answer". It does not hang the boot.

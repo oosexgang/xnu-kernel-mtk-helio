@@ -51,10 +51,10 @@ For people with a branch, a patch or a habit from branch `x6826b` of the working
 | `xnu-build.sh`, `xnu-env.sh` | `kernel/build.sh`, `kernel/env.sh` |
 | `xnu-deps/` | `kernel/deps/` |
 | `xnu/README.md` | `kernel/README.md` |
-| `mtkloader/` | `loader/`; its output in `build/loader/` |
-| `mtkloader/touchfw.h`, `mtkloader/font8x16.h` | Not in the repository. `loader/build.sh` makes them in `build/loader/` from your phone's firmware file (`fw-touch/hdl_firmware.img`) and, on macOS, from a system font |
+| `mtkloader/` | `arch/arm64/boot/`; its output in `build/loader/` |
+| `mtkloader/touchfw.h`, `mtkloader/font8x16.h` | Not in the repository. `arch/arm64/boot/build.sh` makes them in `build/loader/` from your phone's firmware file (`fw-touch/hdl_firmware.img`) and, on macOS, from a system font |
 | `mtkloader/camjn1.h`, `camrx.h` | `build/loader/camjn1.h`, `camrx.h` (`tools/camtable.py`, `tools/camrx.py`) |
-| `tools/chainboot.py`, `xnuloader/mkpayload.py`, `xnuloader/identity.h`, `mkidentity.py` | `loader/chainboot.py`, `loader/mkpayload.py`, `loader/identity.h`, `loader/mkidentity.py` |
+| `tools/chainboot.py`, `xnuloader/mkpayload.py`, `xnuloader/identity.h`, `mkidentity.py` | `arch/arm64/boot/chainboot.py`, `arch/arm64/boot/mkpayload.py`, `arch/arm64/boot/identity.h`, `arch/arm64/boot/mkidentity.py` |
 | `XL_RAMDISK=userland/root.apfs ./xl_x6826b build` | `tools/run/mkpayload.sh` (the payload is the kernel and the small root; the UEFI loader is no longer packed into it) |
 | `build-payload.bin`, `xnu-flashed-slot_a.img` | `build/payload.bin`, `build/boot_a.img` |
 | `xnu-deps/host/zig` | `build/zig` (`tools/get-zig.sh`) |
@@ -63,7 +63,7 @@ For people with a branch, a patch or a habit from branch `x6826b` of the working
 | `docs/mtk-porting.md`, `docs/from-a-clone.md` | `docs/porting.md`, `docs/building.md` |
 | `docs/bluetooth-mtk-porting.md`, `docs/camera-mtk-porting.md` | `docs/bluetooth-porting.md`, `docs/camera-porting.md` |
 | `docs/*x6826b*.md`, `docs/touch-handover.md` (the phone's journals) | The package `x6826b` on the `devices` branch: `x6826b/journal/` |
-| Constants in `mtkloader/*.h` and in the drivers (`LK_FB_BASE`, `RAMOOPS_*`, `MARKER_PA`, `core_order`, `SYSTEM_PART`, every `*_BASE` and `*_PHYS`) | `soc/mt6768.toml` and the package's `board.toml`; `tools/boards.py gen` makes `hakios_platform.h` for the loader and `hakios_board_table.h` for the kernel |
+| Constants in `mtkloader/*.h` and in the drivers (`LK_FB_BASE`, `RAMOOPS_*`, `MARKER_PA`, `core_order`, `SYSTEM_PART`, every `*_BASE` and `*_PHYS`) | `arch/arm64/boot/dts/mediatek/mt6768.toml` and the package's `board.toml`; `tools/boards.py gen` makes `hakios_platform.h` for the loader and `hakios_board_table.h` for the kernel |
 | `runkit/` (the author's local kit) | Still local and not here; a plain run's defaults are the board file's `[boot]` |
 
 <!-- end -->

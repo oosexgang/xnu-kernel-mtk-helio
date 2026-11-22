@@ -194,5 +194,5 @@ def from_dtb(data):
     if 'ramoops_region' not in board:
         missing.append('ramoops\' region (a reserved-memory node with "pstore" or "ramoops" in it: take the live tree)')
     if 'fb_base' not in board:
-        missing.append('LK\'s framebuffer (reserved-memory "framebuffer": take the live tree, or loader/fbdiag.c says it)')
+        missing.append('LK\'s framebuffer (reserved-memory "framebuffer": take the live tree, or arch/arm64/boot/fbdiag.c says it)')
     return {'soc': soc, 'board': board, 'sources': sources, 'missing': missing}

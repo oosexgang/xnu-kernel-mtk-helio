@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The boards this project knows, as data: devices/NAME/board.toml and soc/SOC.toml.
+"""The boards this project knows, as data: arch/arm64/boot/dts/NAME/board.toml and arch/arm64/boot/dts/mediatek/SOC.toml.
 
   tools/boards.py list                 the boards, one a line
   tools/boards.py show BOARD           one board with its SoC's values filled in
@@ -10,9 +10,11 @@
                                        each board with a [loader] section, the loader's header
                                        (NAME/hakios_platform.h). The builds run this themselves.
   tools/boards.py new NAME --soc SOC [--description TEXT] [--dtb FILE]
-                                       start devices/NAME/ from the template; with --dtb, fill in what the phone's
-                                       device tree says (tools/devicetree.py), and write soc/SOC.toml if it is new
-  tools/boards.py which                the one phone that is here (what loader/build.sh builds for when not told)
+                                       start arch/arm64/boot/dts/NAME/ from the template; with --dtb, fill in what
+                                       the phone's device tree says (tools/devicetree.py), and write
+                                       arch/arm64/boot/dts/mediatek/SOC.toml if it is new
+  tools/boards.py which                the one phone that is here (what arch/arm64/boot/build.sh builds for when
+                                       not told)
   tools/boards.py get BOARD SECTION.KEY   one value, for the shell scripts (lists: space-separated)
 
 A board file says what a device has; a SoC file says where the blocks of its chip are, once for every
@@ -22,8 +24,9 @@ phone's boot loader starts a kernel at and travels in that phone's own boot imag
 through adding a device.
 
 A board is a device package: a directory NAME with board.toml in it. Packages are looked for in
-devices/ and in the directories of --devices DIR and of HAKIOS_DEVICES; SoC files in soc/ and --soc-dir
-DIR. The repository itself has a template; phones are packages kept apart from it (tools/device.py
+arch/arm64/boot/dts/ (and devices/, their place before 22 November 2026) and in the directories of
+--devices DIR and of HAKIOS_DEVICES; SoC files in arch/arm64/boot/dts/mediatek/ (and soc/) and --soc-dir
+DIR, as Linux keeps a board's .dts beside its chip's .dtsi. The repository itself has a template; phones are packages kept apart from it (tools/device.py
 brings one in).
 """
 import argparse
@@ -38,8 +41,11 @@ import minitoml  # noqa: E402  (TOML where Python has no reader of its own yet: 
 from devicetree import from_dtb  # noqa: E402  (what a phone's device tree says: tools/devicetree.py)
 
 ROOT = Path(__file__).resolve().parents[1]
-DEVICES = ROOT / 'devices'
-SOCS = ROOT / 'soc'
+DEVICES = ROOT / 'arch/arm64/boot/dts'          # the template, and the packages brought in
+SOCS = ROOT / 'arch/arm64/boot/dts/mediatek'    # one file a chip, as Linux keeps its .dtsi there
+# where packages and SoC files were before (2026-11-22): still looked in, after the places above
+OLD_DEVICES = ROOT / 'devices'
+OLD_SOCS = ROOT / 'soc'
 BOARD_HEADER = ROOT / 'drivers/board/hakios_board.h'
 # What `gen` writes, into one directory (--out; build/boards unless told otherwise). None of it is kept
 # in the repository: it is made from whichever device packages are there when something is built.
@@ -137,18 +143,18 @@ def shown(path):
 
 
 def soc_files():
-    """Every SoC file there is, soc/'s first: a name that is there twice is the first one's."""
+    """Every SoC file there is, arch/arm64/boot/dts/mediatek/'s first: a name that is there twice is the first one's."""
     seen = {}
-    for directory in ([] if ALONE else [SOCS]) + MORE_SOCS:
+    for directory in ([] if ALONE else [SOCS, OLD_SOCS]) + MORE_SOCS:
         for path in sorted(Path(directory).glob('*.toml')):
             seen.setdefault(path.stem, path)
     return [seen[name] for name in sorted(seen)]
 
 
 def board_files():
-    """Every device package's board file, devices/'s first (the template is not a board)."""
+    """Every device package's board file, arch/arm64/boot/dts/'s first (the template is not a board, nor is mediatek/)."""
     seen = {}
-    for directory in ([] if ALONE else [DEVICES]) + MORE_DEVICES:
+    for directory in ([] if ALONE else [DEVICES, OLD_DEVICES]) + MORE_DEVICES:
         for path in sorted(Path(directory).glob('*/board.toml')):
             if not path.parent.name.startswith('_'):
                 seen.setdefault(path.parent.name, path)
@@ -184,12 +190,12 @@ def features_text():
     comments = feature_comments()
     out = ['# What each feature needs', '',
            'A board lists the drivers it may start in `features` of its `board.toml`. Each needs to be told where',
-           'things are first: blocks of its chip\'s SoC file (`[blocks]` of `soc/SOC.toml`, shared by every phone',
+           'things are first: blocks of its chip\'s SoC file (`[blocks]` of `arch/arm64/boot/dts/mediatek/SOC.toml`, shared by every phone',
            'with that chip) and, for some, a section of the board file. `tools/boards.py check` refuses a board',
            'that lists a feature without them, and `tools/boards.py status NAME` says the same for one phone.', '',
            'This page is written by `tools/boards.py features --write` (`make docs`) from the tables the checker',
            'uses and the comments of `drivers/board/hakios_board.h`; a test keeps the three the same.',
-           'What each key means is in `devices/_template/`; the order to turn features on in is',
+           'What each key means is in `arch/arm64/boot/dts/_template/`; the order to turn features on in is',
            '[porting.md](porting.md)\'s.', '',
            '| Feature | What it is | SoC file `[blocks]` | Board file | Started with |', '|---|---|---|---|---|']
     for _, feature in feature_bits():
@@ -210,7 +216,7 @@ def features_text():
 
 def feature_needs(feature, board, soc):
     """What a board that lists the feature must have and has not, in words; [] when it has everything."""
-    soc_file = f'soc/{board.get("soc")}.toml'
+    soc_file = f'arch/arm64/boot/dts/mediatek/{board.get("soc")}.toml'
     blocks = soc.get('blocks', {})
     needs = [f'{block} in [blocks] of {soc_file}' for block in FEATURE_BLOCKS.get(feature, ()) if block not in blocks]
     needs += [f'[{section}] in the board file' for section in FEATURE_SECTIONS.get(feature, ()) if section not in board]
@@ -225,7 +231,7 @@ def status_text(name, board, soc):
     def line(what, state):
         out.append(f'  {what:18} {state}')
 
-    line('loader', 'built for this board (loader/build.sh)' if all(s in board for s in ('loader', 'ramoops', 'display'))
+    line('loader', 'built for this board (arch/arm64/boot/build.sh)' if all(s in board for s in ('loader', 'ramoops', 'display'))
          else 'needs [loader], [ramoops] and [display] in the board file (docs/porting.md)')
     out.append('')
     for _, feature in feature_bits():
@@ -339,7 +345,7 @@ def load(problems=None):
             problems.add(where, f'name = {data.get("name")!r}, but the directory is {name}')
         soc = socs.get(data.get('soc'))
         if soc is None:
-            problems.add(where, f'soc = {data.get("soc")!r}: there is no soc/{data.get("soc")}.toml')
+            problems.add(where, f'soc = {data.get("soc")!r}: there is no arch/arm64/boot/dts/mediatek/{data.get("soc")}.toml')
             soc = {}
         features = data.get('features', [])
         if isinstance(features, list):
@@ -365,7 +371,7 @@ def load(problems=None):
                     problems.add(f'{where} [loader]', 'core_order: begins with the core the boot loader leaves the '
                                  'loader on, which is core 0')
             if loader.get('big_cores_clock') and 'cpufreq' not in soc:
-                problems.add(f'{where} [loader]', f'big_cores_clock needs [cpufreq] in soc/{data.get("soc")}.toml')
+                problems.add(f'{where} [loader]', f'big_cores_clock needs [cpufreq] in arch/arm64/boot/dts/mediatek/{data.get("soc")}.toml')
             partition = loader.get('system_partition')
             if type(partition) is str and not 1 <= len(partition.strip()) <= 35:
                 problems.add(f'{where} [loader]', 'system_partition: a GPT partition name, 1 to 35 characters')
@@ -427,7 +433,7 @@ def c_value(kind, value):
     raise ValueError(kind)
 
 
-GENERATED = '/* Made by tools/boards.py gen from the device packages and soc/ that were there: not kept, not edited. */'
+GENERATED = '/* Made by tools/boards.py gen from the device packages and the SoC files that were there: not kept, not edited. */'
 
 
 def table_text(socs, boards):
@@ -470,7 +476,7 @@ def table_text(socs, boards):
 
 
 def platform_text(name, board, soc):
-    """The loader's header for one board: every value it is built with, as a constant (loader/mtkloader.c)."""
+    """The loader's header for one board: every value it is built with, as a constant (arch/arm64/boot/mtkloader.c)."""
     out = [GENERATED, f'/* board {name}: {board["description"]}, {board["soc"]} */',
            '#ifndef HAKIOS_PLATFORM_H', '#define HAKIOS_PLATFORM_H', '',
            f'#define HAKIOS_BOARD_NAME               {c_string(name)}',
@@ -489,7 +495,7 @@ def platform_text(name, board, soc):
         values = data.get(section, {})
         if not values:
             continue
-        out.append(f'/* [{section}] of {"soc/" + board["soc"] + ".toml" if schema is SOC_SCHEMA else "the board file"} */')
+        out.append(f'/* [{section}] of {"arch/arm64/boot/dts/mediatek/" + board["soc"] + ".toml" if schema is SOC_SCHEMA else "the board file"} */')
         for key, (kind, _) in schema[section].items():
             if key not in values:
                 continue
@@ -591,14 +597,14 @@ def new_board(name, soc_name, description=None, dtb=None):
             raise SystemExit(f'boards.py: {soc_name!r}: lower-case letters, digits and dashes')
         if found:
             (SOCS / f'{soc_name}.toml').write_text(soc_text(soc_name, found))
-            print(f'boards.py: soc/{soc_name}.toml written from the tree: check it, then fill in what its end lists')
+            print(f'boards.py: arch/arm64/boot/dts/mediatek/{soc_name}.toml written from the tree: check it, then fill in what its end lists')
         else:
             text = (DEVICES / '_template/soc.toml').read_text()
             (SOCS / f'{soc_name}.toml').write_text(text.replace('name = "mt0000"', f'name = "{soc_name}"'))
-            print(f'boards.py: soc/{soc_name}.toml is new: every address in it is to be read from your phone')
+            print(f'boards.py: arch/arm64/boot/dts/mediatek/{soc_name}.toml is new: every address in it is to be read from your phone')
     elif found:
         differences = soc_differences(minitoml.loads((SOCS / f'{soc_name}.toml').read_text()), found)
-        print(f'boards.py: soc/{soc_name}.toml and the tree: ' + ('they agree' if not differences else
+        print(f'boards.py: arch/arm64/boot/dts/mediatek/{soc_name}.toml and the tree: ' + ('they agree' if not differences else
               'they DISAGREE -- another chip, or another revision of it:\n  ' + '\n  '.join(differences)))
     target.mkdir(parents=True)
     text = (DEVICES / '_template/board.toml').read_text()
@@ -631,7 +637,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--devices', action='append', default=[], metavar='DIR', help='look for device packages here as well')
     parser.add_argument('--soc-dir', action='append', default=[], metavar='DIR', help='look for SoC files here as well')
-    parser.add_argument('--alone', action='store_true', help='look nowhere else: not in devices/ and soc/, not in HAKIOS_DEVICES')
+    parser.add_argument('--alone', action='store_true', help='look nowhere else: not in arch/arm64/boot/dts (nor devices/, soc/), not in HAKIOS_DEVICES')
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('list')
     sub.add_parser('check')
@@ -709,7 +715,7 @@ def main():
                   ('true' if value else 'false') if isinstance(value, bool) else
                   hex(value) if kind in (A, X) and type(value) is int else value)
         else:
-            for title, data in ((f'devices/{args.board}/board.toml', board), (f'soc/{board["soc"]}.toml', soc)):
+            for title, data in ((f'arch/arm64/boot/dts/{args.board}/board.toml', board), (f'arch/arm64/boot/dts/mediatek/{board["soc"]}.toml', soc)):
                 print(f'# {title}')
                 for key, value in data.items():
                     if isinstance(value, dict):

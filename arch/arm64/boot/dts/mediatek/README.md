@@ -15,7 +15,7 @@ lives here, with the code, and not in a phone's package.
 | `[blocks]` | The address of every peripheral block a driver maps | The loader and every driver: none carries an address of its own |
 | `[cpufreq]` | The big cluster's PLL and the speed it can take at the voltage LK leaves | A board's `big_cores_clock = true` in `[loader]` |
 
-Every key is explained in the file itself and in `devices/_template/soc.toml`.
+Every key is explained in the file itself and in `arch/arm64/boot/dts/_template/soc.toml`.
 
 ## Where the values come from
 
@@ -47,7 +47,7 @@ and refuses a GPU it does not serve with a sentence saying what is missing (`rwa
 
 The GPUs are the vendor's published ones; only `mt6768` has been run. To bring another chip up:
 
-1. Its SoC file here, from the Android device tree of a phone with it (`devices/_template/soc.toml`, `tools/fdtfind.py`).
+1. Its SoC file here, from the Android device tree of a phone with it (`arch/arm64/boot/dts/_template/soc.toml`, `tools/fdtfind.py`).
    `mali` (the GPU's registers) and `mfgcfg` (its clock gates) are the GPU's blocks.
 2. Its GPU brought up by `bsd/dev/mtk_mali.c` (power domains, clocks): the G52's are MT6768's MFG domains, another
    chip's are in its Android kernel's `drivers/gpu/mediatek` and clock driver. The clock's range (`mali_mhz=`,

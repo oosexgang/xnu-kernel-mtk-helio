@@ -17,14 +17,14 @@ word names a file or a tool, the path says where it is.
 | **Job cache** | launchd's own list of the system's jobs; with `JOBCACHE=1` the small image carries it and `init` binds it over the system's, so jobs change without a new system image. |
 | **Kept lines** | What the kernel keeps for the host (`kern.hakios.host_keep`, 64 KB, through the pmsg zone): lines a program says beginning with `!!`. They survive when the log's middle is lost. |
 | **kmali** | `userland/src/mali/rwa/kmali.c`: the native library's GPU memory and submissions, over HakiosMali. |
-| **Loader** | `mtkloader` (`loader/`): what LK starts in place of a kernel; it chooses Android or XNU, builds XNU's device tree, and takes the log back. |
+| **Loader** | `mtkloader` (`arch/arm64/boot/`): what LK starts in place of a kernel; it chooses Android or XNU, builds XNU's device tree, and takes the log back. |
 | **Model** | A host program's stand-in for a block's registers (`workbench/pwrap_model.h`), behind a driver's `rd()` and `wr()`. |
 | **Native library** | `libhakiosmali.dylib` (`userland/src/mali/rwa/`): `air_metal.h`'s contract served with the Mali's job descriptors written by us. |
 | **Payload** | The kernel and the small image in one container ("XNUP", `tools/run/mkpayload.sh`), in the last 96 MiB of the system partition. |
 | **Recipe** | One pipeline a process built, as the Metal device says it in a run's log (`rwr` lines); harvested into `userland/share/rwm-recipes27.txt`. |
 | **Run** | One boot of XNU: `boot_a` written, one XNU boot asked for, the log read back (`tools/run/xnu-cycle.sh`). |
 | **Small image** | `root26-sys.apfs`: our programs, libraries and job list, mounted on `/hakios` (`md1`). |
-| **SoC file** | `soc/SOC.toml`: where the blocks of one chip are, shared by every board with it. |
+| **SoC file** | `arch/arm64/boot/dts/mediatek/SOC.toml`: where the blocks of one chip are, shared by every board with it. |
 | **Stage** | One compiled shader of a pipeline (a vertex, fragment or compute function with its constants). |
 | **Stage cache** | Stages compiled on the Mac beforehand (`userland/tools/rwacache.sh`), loaded by the native library instead of compiled on the phone. |
 | **stage0** | `/sbin/launchd` of the system image: ours; it mounts the small image and runs our `init`. |

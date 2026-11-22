@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| SoC | (soc/SOC.toml) |
+| SoC | (arch/arm64/boot/dts/mediatek/SOC.toml) |
 | Panel | W x H, video or command mode |
 | Storage | eMMC or UFS; the partition with the system image |
 | Verified | the date and the commit of the main branch it was run with |

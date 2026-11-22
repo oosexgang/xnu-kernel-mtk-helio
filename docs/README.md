@@ -21,13 +21,13 @@ Next to the code:
 
 | Document | |
 | --- | --- |
-| [../devices/README.md](../devices/README.md) | Device packages and board files. |
-| [../soc/README.md](../soc/README.md) | SoC files: what one says, where its values come from. |
+| [../arch/arm64/boot/dts/README.md](../arch/arm64/boot/dts/README.md) | Device packages and board files. |
+| [../arch/arm64/boot/dts/mediatek/README.md](../arch/arm64/boot/dts/mediatek/README.md) | SoC files: what one says, where its values come from. |
 | [../workbench/README.md](../workbench/README.md) | What is tested without a phone, and how a driver runs without a kernel. |
 | [../tools/README.md](../tools/README.md) | The tools, one line each: the project's, one run on the phone, what a run left. |
 | [../kernel/README.md](../kernel/README.md) | How the kernel's sources are kept and worked on. |
 | [../kernel/patches/README.md](../kernel/patches/README.md) | What each patch changes in Apple's files. |
-| [../loader/README.md](../loader/README.md) | The loader. |
+| [../arch/arm64/boot/README.md](../arch/arm64/boot/README.md) | The loader. |
 | [../darwin/README.md](../darwin/README.md) | What Darwin 27 needs: each library, tool and build step, and what each needs. |
 | [../userland/README.md](../userland/README.md) | Our user space: the programs, the inserted libraries, the Metal device, the job lists, the user space's tools. |
 | [../userland/src/mali/README.md](../userland/src/mali/README.md) | The native Mali back end's bring-up: its parts, its probe's stages, its 37 capabilities. |

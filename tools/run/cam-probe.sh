@@ -6,8 +6,8 @@
 set -e
 S="${HAKIOS_SERIAL:?set HAKIOS_SERIAL to your phone adb serial}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-"$ROOT/loader/build.sh" -DCAM_PROBE=1 "$@" >/dev/null
-python3 "$ROOT/loader/build_flashed.py" >/dev/null
+"$ROOT/arch/arm64/boot/build.sh" -DCAM_PROBE=1 "$@" >/dev/null
+python3 "$ROOT/arch/arm64/boot/build_flashed.py" >/dev/null
 [ "$(adb -s $S get-state 2>/dev/null)" = device ] && adb -s $S reboot bootloader
 for i in $(seq 1 60); do fastboot devices | grep -q $S && break; sleep 1; done
 # (fastboot -s waits for ever for a phone that is not there)

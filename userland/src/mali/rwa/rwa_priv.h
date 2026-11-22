@@ -55,7 +55,7 @@ extern uint64_t rwa_compile_ns[3];
 
 /* a MediaTek Helio chip and its GPU (rwa_helio.c) */
 struct rwa_helio {
-	const char *soc;              /* hw.board.soc, soc/NAME.toml: "mt6768" */
+	const char *soc;              /* hw.board.soc, arch/arm64/boot/dts/mediatek/NAME.toml: "mt6768" */
 	const char *name;             /* "Helio G85 (MT6768)" */
 	const char *gpu;              /* "Mali-G52 MC2" */
 	unsigned gpu_id[2];           /* Panfrost's product ids (0: no Mali) */

@@ -1,4 +1,4 @@
-# A made-up chip: the shape of soc/mt6768.toml with other addresses, for workbench/ only.
+# A made-up chip: the shape of arch/arm64/boot/dts/mediatek/mt6768.toml with other addresses, for workbench/ only.
 name = "mt0001"
 description = "A made-up chip for the tests"
 [platform]

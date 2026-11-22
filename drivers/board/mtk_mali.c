@@ -1,5 +1,5 @@
 /*
- * The GPU of the first phone (an MT6768: devices/x6826b), a Mali-G52 MC2, brought up from the kernel. Only with
+ * The GPU of the first phone (an MT6768: arch/arm64/boot/dts/x6826b), a Mali-G52 MC2, brought up from the kernel. Only with
  * boot-arg mali=1: every address below belongs to this phone (the Qualcomm port's GPU is an Adreno,
  * in xnu-kernel-qcom).
  *

@@ -4,7 +4,7 @@
 # (docs/porting.md, step 1). HAKIOS_BOARD=NAME when more than one phone's package is here.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/.." && pwd)"
+ROOT="$(cd "$HERE/../../.." && pwd)"
 "$HERE/build.sh" > /dev/null                    # (the board's header, the font, the linker: as the loader's)
 OUT=$ROOT/build/loader
 BOARD=${HAKIOS_BOARD:-$("$ROOT/tools/boards.py" which)}

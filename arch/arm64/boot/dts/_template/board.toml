@@ -4,7 +4,7 @@
 
 name = "NAME"                       # the directory's name, and what the loader puts in /chosen/darwin-board
 description = "Maker Model"         # for people: logs, hw.board.description, tools/boards.py list
-soc = "mt0000"                      # soc/mt0000.toml: where the blocks of the chip are
+soc = "mt0000"                      # arch/arm64/boot/dts/mediatek/mt0000.toml: where the blocks of the chip are
 
 # The drivers this board may start. Empty at first: add one once its driver has been seen to work
 # here, in the order of docs/porting.md. The kernel knows these (drivers/board/hakios_board.h):
@@ -52,7 +52,7 @@ features = []
 # width = 720
 # height = 1640
 
-# loader/fbdiag.c, the first thing a port runs.
+# arch/arm64/boot/fbdiag.c, the first thing a port runs.
 # [fbdiag]
 # marker = 0x4d0df000               # a word that survives the watchdog reset and that Android rewrites: the
 #                                   # header of ramoops' ftrace zone

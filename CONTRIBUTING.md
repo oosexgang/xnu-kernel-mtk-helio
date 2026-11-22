@@ -17,13 +17,13 @@ without the kernel toolchain.
 
 | The change | Goes in | Then |
 | --- | --- | --- |
-| A new phone, or a value of an existing one | Its device package on the `devices` branch: `NAME/board.toml`, with its README and journal. Not `devices/NAME` on the main branch, which git ignores there. | `tools/boards.py check`, with the package in `devices/` of a checkout of the main branch (`tools/device.py add NAME --from DIR` copies it there and checks it) |
-| A new SoC, or a value of an existing one | `soc/SOC.toml` | `tools/boards.py check` |
+| A new phone, or a value of an existing one | Its device package on the `devices` branch: `NAME/board.toml`, with its README and journal. Not `arch/arm64/boot/dts/NAME` on the main branch, which git ignores there. | `tools/boards.py check`, with the package in `arch/arm64/boot/dts/` of a checkout of the main branch (`tools/device.py add NAME --from DIR` copies it there and checks it) |
+| A new SoC, or a value of an existing one | `arch/arm64/boot/dts/mediatek/SOC.toml` | `tools/boards.py check` |
 | A new feature | `HAKIOS_HAS_*` in `drivers/board/hakios_board.h`, its needs in `tools/boards.py` | `make docs` (`docs/features.md`) |
 | A driver, or anything else HakiOS adds to the kernel | `kernel/overlay/` (a driver: `bsd/dev/`, a line in `bsd/conf/files`, its start in `hakios_drivers.c`) | `kernel/build.sh`, and its test in `workbench/` |
 | A change to one of Apple's files | An assembled tree, then `kernel/export.sh` | Never edit `kernel/patches/*.patch` by hand: `kernel/verify.sh` rejects it. |
 | A boot argument | A comment naming it as `name=…` beside its read | `make docs` |
-| The loader | `loader/` | `loader/build.sh`; addresses come from the board files, not from code. |
+| The loader | `arch/arm64/boot/` | `arch/arm64/boot/build.sh`; addresses come from the board files, not from code. |
 | A library inserted into a process, a test program, the Metal device, the Mali library | `userland/src/` | `darwin/mtk27.sh libs`, `metal` or `mali`, then `root` |
 | What a run does | `userland/jobs/` | `RC_JOBS=` of the `root` step |
 | A build step of the 27 release's images | `darwin/` | `darwin/mtk27.sh STEP` |

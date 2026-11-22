@@ -22,7 +22,7 @@ description = "MediaTek ... (MT0000)"
 # topckgen, infracfg_ao, gpio, spm, toprgu, apmixed, pwrap, keypad, scp_sram, scp_cfg, scp_clkctrl,
 # ap_dma_btif_tx, i2c2, btif, i2c4, spi2, msdc0, msdc1, mipi_rx, mfgcfg, mali, mmsys, disp_mutex0,
 # smi_common, disp_ovl0, conn, conn_mcu, conn_hif_on, conn_top_misc_off, conn_wbg, conn_misc_on,
-# camsys, smi_larb3, seninf, camsv0, camsv1: soc/mt6768.toml shows each with its node.
+# camsys, smi_larb3, seninf, camsv0, camsv1: arch/arm64/boot/dts/mediatek/mt6768.toml shows each with its node.
 
 # The big cluster's PLL, for a board's big_cores_clock.
 # [cpufreq]

@@ -15,7 +15,7 @@ boot ROM -> preloader -> LK (the phone's own, untouched)
    LK loads boot_a as an Android boot image and starts its "kernel" as a Linux arm64 Image:
    MMU and caches off, x0 = LK's device tree
       the "kernel" is gzip of:  mtkloader | padding | Android's own Image
-         loader (loader/): Android, unless one XNU boot was asked for
+         loader (arch/arm64/boot/): Android, unless one XNU boot was asked for
            - built for one board: every address is that board's (hakios_platform.h)
            - reads the payload (the kernel and the small image) from the last 96 MiB of the system
              partition, checks its sum
@@ -48,9 +48,9 @@ download mode (mtkclient); [porting.md](porting.md) says how to check it first.
 
 | Layer | Where | Changes when |
 | --- | --- | --- |
-| **Device data** | A device package per phone (`NAME/board.toml`, on the `devices` branch), `soc/SOC.toml` on the main branch | A new phone, or a new SoC. No code. |
+| **Device data** | A device package per phone (`NAME/board.toml`, on the `devices` branch), `arch/arm64/boot/dts/mediatek/SOC.toml` on the main branch | A new phone, or a new SoC. No code. |
 | **Drivers for parts** | `drivers/board/`, `drivers/iokit/`, the loader's part headers | A phone has a part nobody wrote a driver for yet (a touch controller, a camera sensor). |
-| **The port itself** | `kernel/patches/`, the rest of `kernel/overlay/`, `loader/`, `userland/`, `darwin/` | Apple's kernel or the system changes, or the port learns something new. Same for every device. |
+| **The port itself** | `kernel/patches/`, the rest of `kernel/overlay/`, `arch/arm64/boot/`, `userland/`, `darwin/` | Apple's kernel or the system changes, or the port learns something new. Same for every device. |
 
 The aim is that a new phone on a known SoC is a change to the first row only, and a new SoC adds one
 file to it. Where that is not yet true, [drivers.md](drivers.md) says so driver by driver.
@@ -61,11 +61,11 @@ file to it. Where that is not yet true, [drivers.md](drivers.md) says so driver 
   <img src="assets/device-data.svg" alt="board.toml and the SoC file, through tools/boards.py gen, into the kernel's table and the loader's header" width="830">
 </p>
 
-- The repository describes no phone. `devices/` on the main branch has a template
-  (`devices/_template/`).
+- The repository describes no phone. `arch/arm64/boot/dts/` on the main branch has a template
+  (`arch/arm64/boot/dts/_template/`).
 - A phone is a **device package**: a directory `NAME/` with its `board.toml`, its README and its
   journal. Packages are kept on the `devices` branch. `tools/device.py add NAME` copies one into
-  `devices/NAME/` of a checkout, which git ignores there.
+  `arch/arm64/boot/dts/NAME/` of a checkout, which git ignores there.
 - A **board file** says what the device has: its SoC, the drivers it may start (`features`,
   [features.md](features.md)), the memory the loader may use (`[loader]`), Android's ramoops zones
   (`[ramoops]`), the panel and LK's framebuffer (`[display]`), the cell (`[battery]`), CONNSYS's
@@ -73,7 +73,7 @@ file to it. Where that is not yet true, [drivers.md](drivers.md) says so driver 
 - A **SoC file** says where the blocks of the chip are: the interrupt controller and the cores
   (`[platform]`), every peripheral block a driver maps (`[blocks]`), the big cluster's PLL
   (`[cpufreq]`).
-- The generated files are not committed. `kernel/build.sh` and `loader/build.sh` run
+- The generated files are not committed. `kernel/build.sh` and `arch/arm64/boot/build.sh` run
   `tools/boards.py gen` themselves.
 - **The kernel** finds its row by `/chosen/darwin-board`. A driver asks
   `hakios_board_wants(HAKIOS_HAS_…)` before it starts and reads addresses from `hakios_board()`.
@@ -84,7 +84,7 @@ file to it. Where that is not yet true, [drivers.md](drivers.md) says so driver 
   that board's values as constants, and its part drivers (the touch firmware upload, the CONNSYS
   report) are compiled in only for a board that lists the feature.
 
-Details and every key: [devices/README.md](../devices/README.md), `devices/_template/`.
+Details and every key: [arch/arm64/boot/dts/README.md](../arch/arm64/boot/dts/README.md), `arch/arm64/boot/dts/_template/`.
 
 ## The kernel
 
@@ -116,12 +116,12 @@ More: [kernel/README.md](../kernel/README.md), [kernel/patches/README.md](../ker
 
 ## The loader
 
-`loader/mtkloader.c` is one program: LK's hand-over, the payload ("XNUP": kernel + small image), the
+`arch/arm64/boot/mtkloader.c` is one program: LK's hand-over, the payload ("XNUP": kernel + small image), the
 device tree it builds for XNU, the log's way into ramoops, the watcher. `msdc.h` reads the eMMC as LK
 left it; `mtkdbg.h` is the screen and ramoops output; `mtkspi.h` and `tcm.h` are the touch
 controller's bus and protocol; `mtkpwrap.h`, `mtkmali.h`, `mtkcam.h` and `mtkconnsys.h` are probes
 that report and return to Android. It runs with the MMU off, so all memory is device memory: no SIMD,
-no unaligned access, no compiler builtins. More: [loader/README.md](../loader/README.md).
+no unaligned access, no compiler builtins. More: [arch/arm64/boot/README.md](../arch/arm64/boot/README.md).
 
 ## User space
 
@@ -157,7 +157,7 @@ from elsewhere. Everything that is fetched is pinned, listed in one place: `comp
 | The SDK | Apple's. | `iPhoneOS16.5.sdk` of github.com/theos/sdks, into `$THEOS/sdks`; the macOS 26.5 SDK's iig headers, fetched by `kernel/deps/setup.sh`. |
 | The phone's firmware (touch, CONNSYS, sensor hub) and camera tables | The vendor's; taken from the same phone it runs on. | `adb pull` from its Android; the package's journal says which files. |
 | The rooted boot image | Your phone's own. | `backup/boot_a_magisk.img`. |
-| The loader's font | A rendering of a system font. | `loader/build.sh` makes it on macOS; elsewhere the loader's text on the panel is blank. |
+| The loader's font | A rendering of a system font. | `arch/arm64/boot/build.sh` makes it on macOS; elsewhere the loader's text on the panel is blank. |
 
 ## Not carried over from the working tree
 

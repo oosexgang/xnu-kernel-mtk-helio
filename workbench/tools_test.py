@@ -73,7 +73,7 @@ class Boards(unittest.TestCase):
                 ('core_order = [0, 6, 7, 1, 2, 3, 4, 5]', 'core_order = [6, 0, 7, 1, 2, 3, 4, 5]', 'begins with the core'),
                 ('marker = 0x81000000', 'marker = 0xd0000000', 'overlap'),
                 ('fb_pitch = 4352', 'fb_pitch = 1080', 'four a pixel'),
-                ('soc = "mt0001"', 'soc = "mt9999"', 'there is no soc/mt9999.toml'),
+                ('soc = "mt0001"', 'soc = "mt9999"', 'there is no arch/arm64/boot/dts/mediatek/mt9999.toml'),
                 ('cpus = 4', 'cpus = 8', 'cpus: 1 to 7'),
                 ('bootargs = ["touchscreen=2"]', 'bootargs = ["touch screen"]', 'not NAME or NAME=VALUE'),
                 ('pmsg_size = 0x10000', 'pmsg_size = "big"', 'a number of 32 bits'),
@@ -114,14 +114,14 @@ class Boards(unittest.TestCase):
 
     def test_the_template_explains_every_key(self):
         import boards as tool
-        board = (ROOT / 'devices/_template/board.toml').read_text()
+        board = (ROOT / 'arch/arm64/boot/dts/_template/board.toml').read_text()
         for section, keys in tool.BOARD_SCHEMA.items():
             for key in keys:
-                self.assertRegex(board, r'(?m)^#? ?%s = ' % key, f'devices/_template/board.toml does not explain {section or "top"}.{key}')
-        soc = (ROOT / 'devices/_template/soc.toml').read_text()
+                self.assertRegex(board, r'(?m)^#? ?%s = ' % key, f'arch/arm64/boot/dts/_template/board.toml does not explain {section or "top"}.{key}')
+        soc = (ROOT / 'arch/arm64/boot/dts/_template/soc.toml').read_text()
         for section in ('platform', 'cpufreq'):
             for key in tool.SOC_SCHEMA[section]:
-                self.assertRegex(soc, r'(?m)^#? ?%s = ' % key, f'devices/_template/soc.toml does not explain {section}.{key}')
+                self.assertRegex(soc, r'(?m)^#? ?%s = ' % key, f'arch/arm64/boot/dts/_template/soc.toml does not explain {section}.{key}')
         for key in tool.SOC_SCHEMA['blocks']:
             self.assertIn(key, soc)
 

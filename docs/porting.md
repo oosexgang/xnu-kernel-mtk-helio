@@ -12,11 +12,11 @@ order it was needed, and where each thing is in the tree. Expect a step it does 
 
 | The same on every phone (already written) | Yours to find and write |
 | --- | --- |
-| The kernel: Apple's xnu-12377.121.6 + `kernel/patches/` + `kernel/overlay/`, built as `DEVELOPMENT_ARM64_BCM2837` | Your phone's package: `devices/NAME/board.toml` (the table below) |
-| GICv3, PSCI cores, the return to the loader, the platform expert | `soc/SOC.toml`, if your chip has none yet |
-| The loader, the image format and its packer (`loader/chainboot.py`), the run cycle (`tools/run/xnu-cycle.sh`, `tools/run/boot-xnu.sh`) | The storage driver if yours is not an eMMC on MSDC0 left ready by LK |
+| The kernel: Apple's xnu-12377.121.6 + `kernel/patches/` + `kernel/overlay/`, built as `DEVELOPMENT_ARM64_BCM2837` | Your phone's package: `arch/arm64/boot/dts/NAME/board.toml` (the table below) |
+| GICv3, PSCI cores, the return to the loader, the platform expert | `arch/arm64/boot/dts/mediatek/SOC.toml`, if your chip has none yet |
+| The loader, the image format and its packer (`arch/arm64/boot/chainboot.py`), the run cycle (`tools/run/xnu-cycle.sh`, `tools/run/boot-xnu.sh`) | The storage driver if yours is not an eMMC on MSDC0 left ready by LK |
 | The user space side: `darwin/mtk27.sh` for the 27 release, `userland/build.sh` and `darwin/system/fetch.sh` for the earlier system, the inserted libraries | The touch controller, the GPU's power sequence, the keys, the radios, the camera: a driver each, with a feature |
-| The log's road back through ramoops (`loader/mtkdbg.h`) | The addresses of the ramoops zones and of LK's framebuffer |
+| The log's road back through ramoops (`arch/arm64/boot/mtkdbg.h`) | The addresses of the ramoops zones and of LK's framebuffer |
 
 A phone with the same chip and the same parts is a package and nothing else. A phone with another
 SoC of the family adds a SoC file and keeps the method. A phone that is not MediaTek keeps the kernel
@@ -26,7 +26,7 @@ and the user space side only: `mtkloader` assumes LK, MSDC, TOPRGU and OVL.
 
 1. **An unlocked bootloader** and a way to write one partition (`fastboot flash boot_a`).
 2. **Root under Android** (the first phone has Magisk in `boot_a`). The run cycle asks for an XNU boot through `/dev/pmsg0`, reads the log from
-   `/sys/fs/pstore` and writes the system image with `dd`: all three need `su`. `loader/build_flashed.py` packs the loader into **your own**
+   `/sys/fs/pstore` and writes the system image with `dd`: all three need `su`. `arch/arm64/boot/build_flashed.py` packs the loader into **your own**
    rooted boot image, `backup/boot_a_magisk.img` by default; it is never in the repository.
 3. **ramoops in Android's kernel**: `/sys/fs/pstore/console-ramoops-0` exists after a reboot. This is the only way out for a log: the first phone has no
    reachable serial port, and nothing else survives the reset back into Android.
@@ -48,16 +48,16 @@ boot ROM -> preloader -> LK (stock, untouched)
                ... the run ends (time, panic, checkpoint) -> back into the loader -> log into ramoops -> warm reset -> Android
 ```
 
-- `loader/chainboot.py` packs the image; the arm64 header's `res2` is the length of Android's Image and `res3` the payload's offset
-  (`loader/start.S`). Android's ramdisk, dtb and command line are kept as they were.
-- The payload is `build/payload.bin`, made by `loader/mkpayload.py` as `tools/run/mkpayload.sh` calls it. The
-  loader takes two of its entries: `kernel` and `ramdisk` (the small root, md1). `loader/build_flashed.py` then makes
+- `arch/arm64/boot/chainboot.py` packs the image; the arm64 header's `res2` is the length of Android's Image and `res3` the payload's offset
+  (`arch/arm64/boot/start.S`). Android's ramdisk, dtb and command line are kept as they were.
+- The payload is `build/payload.bin`, made by `arch/arm64/boot/mkpayload.py` as `tools/run/mkpayload.sh` calls it. The
+  loader takes two of its entries: `kernel` and `ramdisk` (the small root, md1). `arch/arm64/boot/build_flashed.py` then makes
   `build/boot_a.img`.
 - **The default is Android.** XNU starts only when the loader finds the words `HAKIOS:BOOT-XNU` in ramoops' pmsg zone, written from
   Android by `tools/run/boot-xnu.sh`, and takes them away: the boot after XNU is Android again. A kernel that hangs costs a power cycle.
   (`-DMENU_DEFAULT_XNU=1` reverses that; an image that always started XNU, with no watchdog, is how the phone was trapped.)
 - The loader runs with the MMU off, so all memory is device memory: no SIMD, no unaligned access, no compiler builtins
-  (`-mgeneral-regs-only -mstrict-align -fno-builtin`, `loader/build.sh`). Code added to it must hold to that.
+  (`-mgeneral-regs-only -mstrict-align -fno-builtin`, `arch/arm64/boot/build.sh`). Code added to it must hold to that.
 - A marker in DRAM (the board file's `marker`, three copies) says how the last run ended: none, run; `NXRN`, XNU was cut short, so copy its log out of DRAM
   and start Android; `NXDN`, XNU came back and its log is saved, start Android.
 
@@ -94,8 +94,8 @@ any code is run.
 | Where fbdiag keeps its marker and what it probes | `[fbdiag]` | the header of ramoops' ftrace zone | the ramoops layout |
 | The phone's name to Android | `[boot] android_device` | | `adb shell getprop ro.product.device` |
 
-For a chip without a SoC file, `soc/SOC.toml` takes the tree's `reg` of each block
-(`devices/_template/soc.toml`, `soc/mt6768.toml` as the example): the interrupt controller, the UART,
+For a chip without a SoC file, `arch/arm64/boot/dts/mediatek/SOC.toml` takes the tree's `reg` of each block
+(`arch/arm64/boot/dts/_template/soc.toml`, `arch/arm64/boot/dts/mediatek/mt6768.toml` as the example): the interrupt controller, the UART,
 the watchdog (`toprgu`), the display's overlay engine and mutex, the eMMC's controller. The big
 cluster's PLL (`[cpufreq]`) comes from the vendor's cpufreq table for your chip; leave
 `big_cores_clock` out of the board file until you have read it: it writes a PLL.
@@ -115,7 +115,7 @@ its own with `-DXNU_SERIAL=...`; it is never committed.
 
 Each step has the check that proves it. Do not start a step whose predecessor's check has not been seen on the phone.
 
-1. **Does code of ours run at all, and can it say so?** `loader/build_fbdiag.sh` packs `fbdiag` in front of Android's kernel. It writes to
+1. **Does code of ours run at all, and can it say so?** `arch/arm64/boot/build_fbdiag.sh` packs `fbdiag` in front of Android's kernel. It writes to
    the screen and into the ramoops console, waits five seconds and starts Android. *Check:* `/sys/fs/pstore/console-ramoops-0` begins with
    `fbdiag: phase 1` and a line with the exception level, SCTLR, CPACR, MPIDR and CNTFRQ. If the file is Android's old log, the console zone's address
    is wrong. Six bars on the screen say whether the layer has per-pixel alpha (bar D, white with alpha 0, is invisible if it has). Phase 2, after a

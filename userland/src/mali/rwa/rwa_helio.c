@@ -1,6 +1,6 @@
 /*
  * The MediaTek Helio chips and their GPUs, for the native Metal library: which chip a board has (the kernel's
- * hw.board.soc, from soc/NAME.toml), the GPU in it, and what this library can do with that GPU.
+ * hw.board.soc, from arch/arm64/boot/dts/mediatek/NAME.toml), the GPU in it, and what this library can do with that GPU.
  *
  * The library writes Bifrost v7 job descriptors (genxml v7, Panfrost's PAN_ARCH 7): a Mali-G52 or G76 is served.
  * The rest of the Helio line is here so that a port to another phone starts from a sentence, not from a fault:

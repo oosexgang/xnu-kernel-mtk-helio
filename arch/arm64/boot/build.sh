@@ -2,12 +2,12 @@
 # Build the loader for one board: build/loader/mtkloader.bin. MMU off means device memory: no SIMD,
 # strict alignment, no builtins. Extra arguments go to the compiler (e.g. -DXNU_WDT_SECONDS=0).
 #
-#   HAKIOS_BOARD=NAME   the board (a device package in devices/); not needed when one phone is there
+#   HAKIOS_BOARD=NAME   the board (a device package in arch/arm64/boot/dts/); not needed when one phone is there
 #   TOUCH_FW=FILE       the touch controller's firmware image from your own phone (default
 #                       fw-touch/hdl_firmware.img); without it the loader carries none
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/.." && pwd)"
+ROOT="$(cd "$HERE/../../.." && pwd)"
 OUT=$ROOT/build/loader
 BOARD=${HAKIOS_BOARD:-$("$ROOT/tools/boards.py" which)}
 "$ROOT/tools/boards.py" gen > /dev/null

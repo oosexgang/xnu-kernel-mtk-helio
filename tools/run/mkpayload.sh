@@ -9,4 +9,4 @@ RD=${HAKIOS_RAMDISK:-$ROOT/userland/root.apfs}
 [ -f "$K" ] || { echo "mkpayload.sh: no kernel at $K: kernel/build.sh makes it" >&2; exit 1; }
 [ -f "$RD" ] || { echo "mkpayload.sh: no $RD: userland/build.sh makes it" >&2; exit 1; }
 mkdir -p "$ROOT/build"
-python3 "$ROOT/loader/mkpayload.py" -o "$ROOT/build/payload.bin" "kernel=$K" "ramdisk=$RD"
+python3 "$ROOT/arch/arm64/boot/mkpayload.py" -o "$ROOT/build/payload.bin" "kernel=$K" "ramdisk=$RD"

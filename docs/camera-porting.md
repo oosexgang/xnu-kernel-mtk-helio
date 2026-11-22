@@ -2,7 +2,7 @@
 
 What the first phone (an MT6768, with a Samsung S5K JN1) taught, as an order of work for another MediaTek phone. The code that is the same on every
 phone is `drivers/board/mtk_camera_skel.c`; what is different is a table of operations (`struct mtkcam_platform`) you fill in. The proven
-sequence for one phone is `kernel/bsd/dev/mtk_camera.c` (kernel) and `loader/mtkcam.h` (the loader's probe) in the device repository
+sequence for one phone is `kernel/bsd/dev/mtk_camera.c` (kernel) and `arch/arm64/boot/mtkcam.h` (the loader's probe) in the device repository
 [hakios-mt6768](https://github.com/oosexgang/hakios-mt6768); how it was found, run by run, is the camera journal of the first phone's device package (in Russian).
 
 ## What the skeleton does, and what it refuses to do
@@ -25,7 +25,7 @@ run on a phone: there is no port for it to run on yet.
 1. **Power** (`power_on`/`power_off`). Which rails, clocks, power domain, reset and MCLK pins the camera needs, and the order Android uses. On the first phone:
    the PMIC (MT6358) rails VCAMIO and VCAMD (and VCAMD's voltage: LK leaves one that Android changes; write it **and read it back**), a GPIO for the
    analog supply, the CAM power domain in the SPM and its bus protection, the camera clocks in topckgen/mmsys/camsys, reset and MCLK GPIOs. The loader's
-   probe (hakios-mt6768's `loader/mtkcam.h`, built with `CAM_PROBE=1`, started by `tools/run/cam-probe.sh`) reads pins, rails and the I2C controller and reports, then goes
+   probe (hakios-mt6768's `arch/arm64/boot/mtkcam.h`, built with `CAM_PROBE=1`, started by `tools/run/cam-probe.sh`) reads pins, rails and the I2C controller and reports, then goes
    back to Android: it only reads. A PMIC wrapper (WACS2) is shared with the keys and the connectivity drivers here: take `mtk_pwrap_lock()` around
    every transaction (hakios-mt6768's `kernel/patches/mtk_pwrap_lock.patch`), or two drivers will interleave.
 2. **The sensor** (`sensor_start`/`sensor_stop`). Its I2C address and bus, the chip-ID register and the expected ID (the first phone's is 0x38e1; check yours

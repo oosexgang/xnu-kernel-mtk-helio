@@ -1,5 +1,5 @@
 /*
- * The buttons of the first phone (an MT6768: devices/x6826b), as a source of button presses for
+ * The buttons of the first phone (an MT6768: arch/arm64/boot/dts/x6826b), as a source of button presses for
  * /dev/hakios-touch (sys/hakios_input.h). Only with boot-arg buttons=2: every address below
  * belongs to this phone; buttons=1 is the Qualcomm port's (xnu-kernel-qcom).
  *

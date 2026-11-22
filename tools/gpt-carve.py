@@ -6,7 +6,7 @@ primary and secondary images beside the originals; nothing touches the phone.
 
 Here it is for the first phone: 4 GiB off the end of userdata becomes "xnusys", where
 userland/system.apfs lives so that mtkloader can read it straight off the flash (the eMMC
-reader in loader/msdc.h). Everything else -- every other entry, the disk GUID, the entry
+reader in arch/arm64/boot/msdc.h). Everything else -- every other entry, the disk GUID, the entry
 order -- is left exactly as it was.
 """
 import binascii

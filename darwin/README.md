@@ -84,7 +84,7 @@ git; `userland/build.sh` builds the small root (and the earlier system's own ima
 
 The libraries and the images are the same for every phone. What is not: the system partition's name
 and size (the board file's `[loader] system_partition`, and the payload's 96 MiB at its end), and the
-identity Darwin is told (`loader/identity.h`, the loader's). The SpringBoard addresses in `inj26.sh`
+identity Darwin is told (`arch/arm64/boot/identity.h`, the loader's). The SpringBoard addresses in `inj26.sh`
 and the values in `fips26.py` belong to a Darwin build, not to a phone.
 
 ## Changes from the Qualcomm port

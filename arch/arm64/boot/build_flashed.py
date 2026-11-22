@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 
 android = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'backup', 'boot_a_magisk.img')
 if not os.path.isfile(android):

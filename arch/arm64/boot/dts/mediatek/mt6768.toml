@@ -4,7 +4,7 @@
 name = "mt6768"
 description = "MediaTek Helio G85 (MT6768)"
 
-# What the loader tells the kernel of the machine (loader/mtkloader.c, the device tree it builds).
+# What the loader tells the kernel of the machine (arch/arm64/boot/mtkloader.c, the device tree it builds).
 [platform]
 io_base = 0x0c000000                # one window over the SoC's peripherals: from the interrupt controller ...
 io_size = 0x14000000                # ... to the end of the display and camera blocks (0x20000000)

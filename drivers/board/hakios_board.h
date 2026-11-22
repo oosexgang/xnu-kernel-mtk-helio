@@ -2,7 +2,7 @@
  * The board this kernel runs on, as data.
  *
  * One kernel serves every board. Which one it is, the loader says (/chosen/darwin-board); what that
- * board has and where, the repository's devices/NAME/board.toml and soc/SOC.toml say, and
+ * board has and where, the repository's arch/arm64/boot/dts/NAME/board.toml and arch/arm64/boot/dts/mediatek/SOC.toml say, and
  * tools/boards.py turns them into the table of hakios_board_table.h. A driver asks here instead of
  * carrying its own addresses:
  *
@@ -13,7 +13,7 @@
  *
  * A board that is not in the table (a new port's first boots, a loader that names none) gets NULL and
  * no feature: nothing of a phone is touched on a machine that was not described. Adding a device is a
- * directory under devices/ (docs/porting.md), not a change to the drivers.
+ * directory under arch/arm64/boot/dts/ (docs/porting.md), not a change to the drivers.
  */
 #ifndef _HAKIOS_BOARD_H
 #define _HAKIOS_BOARD_H

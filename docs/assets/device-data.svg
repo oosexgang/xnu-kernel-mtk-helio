@@ -21,7 +21,7 @@
       </g>
       <g font-size="21" font-weight="bold" text-anchor="middle">
         <text x="225" y="132">NAME/board.toml</text>
-        <text x="225" y="268">soc/SOC.toml</text>
+        <text x="225" y="268">dts/mediatek/SOC.toml</text>
         <text x="600" y="200">tools/boards.py</text>
         <text x="975" y="132">the kernel's table</text>
         <text x="975" y="268">the loader's header</text>

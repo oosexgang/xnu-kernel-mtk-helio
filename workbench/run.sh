@@ -14,7 +14,7 @@ if command -v clang > /dev/null; then
 	printf '%s\n' '#include <stdint.h>' '#define TOUCH_FW_SIZE 0u' '#define TOUCH_FW_FLAG 0u' 'static const uint8_t touch_fw[1] = { 0 };' > "$out/touchfw.h"
 	echo 'static const unsigned char font8x16[95][16] = { { 0 } };' > "$out/font8x16.h"
 	clang --target=aarch64-linux-gnu -ffreestanding -fno-builtin -mgeneral-regs-only -mstrict-align -Os -Wall -Wextra -Werror \
-		-Wno-unused-function -fsyntax-only -I"$out/phone-a" -I"$out" loader/mtkloader.c
+		-Wno-unused-function -fsyntax-only -I"$out/phone-a" -I"$out" arch/arm64/boot/mtkloader.c
 	echo "tests: the loader compiles for the stand-in phone"
 else
 	echo "tests: no clang on this machine: the loader was not compiled"

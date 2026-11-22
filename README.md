@@ -73,7 +73,7 @@ The phones are device packages, kept apart from the code on the
 [`devices` branch](https://github.com/oosexgang/xnu-kernel-mtk-helio/tree/devices): its README lists
 them with how far each is, and each package's own README and journal say what works on that phone,
 what was verified on it and when, and what is still off. Chip support is shared and lives here, one
-file a chip in [`soc/`](soc): MT6768 (Helio G85) so far.
+file a chip in [`arch/arm64/boot/dts/mediatek/`](arch/arm64/boot/dts/mediatek): MT6768 (Helio G85) so far.
 
 ## Quick start
 
@@ -83,7 +83,7 @@ cd xnu-kernel-mtk-helio
 make check                        # everything that needs no phone
 
 tools/device.py available         # the phones there are packages for
-tools/device.py add x6826b        # bring one in (devices/x6826b)
+tools/device.py add x6826b        # bring one in (arch/arm64/boot/dts/x6826b)
 tools/boards.py status x6826b     # what it has on, what it can turn on next
 ```
 
@@ -104,7 +104,7 @@ Then build and run: [docs/building.md](docs/building.md). For a phone that has n
 | Write a driver for a part nobody has one for | [docs/writing-a-driver.md](docs/writing-a-driver.md) |
 | Find out what a message in the log means | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Look up a word | [docs/glossary.md](docs/glossary.md) |
-| Know how boards and packages are described | [devices/README.md](devices/README.md) |
+| Know how boards and packages are described | [arch/arm64/boot/dts/README.md](arch/arm64/boot/dts/README.md) |
 | Change something and send it back | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Carry over a branch or a patch from an earlier layout | [docs/migrating.md](docs/migrating.md) |
 | See what changed | [CHANGELOG.md](CHANGELOG.md) |
@@ -113,10 +113,10 @@ Then build and run: [docs/building.md](docs/building.md). For a phone that has n
 
 | Path | Contents |
 | --- | --- |
-| `devices/` | The board template, and the packages you bring in: each a board file. |
-| `soc/` | **One file per chip**: where its blocks are, shared by every board with that chip. |
+| `arch/arm64/boot/dts/` | The board template, and the packages you bring in: each a board file. |
+| `arch/arm64/boot/dts/mediatek/` | **One file per chip**: where its blocks are, shared by every board with that chip. |
 | `kernel/` | The kernel: Apple's pinned release, the files HakiOS adds (`overlay/`), the changes to Apple's files (`patches/`), and the tools that assemble, check and build it. |
-| `loader/` | `mtkloader`: what LK starts in place of a kernel. Built for one board. |
+| `arch/arm64/boot/` | `mtkloader`: what LK starts in place of a kernel. Built for one board. |
 | `darwin/` | What Darwin 27 needs: libraries inserted into a few of its processes, the Metal and Mali builds, the PAC rewriter, the image builders (`mtk27.sh` drives them); `darwin/system/` fetches and chooses the earlier system's files. |
 | `userland/` | Our own user-space sources: `init`, the inserted libraries, the Metal device and the native Mali library, the audio plug-in, test programs; the job lists (`jobs/`), our launchd jobs (`launchd/`) and the tools of the user space (`tools/`: the shader front end, Mesa's patches, the stage cache, APFS). |
 | `workbench/` | Host tests: the tools, and the kernel's drivers against models of the hardware, with a made-up phone and chip. |

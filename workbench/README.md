@@ -10,7 +10,7 @@ What is tested without a phone, and how a driver runs without a kernel. `make ch
 | --- | --- |
 | `tools_test.py` | The TOML reader against every TOML file of the repository; the board files' checks and refusals; what `tools/boards.py gen` writes; `status` and `get`; that the template explains every key; the device tree reader; that `docs/features.md` is what `boards.py features` writes |
 | `bootargs_test.py` | An argument is found by its read and described by the comment that names it; `docs/boot-args.md` is what `tools/bootargs.py` writes (`make docs` after a change) |
-| The loader | `loader/mtkloader.c` compiled for the stand-in phone (syntax and types, `-Werror`), so that a key the loader uses and the generator does not write is found here |
+| The loader | `arch/arm64/boot/mtkloader.c` compiled for the stand-in phone (syntax and types, `-Werror`), so that a key the loader uses and the generator does not write is found here |
 | `input_queue_test.c` | `/dev/hakios-touch`: what the touch and key drivers post and what the system reads |
 | `station_test.c`, `apple80211_test.c` | The Wi-Fi station's side, and the system's Wi-Fi requests answered as wifid sends them |
 | `sparse_driver_test.c` | A sparse image served as a disk |

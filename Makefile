@@ -12,12 +12,12 @@ help:
 	@echo "make device DEVICE=NAME   bring a phone's package in from the devices branch (tools/device.py add)"
 	@echo "make test           host tests: the tools, the drivers against models, the loader for a made-up phone (workbench/run.sh)"
 	@echo "make lint           syntax of every shell and Python script, shellcheck, nothing unpublishable"
-	@echo "make boards         validate the device packages and soc/, write what the code is built with (build/boards)"
+	@echo "make boards         validate the device packages and arch/arm64/boot/dts/mediatek/, write what the code is built with (build/boards)"
 	@echo "make verify-kernel  Apple's release + overlay + patches assemble and export back unchanged (network)"
 	@echo "make syntax-check   every overlay file through clang -fsyntax-only, in seconds (TREE=an assembled tree)"
 	@echo "make docs           docs/boot-args.md and docs/features.md, generated (tools/bootargs.py, tools/boards.py)"
 	@echo "make kernel         build the kernel (kernel/build.sh; docs/building.md says what it needs)"
-	@echo "make loader         build the loader for the phone whose package is here (loader/build.sh)"
+	@echo "make loader         build the loader for the phone whose package is here (arch/arm64/boot/build.sh)"
 
 .PHONY: check
 check: lint boards-check test
@@ -63,4 +63,4 @@ kernel:
 
 .PHONY: loader
 loader:
-	loader/build.sh
+	arch/arm64/boot/build.sh

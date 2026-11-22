@@ -34,8 +34,8 @@ if [ -n "$WANT" ] && [ "$(adb -s $S get-state 2>/dev/null)" = device ]; then
 	GOT=$(adb -s $S shell getprop ro.product.device | tr -d '\r')
 	[ "$GOT" = "$WANT" ] || { echo "xnu-cycle.sh: the phone says it is \"$GOT\", the board $BOARD is \"$WANT\": not flashing it"; exit 1; }
 fi
-"$ROOT/loader/build.sh" "${TEST_FLAGS[@]}" "$@" >/dev/null
-python3 "$ROOT/loader/build_flashed.py" >/dev/null
+"$ROOT/arch/arm64/boot/build.sh" "${TEST_FLAGS[@]}" "$@" >/dev/null
+python3 "$ROOT/arch/arm64/boot/build_flashed.py" >/dev/null
 # HAKIOS_PAYLOAD=flash: the payload goes into the system partition's tail (Android is up now), not into boot_a
 if [ "${HAKIOS_PAYLOAD:-}" = flash ]; then
 	[ "$(adb -s $S get-state 2>/dev/null)" = device ] || { echo "xnu-cycle.sh: HAKIOS_PAYLOAD=flash needs Android up"; exit 1; }

@@ -1,5 +1,5 @@
 // Rasterize printable ASCII from Menlo into an 8x16 1-bit font, emitted as a C header.
-// Usage: swift tools/mkfont8x16.swift > loader/font8x16.h
+// Usage: swift tools/mkfont8x16.swift > arch/arm64/boot/font8x16.h
 import CoreGraphics
 import CoreText
 import Foundation

@@ -2,7 +2,7 @@
  * mtkloader: boots XNU on a MediaTek phone from boot_a, under the phone's own LK, and brings
  * Android back afterwards with XNU's log in pstore. Built for one board: every address here is
  * that board's or its chip's, from hakios_platform.h (tools/boards.py gen writes it from the
- * board's package and soc/).
+ * board's package and arch/arm64/boot/dts/mediatek/).
  *
  * The boot image's kernel (tools/chainboot.py) is this program, then Android's own kernel Image
  * at CHAIN_OFFSET, then the XNU payload ("XNUP": kernel, ramdisk). Each boot, by the marker:
@@ -2237,7 +2237,7 @@ static uint8_t touch_bring_up_once(void)
  */
 static uint8_t touch_bring_up(void)
 {
-	if (TOUCH_FW_SIZE == 0) {       /* (loader/build.sh found no firmware of the phone's to carry) */
+	if (TOUCH_FW_SIZE == 0) {       /* (arch/arm64/boot/build.sh found no firmware of the phone's to carry) */
 		out("touch: this loader was built without the controller's firmware: no touch screen\n");
 		return 0;
 	}
