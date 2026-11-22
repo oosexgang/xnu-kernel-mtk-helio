@@ -110,9 +110,10 @@ FEATURE_BOOTARGS = {
     'touch-td4160': 'touchscreen=2',
     'keys-mt6358': 'buttons=2; mtk_cpufreq=1 looks at the clocks, =2 raises them; mali_mhz=N',
     'gpu-mali-g52': 'mali=1',
-    'connsys-mt6631': 'connsys_step=N, steps 1 and 2 only read; connsys_bt=1',
-    'scp-sensors': 'scp_step=N, step 1 only reads',
-    'camera-s5kjn1': 'mtkcam=1',
+    'connsys-mt6631': 'connsys_step=N: 1 and 2 only read, 16 makes the radio en0, 17 also joins fw/network; '
+                      'connsys_bt=2 for Bluetooth',
+    'scp-sensors': 'scp_step=N: 1 only reads; 7 keeps the hub and its accelerometer running',
+    'camera-s5kjn1': 'mtkcam=1 makes one capture; mtkcam=5 serves frames on /dev/hakios-camera',
     'battery-mt6358': 'mtkbatt=1',
     'display-ovl-flip': 'fb_flip=1',
 }
@@ -167,6 +168,44 @@ def feature_bits():
 
 def c_name(feature):
     return 'HAKIOS_HAS_' + feature.upper().replace('-', '_')
+
+
+FEATURES_PAGE = ROOT / 'docs' / 'features.md'
+
+
+def feature_comments():
+    """What hakios_board.h says beside each HAKIOS_HAS_*: {name as board.toml spells it: the comment, on one line}."""
+    found = re.findall(r'HAKIOS_HAS_([A-Z0-9_]+)\s*=\s*1u\s*<<\s*\d+\s*,\s*/\*(.*?)\*/', BOARD_HEADER.read_text(), re.S)
+    return {name.lower().replace('_', '-'): ' '.join(text.replace('*', ' ').split()) for name, text in found}
+
+
+def features_text():
+    """docs/features.md: every feature a board can list, what it needs first, what starts it."""
+    comments = feature_comments()
+    out = ['# What each feature needs', '',
+           'A board lists the drivers it may start in `features` of its `board.toml`. Each needs to be told where',
+           'things are first: blocks of its chip\'s SoC file (`[blocks]` of `soc/SOC.toml`, shared by every phone',
+           'with that chip) and, for some, a section of the board file. `tools/boards.py check` refuses a board',
+           'that lists a feature without them, and `tools/boards.py status NAME` says the same for one phone.', '',
+           'This page is written by `tools/boards.py features --write` (`make docs`) from the tables the checker',
+           'uses and the comments of `kernel/overlay/bsd/dev/hakios_board.h`; a test keeps the three the same.',
+           'What each key means is in `devices/_template/`; the order to turn features on in is',
+           '[porting.md](porting.md)\'s.', '',
+           '| Feature | What it is | SoC file `[blocks]` | Board file | Started with |', '|---|---|---|---|---|']
+    for _, feature in feature_bits():
+        blocks = ', '.join(f'`{b}`' for b in FEATURE_BLOCKS.get(feature, ())) or 'nothing'
+        sections = ', '.join(f'`[{s}]`' for s in FEATURE_SECTIONS.get(feature, ())) or 'nothing'
+        what = comments.get(feature, '').replace('|', '\\|')
+        how = FEATURE_BOOTARGS.get(feature, '—').replace('|', '\\|')
+        out.append(f'| `{feature}` | {what} | {blocks} | {sections} | {how} |')
+    parts = ', '.join(f'`{f}`' for _, f in feature_bits() if f.split('-')[0] in PART_DRIVERS)
+    loader = ', '.join(f'`{f}`' for f in LOADER_FEATURES)
+    out += ['', f'{parts} are drivers of one part, wired the way one phone has it: list one only if your phone has that',
+            'part on the same pins and bus ([drivers.md](drivers.md)). The loader has a part of its own for',
+            f'{loader}, compiled in only for a board that lists the feature.', '',
+            'A feature listed is not a feature started: every driver still waits for its boot argument, and its',
+            'first level only reads and logs.', '']
+    return '\n'.join(out)
 
 
 def feature_needs(feature, board, soc):
@@ -604,6 +643,8 @@ def main():
     get.add_argument('key')
     gen = sub.add_parser('gen')
     gen.add_argument('--out', default=str(OUT))
+    features = sub.add_parser('features', help='docs/features.md: what each feature needs (--write writes it)')
+    features.add_argument('--write', action='store_true')
     new = sub.add_parser('new')
     new.add_argument('name')
     new.add_argument('--soc', required=True)
@@ -619,6 +660,13 @@ def main():
 
     if args.command == 'new':
         new_board(args.name, args.soc, args.description, args.dtb)
+        return 0
+    if args.command == 'features':
+        if args.write:
+            FEATURES_PAGE.write_text(features_text())
+            print(f'wrote {shown(FEATURES_PAGE)}')
+        else:
+            print(features_text(), end='')
         return 0
     if args.command == 'check':
         problems = Problems()

@@ -15,7 +15,7 @@ help:
 	@echo "make boards         validate the device packages and soc/, write what the code is built with (build/boards)"
 	@echo "make verify-kernel  Apple's release + overlay + patches assemble and export back unchanged (network)"
 	@echo "make syntax-check   every overlay file through clang -fsyntax-only, in seconds (TREE=an assembled tree)"
-	@echo "make docs           docs/boot-args.md from the kernel's sources (tools/bootargs.py --write)"
+	@echo "make docs           docs/boot-args.md and docs/features.md, generated (tools/bootargs.py, tools/boards.py)"
 	@echo "make kernel         build the kernel (kernel/build.sh; docs/building.md says what it needs)"
 	@echo "make loader         build the loader for the phone whose package is here (loader/build.sh)"
 
@@ -38,6 +38,7 @@ boards:
 .PHONY: docs
 docs:
 	tools/bootargs.py --write
+	tools/boards.py features --write
 
 .PHONY: syntax-check
 TREE ?= ../xnu-12377-hakios

@@ -163,6 +163,20 @@ def fdt(nodes):
         b'\0' * 16 + structure + strings
 
 
+class FeaturesPage(unittest.TestCase):
+    def test_the_committed_page_is_what_the_tool_writes(self):
+        written = boards('features')
+        self.assertEqual(written.returncode, 0, written.stderr)
+        self.assertEqual((ROOT / 'docs/features.md').read_text(), written.stdout, 'run `make docs`')
+
+    def test_every_feature_of_the_kernel_is_on_it(self):
+        page = (ROOT / 'docs/features.md').read_text()
+        header = (ROOT / 'kernel/overlay/bsd/dev/hakios_board.h').read_text()
+        import re
+        for name in re.findall(r'HAKIOS_HAS_([A-Z0-9_]+)\s*=\s*1u', header):
+            self.assertIn('`' + name.lower().replace('_', '-') + '`', page)
+
+
 class DeviceTree(unittest.TestCase):
     def tree(self):
         import struct
